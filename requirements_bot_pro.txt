@@ -1,9 +1,0 @@
-# Requirements for Bracket Bot Pro
-# pip install -r requirements_bot_pro.txt
-
-streamlit>=1.30.0
-alpaca-py>=0.21.0
-pandas>=2.0.0
-pyTelegramBotAPI>=4.14.0
-jsonschema>=4.19.0
-statistics
