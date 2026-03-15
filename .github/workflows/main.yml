@@ -1,0 +1,56 @@
+name: Build Bracket Bot Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_windows:
+        description: 'Build Windows'
+        type: boolean
+        default: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name bracket-bot-server main.py
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Electron app
+        working-directory: desktop
+        run: |
+          npm install
+          mkdir -p resources/backend resources/frontend
+          copy ..\backend\dist\bracket-bot-server.exe resources\backend\
+          xcopy /E /I ..\frontend\dist resources\frontend
+          npm run dist:win
+
+      - name: Upload Windows builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-Windows
+          path: desktop/dist/*.exe
+          retention-days: 30

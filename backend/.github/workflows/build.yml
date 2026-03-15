@@ -1,0 +1,310 @@
+name: Build Bracket Bot Executable
+
+on:
+  # Trigger on version tags
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'desktop/**'
+      - '.github/workflows/build.yml'
+  
+  # Manual trigger with version input
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 3.0.0)'
+        required: false
+        default: '3.0.0'
+      build_windows:
+        description: 'Build Windows'
+        type: boolean
+        default: true
+      build_mac:
+        description: 'Build macOS'
+        type: boolean
+        default: false
+      build_linux:
+        description: 'Build Linux'
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════
+  # Windows Build
+  # ═══════════════════════════════════════════════════════════════════════
+  build-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_windows }}
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            frontend/node_modules
+            desktop/node_modules
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json', '**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      # ─── Build Backend ─────────────────────────────────────────────────
+      - name: Install Python dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Python backend executable
+        working-directory: backend
+        run: |
+          pyinstaller --onefile --name bracket-bot-server --clean main.py
+          echo "Backend build complete"
+          dir dist
+
+      # ─── Build Frontend ────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --legacy-peer-deps || npm install
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_BACKEND_URL: http://localhost:8000
+        run: npm run build
+
+      # ─── Build Electron App ────────────────────────────────────────────
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --legacy-peer-deps || npm install
+
+      - name: Copy backend to desktop resources
+        run: |
+          mkdir -p desktop/resources/backend
+          copy backend\dist\bracket-bot-server.exe desktop\resources\backend\
+        shell: cmd
+
+      - name: Copy frontend to desktop resources
+        run: |
+          mkdir -p desktop/resources/frontend
+          xcopy /E /I frontend\dist desktop\resources\frontend
+        shell: cmd
+
+      - name: Build Windows installer
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:win
+
+      - name: List build outputs
+        run: dir desktop\dist
+        shell: cmd
+
+      # ─── Upload Artifacts ──────────────────────────────────────────────
+      - name: Upload Windows Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-Windows-Setup
+          path: desktop/dist/*Setup*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Windows Portable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-Windows-Portable
+          path: desktop/dist/*portable*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload all Windows builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-Windows-All
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.zip
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # macOS Build (Optional)
+  # ═══════════════════════════════════════════════════════════════════════
+  build-macos:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_mac }}
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name bracket-bot-server main.py
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build macOS app
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install
+          mkdir -p resources/backend resources/frontend
+          cp ../backend/dist/bracket-bot-server resources/backend/
+          cp -r ../frontend/dist/* resources/frontend/
+          npm run dist:mac
+
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-macOS
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Linux Build (Optional)
+  # ═══════════════════════════════════════════════════════════════════════
+  build-linux:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_linux }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name bracket-bot-server main.py
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Linux app
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm install
+          mkdir -p resources/backend resources/frontend
+          cp ../backend/dist/bracket-bot-server resources/backend/
+          cp -r ../frontend/dist/* resources/frontend/
+          npm run dist:linux
+
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bracket-Bot-Linux
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # Create Release (on tag push)
+  # ═══════════════════════════════════════════════════════════════════════
+  release:
+    needs: [build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Display downloaded files
+        run: ls -R artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.zip
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+          generate_release_notes: true
+          body: |
+            ## Bracket Bot Release
+            
+            ### Downloads
+            - **Windows Installer**: `Bracket-Bot-Setup-*.exe` (Recommended)
+            - **Windows Portable**: `Bracket-Bot-*-portable.exe` (No installation needed)
+            
+            ### Installation
+            1. Download the installer or portable version
+            2. Run the executable
+            3. Enter your Alpaca API keys in Settings
+            4. Start trading!
+            
+            ### Requirements
+            - Windows 10/11 (64-bit)
+            - Internet connection
+            - Alpaca trading account (paper or live)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
