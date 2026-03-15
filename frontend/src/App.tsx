@@ -1,6 +1,22 @@
 // src/App.tsx
 import { useEffect, useState } from 'react'
 import './App.css'
+import { useWebSocket } from './hooks/useWebSocket'
+import { CommandPalette } from './components/CommandPalette'
+import { TickerGrid } from './components/TickerGrid'
+
+function App() {
+  // This initializes the connection as soon as the app loads
+  useWebSocket() 
+
+  return (
+    <div className="min-h-screen bg-background">
+      <TickerGrid />
+      <CommandPalette />
+      {/* Other components... */}
+    </div>
+  )
+}
 
 function App() {
   const [backendMessage, setBackendMessage] = useState<string>('Loading...')
