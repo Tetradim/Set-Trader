@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-interface TradeLog {
+export interface TradeLog {
   id: string;
   symbol: string;
   type: 'BUY' | 'SELL' | 'STOP';
@@ -8,35 +8,47 @@ interface TradeLog {
   timestamp: string;
 }
 
-interface Ticker {
+// Matches TickerConfig in main.py
+export interface Ticker {
   symbol: string;
   base_power: number;
   enabled: boolean;
-  profit: number;
-  status: 'Waiting' | 'In-trade' | 'Pending';
+  avg_days: number;
+  buy_offset: number;
+  buy_percent: boolean;
+  sell_offset: number;
+  sell_percent: boolean;
+  stop_offset: number;
+  stop_percent: boolean;
 }
 
 interface BotState {
   tickers: Record<string, Ticker>;
+  profits: Record<string, number>; // Backend sends this separately
   connected: boolean;
   paused: boolean;
   logs: TradeLog[];
+  
   // Actions
   setTickers: (tickers: Record<string, Ticker>) => void;
+  setProfits: (profits: Record<string, number>) => void;
   updateTicker: (symbol: string, updates: Partial<Ticker>) => void;
   setConnected: (status: boolean) => void;
-  togglePause: () => void;
+  setPaused: (status: boolean) => void;
   removeTicker: (symbol: string) => void;
   addLog: (log: TradeLog) => void;
 }
 
 export const useStore = create<BotState>((set) => ({
   tickers: {},
+  profits: {},
   connected: false,
   paused: false,
   logs: [],
 
   setTickers: (tickers) => set({ tickers }),
+  
+  setProfits: (profits) => set({ profits }),
 
   updateTicker: (symbol, updates) =>
     set((state) => {
@@ -53,9 +65,7 @@ export const useStore = create<BotState>((set) => ({
 
   setConnected: (status) => set({ connected: status }),
 
-  togglePause: () => set((state) => ({ 
-    paused: !state.paused 
-  })),
+  setPaused: (status) => set({ paused: status }),
 
   removeTicker: (symbol) =>
     set((state) => {
@@ -66,6 +76,6 @@ export const useStore = create<BotState>((set) => ({
 
   addLog: (log) =>
     set((state) => ({
-      logs: [log, ...state.logs].slice(0, 50), // Keep the last 50 entries
+      logs: [log, ...state.logs].slice(0, 50),
     })),
 }));

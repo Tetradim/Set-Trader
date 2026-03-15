@@ -4,42 +4,68 @@ import { toast } from 'sonner'
 
 export const useWebSocket = () => {
   const socket = useRef<WebSocket | null>(null)
-  const { setTickers, setConnected, setPaused } = useStore()
+  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
+  const { setTickers, setConnected, setPaused, setProfits } = useStore()
 
-  useEffect(() => {
-    // Replace with your actual backend URL
-    const WS_URL = 'ws://localhost:8000/ws'
+  const connect = () => {
+    // 127.0.0.1 is more reliable than 'localhost' on Windows
+    const WS_URL = 'ws://127.0.0.1:8000/ws'
+    
+    if (socket.current?.readyState === WebSocket.OPEN) return
+
     socket.current = new WebSocket(WS_URL)
 
     socket.current.onopen = () => {
       setConnected(true)
       toast.success('Connected to Bot Engine')
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
     }
 
     socket.current.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      
-      // Handle different message types from your backend
-      if (data.type === 'INITIAL_STATE') {
-        setTickers(data.tickers)
-        setPaused(data.paused)
-      } else if (data.type === 'TICKER_UPDATE') {
-        // This keeps the UI snappy by only updating what changed
-        useStore.getState().updateTicker(data.symbol, data.update)
+      try {
+        const data = JSON.parse(event.data)
+        
+        if (data.type === 'INITIAL_STATE') {
+          setTickers(data.tickers)
+          setPaused(data.paused)
+          // WE MUST SET PROFITS HERE OR THE CARDS WON'T SHOW DATA
+          if (data.profits) setProfits(data.profits)
+        } 
+        
+        if (data.type === 'TRADE_LOG') {
+           useStore.getState().addLog(data.log)
+        }
+      } catch (err) {
+        console.error("WS Message Error:", err)
       }
     }
 
     socket.current.onclose = () => {
       setConnected(false)
-      toast.error('Bot Connection Lost')
+      // Attempt to reconnect every 3 seconds
+      reconnectTimeout.current = setTimeout(connect, 3000)
     }
 
-    return () => socket.current?.close()
+    socket.current.onerror = (err) => {
+      console.error("WebSocket Error:", err)
+      socket.current?.close()
+    }
+  }
+
+  useEffect(() => {
+    connect()
+    return () => {
+      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
+      socket.current?.close()
+    }
   }, [])
 
   const sendMessage = (action: string, payload: any = {}) => {
     if (socket.current?.readyState === WebSocket.OPEN) {
-      socket.current.send(JSON.stringify({ action, ...payload }))
+      const message = JSON.stringify({ action, ...payload })
+      socket.current.send(message)
+    } else {
+      toast.error('Not connected to backend')
     }
   }
 

@@ -1,56 +1,44 @@
-// src/App.tsx
+import { TickerGrid } from './components/TickerGrid';
+import { AddTickerDialog } from './components/AddTickerDialog';
+import { TradeLog } from './components/TradeLog';
+import { useStore } from './stores/useStore';
 import { useEffect, useState } from 'react'
 import './App.css'
 import { useWebSocket } from './hooks/useWebSocket'
 import { CommandPalette } from './components/CommandPalette'
-import { TickerGrid } from './components/TickerGrid'
+
 
 function App() {
-  // This initializes the connection as soon as the app loads
-  useWebSocket() 
+  const connected = useStore((state) => state.connected);
 
   return (
-    <div className="min-h-screen bg-background">
-      <TickerGrid />
-      <CommandPalette />
-      {/* Other components... */}
-    </div>
-  )
-}
+    <main className="min-h-screen bg-background text-foreground p-4 md:p-8 space-y-8">
+      {/* Header Area */}
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">BracketBot Terminal</h1>
+          <p className="text-muted-foreground flex items-center gap-2 mt-1">
+            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            {connected ? 'System Online' : 'Connecting to Backend...'}
+          </p>
+        </div>
+        <AddTickerDialog />
+      </header>
 
-function App() {
-  const [backendMessage, setBackendMessage] = useState<string>('Loading...')
-
-  useEffect(() => {
-    // Test connection to your FastAPI backend
-    fetch('http://localhost:8000/api/')
-      .then(res => res.json())
-      .then(data => setBackendMessage(data.message || 'Connected!'))
-      .catch(err => setBackendMessage(`Error: ${err.message}`))
-  }, [])
-
-  return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
-      <h1 className="text-5xl font-bold mb-6 text-emerald-400">
-        Bracket Bot Dashboard
-      </h1>
-
-      <p className="text-xl mb-8">
-        Vite + React is running! Edit <code>src/App.tsx</code> and save to see magic ✨
-      </p>
-
-      <div className="bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-700 max-w-md w-full">
-        <h2 className="text-2xl font-semibold mb-4">Backend Status</h2>
-        <p className="text-lg">
-          {backendMessage}
-        </p>
+      {/* Main Dashboard Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+        <div className="xl:col-span-3">
+          <TickerGrid />
+        </div>
+        
+        {/* Sidebar Log */}
+        <div className="xl:col-span-1 border-l pl-0 xl:pl-8">
+          <h2 className="text-lg font-semibold mb-4">Activity Log</h2>
+          <TradeLog />
+        </div>
       </div>
-
-      <p className="mt-12 text-gray-400">
-        Next: Add ticker cards, forms, and live WebSocket updates!
-      </p>
-    </div>
-  )
+    </main>
+  );
 }
 
-export default App
+export default App;

@@ -6,6 +6,7 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -22,7 +23,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
 
-// 1. Define validation rules
 const formSchema = z.object({
   symbol: z.string().min(2, "Symbol must be at least 2 chars").toUpperCase(),
   base_power: z.coerce.number().min(1, "Base power must be at least 1"),
@@ -32,7 +32,6 @@ export function AddTickerDialog() {
   const { sendMessage } = useWebSocket();
   const [open, setOpen] = React.useState(false);
 
-  // 2. Initialize form
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -41,11 +40,10 @@ export function AddTickerDialog() {
     },
   });
 
-  // 3. Handle submission
   function onSubmit(values: z.infer<typeof formSchema>) {
     sendMessage("ADD_TICKER", values);
     form.reset();
-    setOpen(false); // Close dialog on success
+    setOpen(false); 
   }
 
   return (
@@ -58,7 +56,11 @@ export function AddTickerDialog() {
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Add New Trading Pair</DialogTitle>
+          <DialogDescription>
+            Enter the ticker symbol and base power to start the bot.
+          </DialogDescription>
         </DialogHeader>
+
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField

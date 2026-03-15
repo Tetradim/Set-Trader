@@ -1,3 +1,4 @@
+# backend/main.py
 import asyncio
 import json
 import os
@@ -8,12 +9,12 @@ from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-# Load environment variables
-load_dotenv()
 
 # LOGGING & LOCKS
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -29,7 +30,7 @@ try:
     from alpaca.data.timeframe import TimeFrame
     ALPACA_AVAILABLE = True
 except ImportError:
-    logger.error("Alpaca SDK not found. Running in Mock Mode only.")
+    logger.error("Alpaca SDK not found. Running in Mock Mode.")
     ALPACA_AVAILABLE = False
 
 STATE_FILE = "bot_state.json"
@@ -123,18 +124,17 @@ class AlpacaService:
                 self.trading_client = TradingClient(key, secret, paper=True)
                 self.data_client = StockHistoricalDataClient(key, secret)
                 self.connected = True
-                logger.info("Alpaca Client Connected Successfully.")
-            except Exception as e:
-                logger.error(f"Alpaca Connection Failed: {e}")
+                logger.info("Alpaca Connected")
+            except Exception:
+                logger.error("Alpaca Connection Failed")
 
     def get_avg_price(self, symbol, days):
         if not self.connected: return 0.0
         try:
-            start_date = datetime.now(timezone.utc) - timedelta(days=days + 5)
             req = StockBarsRequest(
                 symbol_or_symbols=symbol, 
                 timeframe=TimeFrame.Day, 
-                start=start_date
+                start=datetime.now(timezone.utc)-timedelta(days=days+5)
             )
             df = self.data_client.get_stock_bars(req).df
             return float(df["close"].tail(days).mean())
@@ -146,13 +146,16 @@ alpaca = AlpacaService()
 # --- STRATEGY ENGINE ---
 class StrategyEngine:
     def place_bracket(self, sym):
-        if not alpaca.connected or state.paused: return
+        if not alpaca.connected or state.paused: 
+            return
+            
         cfg = state.tickers.get(sym)
-        if not cfg or not cfg.enabled: return
+        if not cfg or not cfg.enabled: 
+            return
         
         avg = alpaca.get_avg_price(sym, cfg.avg_days)
-        if avg <= 0: return # Skip if no data
-        
+        if avg <= 0: return
+
         buy = round(avg * (1 + cfg.buy_offset/100) if cfg.buy_percent else avg + cfg.buy_offset, 2)
         sell = round(avg * (1 + cfg.sell_offset/100) if cfg.sell_percent else avg + cfg.sell_offset, 2)
         stop = round(buy * (1 + cfg.stop_offset/100) if cfg.stop_percent else buy + cfg.stop_offset, 2)
@@ -170,12 +173,10 @@ class StrategyEngine:
                 )
             )
             
-            # Update local tracking
+            # Update tracking and broadcast log
             state.tracked_orders[str(order.id)] = {"symbol": sym, "buy": buy}
             state.save()
-            logger.info(f"Placed {sym} order @ {buy}")
-
-            # Broadcast log to UI
+            
             asyncio.create_task(manager.broadcast({
                 "type": "TRADE_LOG",
                 "log": {
@@ -186,6 +187,7 @@ class StrategyEngine:
                     "timestamp": datetime.now().strftime("%H:%M:%S")
                 }
             }))
+            logger.info(f"Placed {sym} order @ {buy}")
         except Exception as e:
             logger.error(f"Order Failed for {sym}: {e}")
 
@@ -203,11 +205,10 @@ async def trading_loop():
         await asyncio.sleep(60)
 
 async def mock_data_generator():
-    """Simulates market movements for UI testing."""
     while True:
         if not state.paused and state.tickers:
             symbol = random.choice(list(state.tickers.keys()))
-            change = random.uniform(-5.0, 5.0)
+            change = random.uniform(-2.0, 2.0)
             state.profits[symbol] = state.profits.get(symbol, 0) + change
             
             if random.random() > 0.8:
@@ -225,6 +226,7 @@ async def mock_data_generator():
             await manager.broadcast({
                 "type": "INITIAL_STATE",
                 "tickers": {k: v.model_dump() for k, v in state.tickers.items()},
+                "profits": state.profits,
                 "paused": state.paused
             })
             
@@ -238,26 +240,30 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Adjust for production
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- ROUTES ---
 @app.get("/api/health")
 async def health_check():
-    return {"status": "online", "bot": "BracketBot", "alpaca": alpaca.connected}
+    return {"status": "online", "alpaca": alpaca.connected}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
-        # Initial Push
+        # Give React time to open socket
+        await asyncio.sleep(0.1)
+        
         await websocket.send_json({
             "type": "INITIAL_STATE",
             "tickers": {k: v.model_dump() for k, v in state.tickers.items()},
+            "profits": state.profits,
             "paused": state.paused
         })
 
@@ -276,7 +282,6 @@ async def websocket_endpoint(websocket: WebSocket):
             elif action == "UPDATE_TICKER":
                 sym = msg.get("symbol")
                 if sym in state.tickers:
-                    # Update ticker config dynamically
                     cfg_dict = state.tickers[sym].model_dump()
                     cfg_dict.update({k: v for k, v in msg.items() if k != "action"})
                     state.tickers[sym] = TickerConfig(**cfg_dict)
@@ -285,6 +290,7 @@ async def websocket_endpoint(websocket: WebSocket):
             await manager.broadcast({
                 "type": "INITIAL_STATE",
                 "tickers": {k: v.model_dump() for k, v in state.tickers.items()},
+                "profits": state.profits,
                 "paused": state.paused
             })
 
