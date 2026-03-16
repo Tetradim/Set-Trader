@@ -66,6 +66,7 @@ class TickerConfig(BaseModel):
     trailing_percent_mode: bool = True
     trailing_order_type: str = "limit"
     wait_day_after_buy: bool = False
+    compound_profits: bool = True
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -91,6 +92,7 @@ class TickerUpdate(BaseModel):
     trailing_percent_mode: Optional[bool] = None
     trailing_order_type: Optional[str] = None
     wait_day_after_buy: Optional[bool] = None
+    compound_profits: Optional[bool] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -311,6 +313,7 @@ class TradingEngine:
         trail_pct = ticker_doc.get("trailing_percent", 2.0)
         trail_is_pct = ticker_doc.get("trailing_percent_mode", True)
         trail_otype = ticker_doc.get("trailing_order_type", "limit")
+        compound = ticker_doc.get("compound_profits", True)
         base_power = ticker_doc.get("base_power", 100.0)
 
         # Percent mode: offset from average. Dollar mode: ABSOLUTE target price.
@@ -374,7 +377,7 @@ class TradingEngine:
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
                     self._trailing_highs.pop(sym, None)
-                    await self._update_profit(sym, pnl)
+                    await self._update_profit(sym, pnl, compound)
                     return
 
             should_sell = (sell_otype == "market") or (price >= sell_target)
@@ -389,7 +392,7 @@ class TradingEngine:
                 await self._record_trade(trade)
                 self._positions[sym] = {"qty": 0, "avg_entry": 0}
                 self._trailing_highs.pop(sym, None)
-                await self._update_profit(sym, pnl)
+                await self._update_profit(sym, pnl, compound)
 
             elif price <= stop_target or stop_otype == "market":
                 should_stop = (stop_otype == "market") or (price <= stop_target)
@@ -404,7 +407,7 @@ class TradingEngine:
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
                     self._trailing_highs.pop(sym, None)
-                    await self._update_profit(sym, pnl)
+                    await self._update_profit(sym, pnl, compound)
 
     async def _record_trade(self, trade: TradeRecord):
         doc = trade.model_dump()
@@ -419,13 +422,23 @@ class TradingEngine:
         except Exception:
             pass
 
-    async def _update_profit(self, symbol: str, pnl: float):
+    async def _update_profit(self, symbol: str, pnl: float, compound: bool = False):
         await db.profits.update_one(
             {"symbol": symbol},
             {"$inc": {"total_pnl": pnl, "trade_count": 1},
              "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
             upsert=True
         )
+        # Compound: add positive profit to buy power
+        if compound and pnl > 0:
+            await db.tickers.update_one(
+                {"symbol": symbol},
+                {"$inc": {"base_power": round(pnl, 2)}}
+            )
+            doc = await db.tickers.find_one({"symbol": symbol}, {"_id": 0})
+            if doc:
+                await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+                logger.info(f"COMPOUND: {symbol} buy power increased by ${pnl:.2f} to ${doc.get('base_power', 0):.2f}")
 
 engine = TradingEngine()
 

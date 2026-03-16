@@ -19,6 +19,7 @@ export interface TickerConfig {
   trailing_percent_mode: boolean;
   trailing_order_type: string;
   wait_day_after_buy: boolean;
+  compound_profits: boolean;
   enabled: boolean;
   strategy: string;
   created_at: string;

@@ -235,18 +235,32 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
             className="overflow-hidden"
           >
             <div className="p-4 border-t border-border bg-secondary/20 space-y-4">
-              {/* Wait-a-day toggle — top right */}
-              <div className="flex items-center justify-end gap-2">
-                <label className="text-[10px] text-muted-foreground font-medium cursor-pointer" htmlFor={`wait-day-${ticker.symbol}`}>
-                  Wait 1 day before selling
-                </label>
-                <Checkbox
-                  id={`wait-day-${ticker.symbol}`}
-                  data-testid={`wait-day-toggle-${ticker.symbol}`}
-                  checked={ticker.wait_day_after_buy ?? false}
-                  onCheckedChange={(v) => handleFieldChange('wait_day_after_buy', !!v)}
-                  className="h-3.5 w-3.5 data-[state=checked]:bg-amber-400 data-[state=checked]:border-amber-400"
-                />
+              {/* Top config toggles */}
+              <div className="flex items-center justify-end gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-muted-foreground font-medium cursor-pointer" htmlFor={`compound-${ticker.symbol}`}>
+                    Compound profits
+                  </label>
+                  <Checkbox
+                    id={`compound-${ticker.symbol}`}
+                    data-testid={`compound-toggle-${ticker.symbol}`}
+                    checked={ticker.compound_profits ?? true}
+                    onCheckedChange={(v) => handleFieldChange('compound_profits', !!v)}
+                    className="h-3.5 w-3.5 data-[state=checked]:bg-emerald-400 data-[state=checked]:border-emerald-400"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-muted-foreground font-medium cursor-pointer" htmlFor={`wait-day-${ticker.symbol}`}>
+                    Wait 1 day before selling
+                  </label>
+                  <Checkbox
+                    id={`wait-day-${ticker.symbol}`}
+                    data-testid={`wait-day-toggle-${ticker.symbol}`}
+                    checked={ticker.wait_day_after_buy ?? false}
+                    onCheckedChange={(v) => handleFieldChange('wait_day_after_buy', !!v)}
+                    className="h-3.5 w-3.5 data-[state=checked]:bg-amber-400 data-[state=checked]:border-amber-400"
+                  />
+                </div>
               </div>
 
               {/* Buy Rules */}

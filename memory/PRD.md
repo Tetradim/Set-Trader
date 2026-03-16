@@ -56,6 +56,13 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
 - [x] Backward compatible: existing tickers default to percent mode
 
+### 2026-03-16 - Compound Profits Toggle
+- [x] Added `compound_profits: bool = True` to ticker schema (default ON)
+- [x] When enabled, positive P&L from sells/stops is added to the ticker's `base_power` (buy power)
+- [x] When disabled, buy power stays fixed at the manually set amount
+- [x] Backend broadcasts updated ticker after compounding so UI reflects new buy power
+- [x] Green checkbox in expanded card config, paired with "Wait 1 day" toggle
+
 ### 2026-03-16 - Windows Executable Packaging Workflow
 - [x] Created `build-windows.ps1` PowerShell build script (PyInstaller + frontend bundle)
 - [x] Created `start-bracketbot.bat` launcher for source and packaged modes
