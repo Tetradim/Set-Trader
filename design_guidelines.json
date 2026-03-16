@@ -1,0 +1,140 @@
+{
+  "theme_strategy": {
+    "theme_mode": "dark",
+    "archetype": "The Performance Pro (Cyberpunk Hybrid)",
+    "emotional_goal": "Precision, Speed, High-Stakes Control",
+    "visual_style": "Glassmorphism + Neon Accents + High Density Data"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, system-ui, sans-serif",
+      "body": "IBM Plex Sans, Inter, system-ui, sans-serif",
+      "mono": "JetBrains Mono, Fira Code, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-semibold",
+      "h4": "text-xl font-medium",
+      "body": "text-sm leading-relaxed",
+      "small": "text-xs font-medium text-muted-foreground",
+      "mono_lg": "font-mono text-lg font-bold tracking-wide",
+      "mono_base": "font-mono text-sm font-medium",
+      "mono_sm": "font-mono text-xs"
+    },
+    "rules": [
+      "Use Monospace font for ALL financial data (prices, P&L, percentages, trade logs).",
+      "Use Manrope for UI headers (Card titles, Section headers).",
+      "Use IBM Plex Sans for UI labels and descriptive text.",
+      "Tabular figures (tnum) are mandatory for changing numbers to prevent jitter."
+    ]
+  },
+  "colors": {
+    "palette": {
+      "background": "#0B0C10",
+      "foreground": "#E2E8F0",
+      "card": "rgba(17, 24, 39, 0.7)",
+      "card_border": "rgba(255, 255, 255, 0.1)",
+      "primary": "#6366f1",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#1E293B",
+      "secondary_foreground": "#F8FAFC",
+      "accent": "#8B5CF6",
+      "accent_foreground": "#FFFFFF",
+      "success": "#10B981",
+      "success_glow": "0 0 10px rgba(16, 185, 129, 0.4)",
+      "danger": "#EF4444",
+      "danger_glow": "0 0 10px rgba(239, 68, 68, 0.4)",
+      "warning": "#F59E0B",
+      "info": "#3B82F6",
+      "muted": "#334155",
+      "muted_foreground": "#94A3B8"
+    },
+    "gradients": {
+      "active_card": "linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(17, 24, 39, 0) 100%)",
+      "profit_card": "linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(17, 24, 39, 0) 100%)",
+      "loss_card": "linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(17, 24, 39, 0) 100%)"
+    },
+    "status_logic": {
+      "profit": "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
+      "loss": "text-red-400 border-red-500/30 bg-red-500/10",
+      "neutral": "text-slate-400 border-slate-700 bg-slate-800/50"
+    }
+  },
+  "layout": {
+    "structure": "Single-page dashboard with fixed sidebar (or collapsible) and tabbed main content area.",
+    "spacing": {
+      "container_padding": "p-4 md:p-6 lg:p-8",
+      "card_padding": "p-5",
+      "gap_main": "gap-6",
+      "gap_tight": "gap-3"
+    },
+    "grid_strategy": {
+      "dashboard_mode": "Bento Grid Mode B (High Density)",
+      "columns": "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
+      "cards": "aspect-auto h-full min-h-[300px]"
+    },
+    "z_index": {
+      "toast": 100,
+      "modal": 50,
+      "dropdown": 40,
+      "sticky_header": 30,
+      "default": 1
+    }
+  },
+  "components": {
+    "stock_card": {
+      "style": "Glassmorphism card with dynamic border color based on daily P&L.",
+      "header": "Ticker symbol (Left), Current Price (Right, large font).",
+      "body": "Mini-chart or trend line, Strategy status badges.",
+      "footer": "Expandable config area (Accordion style).",
+      "interaction": "Hover: Lift + Glow. Click: Expand details."
+    },
+    "toggles": {
+      "style": "Pill-shaped, neon-glow when active.",
+      "colors": "Active: bg-primary shadow-[0_0_8px_rgba(99,102,241,0.6)]. Inactive: bg-slate-700."
+    },
+    "buttons": {
+      "primary": "bg-primary hover:bg-primary/90 text-white font-medium shadow-lg shadow-primary/25 transition-all",
+      "destructive": "bg-destructive/20 text-destructive border border-destructive/50 hover:bg-destructive/30",
+      "outline": "border-slate-700 hover:bg-slate-800 hover:text-white text-slate-300",
+      "ghost": "hover:bg-slate-800/50 text-slate-400 hover:text-white"
+    },
+    "command_palette": {
+      "trigger": "Cmd+K / Ctrl+K",
+      "style": "Fixed centered modal, backdrop blur, search input auto-focus."
+    },
+    "trade_log": {
+      "position": "Sidebar (Right) or Bottom Panel.",
+      "typography": "Mono, small (text-xs).",
+      "row_style": "Striped or hover-highlight. Success/Fail color coded lines."
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-slate-900/70 border border-white/10 shadow-xl",
+    "neon_glow": "box-shadow: 0 0 15px -3px var(--tw-shadow-color)",
+    "micro_interactions": "Framer Motion layout animations for card expansion (layoutId).",
+    "loading_states": "Skeleton loaders with shimmering gradient (slate-800 to slate-700)."
+  },
+  "accessibility": {
+    "focus_states": "focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-slate-900",
+    "contrast": "Ensure text-slate-400 is readable on slate-900. Use text-slate-300 for critical labels.",
+    "reduced_motion": "Disable layout animations if prefers-reduced-motion is true."
+  },
+  "instructions_to_main_agent": [
+    "INSTALL: framer-motion, clsx, tailwind-merge, lucide-react, recharts (for simple sparklines/charts).",
+    "SETUP: Configure 'JetBrains Mono' font family in tailwind config.",
+    "CRITICAL: Dark Mode only. Hardcode 'dark' class on the HTML or body tag if needed, but allow toggling if requested (default to dark).",
+    "DATA: All price data must use 'toFixed(2)' or similar formatting. P&L must show '+' sign for positive values.",
+    "LAYOUT: Use a SidebarLayout component that persists across tabs.",
+    "STATE: Use Zustand for global state (prices, portfolio, logs).",
+    "PERFORMANCE: Wrap StockCards in memo() to prevent re-renders on unrelated global state changes.",
+    "ANIMATION: Use <AnimatePresence> for list items (adding/removing stocks)."
+  ],
+  "universal_guidelines": [
+    "Don't use gradients for text, it reduces readability in dashboards.",
+    "Use 'tracking-tight' for large number displays to make them look tighter/more numeric.",
+    "Inputs should have 'font-mono' for numerical values.",
+    "Use 'sonner' for toast notifications (Trade executed, Error, Connection lost)."
+  ]
+}
