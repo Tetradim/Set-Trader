@@ -9,70 +9,42 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - **Database**: MongoDB 7
 - **Infrastructure**: Docker Compose (dev + prod), GitHub Actions CI/CD, Makefile
 
-## User Personas
-1. **Active Trader** - Monitors positions, adjusts bracket rules in real-time
-2. **Algorithmic Trading Enthusiast** - Configures strategies, backtests with presets
-3. **Multi-Account Manager** - Uses Telegram to control bot remotely across accounts
-
-## Core Requirements (Static)
-- Per-stock toggle cards with expandable configuration
-- Buy/Sell/Stop-Loss/Trailing-Stop rules per ticker
-- Live price feed (~2s updates) via yfinance (free)
-- WebSocket real-time communication
-- MongoDB persistence for tickers, trades, profits, settings
-- Tabbed dashboard: Watchlist, Positions, History, Logs, Settings
-- Command palette (Ctrl+K)
-- Telegram bot with /pause command and restart/offline alerts
-- Preset strategies (Conservative 1Y, Aggressive Monthly, Swing Trader)
-- Docker Compose for dev and production
-- CI/CD with GitHub Actions
-
 ## What's Been Implemented
 
 ### 2026-03-16 - MVP
-- [x] Full backend rewrite: server.py with trading engine, WebSocket, REST API, MongoDB
-- [x] Ghost code cleanup: removed 15+ dead files
-- [x] Dark theme dashboard with blues/purples
-- [x] 5 tabs: Watchlist, Positions, History, Logs, Settings
-- [x] Ticker cards with expandable config
-- [x] Preset strategy system, Command palette, Add/Delete ticker
+- [x] Full backend rewrite with trading engine, WebSocket, REST API, MongoDB
+- [x] Ghost code cleanup (15+ dead files removed), JSX -> TSX conversion
+- [x] Dark theme dashboard, 5 tabs, ticker cards, preset strategies, command palette
 - [x] Docker Compose, Makefile, GitHub Actions CI/CD, README
 
 ### 2026-03-16 - Positions Tab Fix
-- [x] Fixed crash: added missing market_value/symbol fields in WebSocket position data
-- [x] Added ErrorBoundary to prevent full-page crashes
+- [x] Fixed crash from missing fields in WebSocket position data + ErrorBoundary
 
 ### 2026-03-16 - Telegram Integration
-- [x] Full TelegramService with python-telegram-bot polling
-- [x] /pause command pauses ALL trading + broadcasts confirmation
-- [x] /resume command resumes trading
-- [x] Bot restart alert sent to all chat IDs on server startup
-- [x] Bot offline alert sent before server shutdown
-- [x] Trade execution alerts (BUY, SELL, STOP, TRAILING_STOP)
-- [x] 11 Telegram commands: /pause, /resume, /start, /stop, /status, /portfolio, /new, /cancel, /cancelall, /history, /help
-- [x] Multi-user support via multiple chat IDs
-- [x] Settings UI with connection status, test alert button
-- [x] Auto-reconnect on settings save
-- [x] Testing: 34/34 backend, 14/14 frontend passed
+- [x] Full TelegramService with /pause, /resume, /start, /stop, /status, /portfolio, /new, /cancel, /cancelall, /history, /help
+- [x] Restart/offline alerts, trade execution alerts
+- [x] Multi-user chat ID support, Settings UI with connection status + test alert
+
+### 2026-03-16 - Take Profit + Offset Fix + Custom Steps
+- [x] Take Profit button per ticker (confirms, zeros P&L, moves to cash reserve)
+- [x] Cash Reserve tracking (ledger + total) shown in header when > 0
+- [x] Buy/Stop Offset always negative: locked dash prefix, user types magnitude only
+- [x] Custom stepper arrows replacing browser default spinners on all number inputs
+- [x] Settings tab: separate Increase Step and Decrease Step inputs (e.g. +0.05 / -0.10)
+- [x] Steps persist in MongoDB and sync via WebSocket
+- [x] Testing: 49/49 backend, 95% frontend pass
 
 ## Prioritized Backlog
-
-### P1 (High Priority)
+### P1
 - Live broker connection (Alpaca paper trading)
 - Confirmation dialogs for high-risk actions
-
-### P2 (Medium Priority)
-- Prometheus + Grafana monitoring stack
-- OpenTelemetry tracing for trade decisions
-- Live trailing stop chart (per-ticker sparkline)
-
-### P3 (Nice to Have)
-- Authentication/login system
-- Multiple broker API support
-- Export trade history to CSV
-- Sharpe ratio and max drawdown calculations
+### P2
+- Prometheus + Grafana monitoring
+- Live trailing stop chart per ticker
+### P3
+- Authentication system, multi-broker support, CSV export
 
 ## Next Tasks
-1. Add confirmation dialogs for high-risk events
-2. Implement live trailing stop chart with Recharts
-3. Add Prometheus metrics export endpoint
+1. Confirmation dialogs for high-risk/volatile stock actions
+2. Live trailing stop chart using Recharts
+3. Alpaca paper trading API integration
