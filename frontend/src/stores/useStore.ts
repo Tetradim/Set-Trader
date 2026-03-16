@@ -13,6 +13,7 @@ export interface TickerConfig {
   stop_percent: boolean;
   trailing_enabled: boolean;
   trailing_percent: number;
+  trailing_percent_mode: boolean;
   enabled: boolean;
   strategy: string;
   created_at: string;

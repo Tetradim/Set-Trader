@@ -60,6 +60,7 @@ class TickerConfig(BaseModel):
     stop_percent: bool = True
     trailing_enabled: bool = False
     trailing_percent: float = 2.0
+    trailing_percent_mode: bool = True
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -79,6 +80,7 @@ class TickerUpdate(BaseModel):
     stop_percent: Optional[bool] = None
     trailing_enabled: Optional[bool] = None
     trailing_percent: Optional[float] = None
+    trailing_percent_mode: Optional[bool] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -122,6 +124,7 @@ class PresetStrategy(BaseModel):
     stop_percent: bool
     trailing_enabled: bool
     trailing_percent: float
+    trailing_percent_mode: bool = True
 
 
 # --- WEBSOCKET MANAGER ---
@@ -293,6 +296,7 @@ class TradingEngine:
         is_stop_pct = ticker_doc.get("stop_percent", True)
         trailing = ticker_doc.get("trailing_enabled", False)
         trail_pct = ticker_doc.get("trailing_percent", 2.0)
+        trail_is_pct = ticker_doc.get("trailing_percent_mode", True)
         base_power = ticker_doc.get("base_power", 100.0)
 
         # Percent mode: offset from average. Dollar mode: ABSOLUTE target price.
@@ -322,7 +326,10 @@ class TradingEngine:
                 if price > high:
                     self._trailing_highs[sym] = price
                     high = price
-                trail_stop = round(high * (1 - trail_pct / 100), 2)
+                if trail_is_pct:
+                    trail_stop = round(high * (1 - trail_pct / 100), 2)
+                else:
+                    trail_stop = round(high - trail_pct, 2)
                 if price <= trail_stop:
                     pnl = round((price - entry) * pos["qty"], 2)
                     trade = TradeRecord(

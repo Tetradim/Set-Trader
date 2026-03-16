@@ -48,6 +48,14 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend History Tab: Collapsible grouped rows with count badge, avg price, total qty, net P&L
 - [x] Testing: 10/10 backend tests, 90% frontend (WebSocket intermittent in test env)
 
+### 2026-03-16 - Trailing Stop Percent/Dollar Mode
+- [x] Added `trailing_percent_mode` field to ticker schema (backend + frontend)
+- [x] Trailing stop now supports both percent (trail by X%) and dollar (trail by $X) modes
+- [x] Min value 0.01 for both modes
+- [x] Backend: `high - $value` for dollar mode, `high * (1 - %/100)` for percent mode
+- [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
+- [x] Backward compatible: existing tickers default to percent mode
+
 ## Prioritized Backlog
 ### P1
 - Live broker connection (Alpaca paper trading)

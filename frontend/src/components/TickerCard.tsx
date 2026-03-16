@@ -279,9 +279,17 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                   accent
                 />
                 {ticker.trailing_enabled && (
-                  <SteppedInput label="Trail %" value={ticker.trailing_percent}
-                    onChange={(v) => handleFieldChange('trailing_percent', v)} min={0.1} max={50}
-                    incrementStep={incrementStep} decrementStep={decrementStep} />
+                  <>
+                    <SteppedInput
+                      label={(ticker.trailing_percent_mode ?? true) ? 'Trail %' : 'Trail $'}
+                      value={ticker.trailing_percent}
+                      onChange={(v) => handleFieldChange('trailing_percent', v)}
+                      min={0.01} max={(ticker.trailing_percent_mode ?? true) ? 50 : 99999}
+                      incrementStep={incrementStep} decrementStep={decrementStep}
+                    />
+                    <ConfigToggle label="Use %" checked={ticker.trailing_percent_mode ?? true}
+                      onChange={(v) => handleFieldChange('trailing_percent_mode', v)} />
+                  </>
                 )}
               </ConfigSection>
 
