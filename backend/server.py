@@ -836,12 +836,41 @@ async def delete_ticker(symbol: str):
 @api.post("/tickers/{symbol}/strategy/{preset}")
 async def apply_strategy(symbol: str, preset: str):
     sym = symbol.upper()
+    current_doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+    if not current_doc:
+        raise HTTPException(404, f"{sym} not found")
+
+    # Toggle OFF: restore custom backup
+    if current_doc.get("strategy") == preset:
+        backup = current_doc.get("custom_backup", {})
+        if backup:
+            backup["strategy"] = "custom"
+            await db.tickers.update_one({"symbol": sym}, {"$set": backup, "$unset": {"custom_backup": ""}})
+        else:
+            await db.tickers.update_one({"symbol": sym}, {"$set": {"strategy": "custom"}})
+        doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        return doc
+
+    # Toggle ON: backup + apply
     strategy = PRESET_STRATEGIES.get(preset)
     if not strategy:
         raise HTTPException(400, f"Unknown preset: {preset}")
+    backup_fields = {
+        "avg_days": current_doc.get("avg_days"),
+        "buy_offset": current_doc.get("buy_offset"),
+        "buy_percent": current_doc.get("buy_percent"),
+        "sell_offset": current_doc.get("sell_offset"),
+        "sell_percent": current_doc.get("sell_percent"),
+        "stop_offset": current_doc.get("stop_offset"),
+        "stop_percent": current_doc.get("stop_percent"),
+        "trailing_enabled": current_doc.get("trailing_enabled"),
+        "trailing_percent": current_doc.get("trailing_percent"),
+        "trailing_percent_mode": current_doc.get("trailing_percent_mode", True),
+    }
     updates = strategy.model_dump()
     updates.pop("name")
     updates["strategy"] = preset
+    updates["custom_backup"] = backup_fields
     await db.tickers.update_one({"symbol": sym}, {"$set": updates})
     doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
     return doc
@@ -1124,11 +1153,43 @@ async def ws_endpoint(websocket: WebSocket):
             elif action == "APPLY_STRATEGY":
                 sym = msg.get("symbol", "").upper()
                 preset = msg.get("preset", "")
+                current_doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                if not current_doc:
+                    continue
+
+                # Toggle OFF: if already on this preset, restore custom backup
+                if current_doc.get("strategy") == preset:
+                    backup = current_doc.get("custom_backup", {})
+                    if backup:
+                        backup["strategy"] = "custom"
+                        backup.pop("custom_backup", None)
+                        await db.tickers.update_one({"symbol": sym}, {"$set": backup, "$unset": {"custom_backup": ""}})
+                    else:
+                        await db.tickers.update_one({"symbol": sym}, {"$set": {"strategy": "custom"}})
+                    doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                    if doc:
+                        await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+                    continue
+
+                # Toggle ON: backup current custom config, then apply preset
                 strategy = PRESET_STRATEGIES.get(preset)
                 if strategy:
+                    backup_fields = {
+                        "avg_days": current_doc.get("avg_days"),
+                        "buy_offset": current_doc.get("buy_offset"),
+                        "buy_percent": current_doc.get("buy_percent"),
+                        "sell_offset": current_doc.get("sell_offset"),
+                        "sell_percent": current_doc.get("sell_percent"),
+                        "stop_offset": current_doc.get("stop_offset"),
+                        "stop_percent": current_doc.get("stop_percent"),
+                        "trailing_enabled": current_doc.get("trailing_enabled"),
+                        "trailing_percent": current_doc.get("trailing_percent"),
+                        "trailing_percent_mode": current_doc.get("trailing_percent_mode", True),
+                    }
                     updates = strategy.model_dump()
                     updates.pop("name")
                     updates["strategy"] = preset
+                    updates["custom_backup"] = backup_fields
                     await db.tickers.update_one({"symbol": sym}, {"$set": updates})
                     doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:

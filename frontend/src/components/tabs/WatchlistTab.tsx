@@ -12,6 +12,7 @@ export function WatchlistTab() {
   const running = useStore((s) => s.running);
   const connected = useStore((s) => s.connected);
   const simulate247 = useStore((s) => s.simulate247);
+  const chartEnabled = useStore((s) => s.chartEnabled);
 
   const activeTickers = tickers.filter((t) => t.enabled);
   const inactiveTickers = tickers.filter((t) => !t.enabled);
@@ -75,6 +76,7 @@ export function WatchlistTab() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.2 }}
+                  className={chartEnabled[t.symbol] ? 'col-span-1 md:col-span-2' : ''}
                 >
                   <TickerCard ticker={t} />
                 </motion.div>
@@ -99,7 +101,7 @@ export function WatchlistTab() {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="opacity-60 hover:opacity-100 transition-opacity"
+                  className={`${chartEnabled[t.symbol] ? 'col-span-1 md:col-span-2' : ''} opacity-60 hover:opacity-100 transition-opacity`}
                 >
                   <TickerCard ticker={t} />
                 </motion.div>

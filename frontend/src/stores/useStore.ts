@@ -17,6 +17,7 @@ export interface TickerConfig {
   enabled: boolean;
   strategy: string;
   created_at: string;
+  custom_backup?: Record<string, any>;
 }
 
 export interface TradeLog {
@@ -37,6 +38,11 @@ export interface PositionData {
   current_price: number;
   market_value: number;
   unrealized_pnl: number;
+}
+
+export interface PricePoint {
+  time: number;
+  price: number;
 }
 
 interface BotState {
@@ -62,6 +68,14 @@ interface BotState {
   // Prices
   prices: Record<string, number>;
   setPrices: (p: Record<string, number>) => void;
+
+  // Price history for charts
+  priceHistory: Record<string, PricePoint[]>;
+  appendPriceHistory: (prices: Record<string, number>) => void;
+
+  // Chart enabled per ticker
+  chartEnabled: Record<string, boolean>;
+  toggleChart: (symbol: string) => void;
 
   // Profits
   profits: Record<string, number>;
@@ -129,6 +143,23 @@ export const useStore = create<BotState>((set) => ({
 
   prices: {},
   setPrices: (prices) => set({ prices }),
+
+  priceHistory: {},
+  appendPriceHistory: (prices) => set((state) => {
+    const now = Date.now();
+    const updated = { ...state.priceHistory };
+    for (const [sym, price] of Object.entries(prices)) {
+      const arr = updated[sym] || [];
+      const next = [...arr, { time: now, price }];
+      updated[sym] = next.length > 120 ? next.slice(-120) : next;
+    }
+    return { priceHistory: updated };
+  }),
+
+  chartEnabled: {},
+  toggleChart: (symbol) => set((state) => ({
+    chartEnabled: { ...state.chartEnabled, [symbol]: !state.chartEnabled[symbol] }
+  })),
 
   profits: {},
   setProfits: (profits) => set({ profits }),

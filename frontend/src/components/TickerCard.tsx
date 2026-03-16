@@ -1,5 +1,5 @@
-import React, { memo, useState, useCallback, useEffect } from 'react';
-import { useStore, TickerConfig } from '@/stores/useStore';
+import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
+import { useStore, TickerConfig, PricePoint } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,9 +15,13 @@ import {
   Banknote,
   Minus,
   Plus,
+  Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+} from 'recharts';
 
 interface Props {
   ticker: TickerConfig;
@@ -30,6 +34,9 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   const position = useStore((s) => s.positions[ticker.symbol]);
   const incrementStep = useStore((s) => s.incrementStep);
   const decrementStep = useStore((s) => s.decrementStep);
+  const chartEnabled = useStore((s) => s.chartEnabled[ticker.symbol] ?? false);
+  const toggleChart = useStore((s) => s.toggleChart);
+  const priceHistory = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP, setConfirmTP] = useState(false);
@@ -99,6 +106,12 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
       <div className="relative p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
+            <Checkbox
+              data-testid={`chart-toggle-${ticker.symbol}`}
+              checked={chartEnabled}
+              onCheckedChange={() => toggleChart(ticker.symbol)}
+              className="h-3.5 w-3.5 data-[state=checked]:bg-accent data-[state=checked]:border-accent"
+            />
             <h3 className="text-lg font-bold tracking-tight text-foreground">{ticker.symbol}</h3>
             <span
               className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
@@ -164,6 +177,9 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
             </span>
           </div>
         )}
+
+        {/* Live Price Chart */}
+        {chartEnabled && <LivePriceChart ticker={ticker} priceHistory={priceHistory} />}
 
         {/* Controls row: Expand / Take Profit / Delete */}
         <div className="flex items-center justify-between mt-3">
@@ -328,6 +344,69 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
 });
 
 /* --- SUB COMPONENTS --- */
+
+function LivePriceChart({ ticker, priceHistory }: { ticker: TickerConfig; priceHistory: PricePoint[] }) {
+  const chartData = useMemo(() => {
+    if (priceHistory.length < 2) return [];
+    let runningHigh = 0;
+    return priceHistory.map((p) => {
+      if (p.price > runningHigh) runningHigh = p.price;
+      const trailMode = ticker.trailing_percent_mode ?? true;
+      const trailVal = ticker.trailing_percent;
+      const trailStop = ticker.trailing_enabled
+        ? trailMode
+          ? runningHigh * (1 - trailVal / 100)
+          : runningHigh - trailVal
+        : undefined;
+      return {
+        time: new Date(p.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        price: p.price,
+        trailStop: trailStop ? Math.round(trailStop * 100) / 100 : undefined,
+      };
+    });
+  }, [priceHistory, ticker.trailing_enabled, ticker.trailing_percent, ticker.trailing_percent_mode]);
+
+  if (chartData.length < 2) {
+    return (
+      <div className="mt-3 flex items-center justify-center h-24 rounded-lg bg-secondary/30 border border-border/30">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Activity size={12} className="animate-pulse" />
+          Collecting price data...
+        </div>
+      </div>
+    );
+  }
+
+  const prices = chartData.map((d) => d.price);
+  const minP = Math.min(...prices) * 0.9995;
+  const maxP = Math.max(...prices) * 1.0005;
+
+  return (
+    <div className="mt-3 rounded-lg bg-secondary/20 border border-border/30 p-2" data-testid={`chart-${ticker.symbol}`}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
+          <Activity size={10} /> Live Chart
+        </span>
+        <span className="text-[10px] font-mono text-muted-foreground">{chartData.length} pts</span>
+      </div>
+      <ResponsiveContainer width="100%" height={140}>
+        <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
+          <XAxis dataKey="time" tick={false} axisLine={false} />
+          <YAxis domain={[minP, maxP]} tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} width={50} tickFormatter={(v: number) => `$${v.toFixed(1)}`} />
+          <Tooltip
+            contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
+            labelStyle={{ color: '#94a3b8' }}
+            formatter={(v: number, name: string) => [`$${v.toFixed(2)}`, name === 'price' ? 'Price' : 'Trail Stop']}
+          />
+          <Line type="monotone" dataKey="price" stroke="#6366f1" strokeWidth={2} dot={false} isAnimationActive={false} />
+          {ticker.trailing_enabled && (
+            <Line type="monotone" dataKey="trailStop" stroke="#f59e0b" strokeWidth={1} strokeDasharray="4 2" dot={false} isAnimationActive={false} />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 function ConfigSection({
   title, icon: Icon, color, children,

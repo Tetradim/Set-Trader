@@ -1,0 +1,62 @@
+{
+  "summary": "Verified both new features: 1) Live Price Chart with checkbox toggle (data-testid='chart-toggle-{SYMBOL}'), col-span-2 expansion, Y-axis labels, and trailing stop line for tickers with trailing enabled. 2) Preset Strategy Toggle correctly backs up custom config when applying preset and restores it when clicking the same preset again.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "component": "WebSocket Connection",
+        "issue": "WebSocket intermittently shows 'No activity yet' in Live Activity sidebar, but reconnects and displays grouped trades (10 trades / 1 groups, QBTS x10). Known issue from previous iteration.",
+        "affected_selectors": "Live Activity panel",
+        "priority": "LOW"
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_chart_preset_features.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_chart_preset_features.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "100% (all new features working)"
+  },
+  "seed_data_creation": "None required - tested with existing tickers",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Two new features fully verified: 1) Live chart checkbox (chart-toggle-{SYMBOL}) shows LineChart with price history and trailing stop line when trailing is enabled. Card expands to col-span-2 when chart enabled. 2) Preset strategy toggle saves custom_backup when applying preset and restores values when clicking same preset again. WebSocket intermittent issue is pre-existing.",
+  "features_verified": {
+    "live_price_chart": {
+      "status": "WORKING",
+      "checkbox_testid": "chart-toggle-{SYMBOL}",
+      "chart_testid": "chart-{SYMBOL}",
+      "col_span_2": "Verified - AAPL/SPY cards span 2 columns when chart enabled",
+      "y_axis_labels": "Verified - Shows dollar values ($250.0, $662.0, etc)",
+      "trailing_stop_line": "Verified - SPY chart shows 2 line curves (price + trailing stop dashed amber line)",
+      "data_points": "Verified - Shows '40 pts' after ~6 seconds of price data collection"
+    },
+    "preset_strategy_toggle": {
+      "status": "WORKING",
+      "apply_preset": "Conservative 1Y changes buy_offset=-5.0, avg_days=365, saves custom_backup",
+      "toggle_off": "Clicking same preset again restores original values from custom_backup",
+      "api_verified": "POST /api/tickers/{symbol}/strategy/{preset} correctly handles toggle logic",
+      "websocket_handler": "APPLY_STRATEGY action in WebSocket also handles toggle correctly"
+    },
+    "sidebar_grouped_trades": {
+      "status": "WORKING (when WebSocket connected)",
+      "format": "Shows '10 trades / 1 groups' with 'QBTS x10' grouped format"
+    },
+    "live_prices": {
+      "status": "WORKING",
+      "tickers": "AAPL, NVDA, QBTS, SPY, TSLA all showing live prices"
+    }
+  }
+}

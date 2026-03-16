@@ -43,7 +43,10 @@ export function useWebSocket() {
         }
 
         if (data.type === 'PRICE_UPDATE') {
-          if (data.prices) store.setPrices(data.prices);
+          if (data.prices) {
+            store.setPrices(data.prices);
+            store.appendPriceHistory(data.prices);
+          }
           if (data.positions) store.setPositions(data.positions);
           if (data.profits) store.setProfits(data.profits);
           if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
