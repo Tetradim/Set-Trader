@@ -24,6 +24,9 @@ export interface TickerConfig {
   max_consecutive_losses: number;
   auto_stopped: boolean;
   auto_stop_reason: string;
+  auto_rebracket: boolean;
+  rebracket_threshold: number;
+  rebracket_spread: number;
   enabled: boolean;
   strategy: string;
   created_at: string;

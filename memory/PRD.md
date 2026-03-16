@@ -56,6 +56,12 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
 - [x] Backward compatible: existing tickers default to percent mode
 
+### 2026-03-16 - Auto Rebracket Feature
+- [x] Detects when price drifts beyond bracket by configurable threshold ($)
+- [x] Auto-sets new bracket using rolling recent low + configurable spread ($)
+- [x] Telegram notification on each rebracket with old/new bracket details
+- [x] Frontend: toggle + threshold/spread inputs in expanded card config
+
 ### 2026-03-16 - Compound Profits Toggle
 - [x] Added `compound_profits: bool = True` to ticker schema (default ON)
 - [x] When enabled, positive P&L from sells/stops is added to the ticker's `base_power` (buy power)

@@ -314,6 +314,39 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                 </div>
               </ConfigSection>
 
+              {/* Auto Rebracket */}
+              <ConfigSection title="Auto Rebracket" icon={Activity} color="text-cyan-400">
+                <div className="col-span-2">
+                  <ConfigToggle
+                    label="Enable Auto Rebracket"
+                    checked={ticker.auto_rebracket ?? false}
+                    onChange={(v) => handleFieldChange('auto_rebracket', v)}
+                    accent
+                  />
+                </div>
+                {(ticker.auto_rebracket ?? false) && (
+                  <>
+                    <SteppedInput
+                      label="Threshold ($)"
+                      value={ticker.rebracket_threshold ?? 2.0}
+                      onChange={(v) => handleFieldChange('rebracket_threshold', v)}
+                      min={0.01} max={99999}
+                      incrementStep={incrementStep} decrementStep={decrementStep}
+                    />
+                    <SteppedInput
+                      label="Spread ($)"
+                      value={ticker.rebracket_spread ?? 0.80}
+                      onChange={(v) => handleFieldChange('rebracket_spread', v)}
+                      min={0.01} max={99999}
+                      incrementStep={incrementStep} decrementStep={decrementStep}
+                    />
+                    <div className="col-span-2 text-[9px] text-muted-foreground/60">
+                      When price drifts beyond threshold from the current bracket, a new bracket is set using the spread. Switches to dollar mode.
+                    </div>
+                  </>
+                )}
+              </ConfigSection>
+
               {/* Buy Rules */}
               <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
                 <OrderTypeToggle

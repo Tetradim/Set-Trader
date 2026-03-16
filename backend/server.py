@@ -71,6 +71,9 @@ class TickerConfig(BaseModel):
     max_consecutive_losses: int = 0  # 0 = disabled
     auto_stopped: bool = False
     auto_stop_reason: str = ""
+    auto_rebracket: bool = False
+    rebracket_threshold: float = 2.0
+    rebracket_spread: float = 0.80
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -101,6 +104,9 @@ class TickerUpdate(BaseModel):
     max_consecutive_losses: Optional[int] = None
     auto_stopped: Optional[bool] = None
     auto_stop_reason: Optional[str] = None
+    auto_rebracket: Optional[bool] = None
+    rebracket_threshold: Optional[float] = None
+    rebracket_spread: Optional[float] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -257,6 +263,7 @@ class TradingEngine:
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
         self._last_trade_ts: Dict[str, datetime] = {}  # per-symbol cooldown
+        self._recent_prices: Dict[str, list] = {}  # rolling window for rebracket
 
     async def save_state(self):
         """Persist running/paused/simulate_24_7 to MongoDB so they survive restarts."""
@@ -418,6 +425,60 @@ class TradingEngine:
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
                     self._trailing_highs.pop(sym, None)
                     await self._update_profit(sym, pnl, compound)
+
+        # --- AUTO REBRACKET ---
+        rebracket_on = ticker_doc.get("auto_rebracket", False)
+        if rebracket_on and pos["qty"] == 0:
+            threshold = ticker_doc.get("rebracket_threshold", 2.0)
+            spread = ticker_doc.get("rebracket_spread", 0.80)
+
+            # Track rolling recent prices (last 10 ticks)
+            hist = self._recent_prices.get(sym, [])
+            hist.append(price)
+            if len(hist) > 10:
+                hist = hist[-10:]
+            self._recent_prices[sym] = hist
+
+            drifted_up = price > sell_target + threshold
+            drifted_down = price < buy_target - threshold
+            if drifted_up or drifted_down:
+                recent_low = min(hist)
+                new_buy = round(recent_low - 0.10, 2)
+                new_sell = round(new_buy + spread, 2)
+                old_buy = buy_target
+                old_sell = sell_target
+
+                # Switch to dollar mode and update bracket
+                await db.tickers.update_one(
+                    {"symbol": sym},
+                    {"$set": {
+                        "buy_offset": new_buy,
+                        "buy_percent": False,
+                        "sell_offset": new_sell,
+                        "sell_percent": False,
+                    }}
+                )
+                doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                if doc:
+                    await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+
+                direction = "UP" if drifted_up else "DOWN"
+                logger.info(f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} (was ${old_buy} / ${old_sell})")
+
+                # Telegram notification
+                try:
+                    await telegram_service._broadcast_alert(
+                        f"REBRACKET {sym}\n"
+                        f"Price drifted {direction}: ${price:.2f}\n"
+                        f"Old bracket: ${old_buy:.2f} / ${old_sell:.2f}\n"
+                        f"New bracket: ${new_buy:.2f} / ${new_sell:.2f}\n"
+                        f"Spread: ${spread:.2f}"
+                    )
+                except Exception:
+                    pass
+
+                # Reset recent prices after rebracket
+                self._recent_prices[sym] = []
 
     async def _record_trade(self, trade: TradeRecord):
         doc = trade.model_dump()
