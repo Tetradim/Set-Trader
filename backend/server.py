@@ -224,6 +224,8 @@ price_service = PriceService()
 
 # --- TRADING ENGINE ---
 class TradingEngine:
+    TRADE_COOLDOWN_SECS = 30  # min seconds between trades for the same symbol
+
     def __init__(self):
         self.running = False
         self.paused = False
@@ -231,6 +233,7 @@ class TradingEngine:
         self._prices: Dict[str, float] = {}
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
+        self._last_trade_ts: Dict[str, datetime] = {}  # per-symbol cooldown
 
     async def save_state(self):
         """Persist running/paused/simulate_24_7 to MongoDB so they survive restarts."""
@@ -270,6 +273,12 @@ class TradingEngine:
     async def evaluate_ticker(self, ticker_doc: dict):
         sym = ticker_doc["symbol"]
         if not ticker_doc.get("enabled", False):
+            return
+
+        # Per-symbol cooldown: skip if we traded too recently
+        now = datetime.now(timezone.utc)
+        last = self._last_trade_ts.get(sym)
+        if last and (now - last).total_seconds() < self.TRADE_COOLDOWN_SECS:
             return
 
         price = await price_service.get_price(sym)
@@ -351,6 +360,7 @@ class TradingEngine:
     async def _record_trade(self, trade: TradeRecord):
         doc = trade.model_dump()
         await db.trades.insert_one(doc)
+        self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
         logger.info(f"TRADE: {trade.side} {trade.symbol} @ ${trade.price} x{trade.quantity}")
         clean = {k: v for k, v in doc.items() if k != "_id"}
         await ws_manager.broadcast({"type": "TRADE", "trade": clean})
