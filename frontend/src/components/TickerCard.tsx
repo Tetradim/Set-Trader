@@ -66,12 +66,13 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   };
 
   const avgPrice = price > 0 ? price : 100;
+  // Percent mode: offset from avg. Dollar mode: the value IS the target price.
   const buyTarget = ticker.buy_percent
     ? (avgPrice * (1 + ticker.buy_offset / 100)).toFixed(2)
-    : (avgPrice + ticker.buy_offset).toFixed(2);
+    : ticker.buy_offset.toFixed(2);
   const sellTarget = ticker.sell_percent
     ? (avgPrice * (1 + ticker.sell_offset / 100)).toFixed(2)
-    : (avgPrice + ticker.sell_offset).toFixed(2);
+    : ticker.sell_offset.toFixed(2);
 
   return (
     <div
@@ -220,10 +221,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
             <div className="p-4 border-t border-border bg-secondary/20 space-y-4">
               {/* Buy Rules */}
               <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
-                <NegativeOffsetInput
-                  label="Buy Offset"
+                <OffsetInput
+                  label={ticker.buy_percent ? 'Buy Offset (%)' : 'Buy Price ($)'}
                   value={ticker.buy_offset}
                   isPercent={ticker.buy_percent}
+                  mode="buy"
                   onChange={(v) => handleFieldChange('buy_offset', v)}
                   incrementStep={incrementStep}
                   decrementStep={decrementStep}
@@ -240,19 +242,26 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
 
               {/* Sell Rules */}
               <ConfigSection title="Sell Rules" icon={TrendingUp} color="text-blue-400">
-                <SteppedInput label="Sell Offset" value={ticker.sell_offset}
+                <OffsetInput
+                  label={ticker.sell_percent ? 'Sell Offset (%)' : 'Sell Price ($)'}
+                  value={ticker.sell_offset}
+                  isPercent={ticker.sell_percent}
+                  mode="sell"
                   onChange={(v) => handleFieldChange('sell_offset', v)}
-                  incrementStep={incrementStep} decrementStep={decrementStep} />
+                  incrementStep={incrementStep}
+                  decrementStep={decrementStep}
+                />
                 <ConfigToggle label="Use %" checked={ticker.sell_percent}
                   onChange={(v) => handleFieldChange('sell_percent', v)} />
               </ConfigSection>
 
               {/* Stop Loss */}
               <ConfigSection title="Stop Loss" icon={ShieldAlert} color="text-red-400">
-                <NegativeOffsetInput
-                  label="Stop Offset"
+                <OffsetInput
+                  label={ticker.stop_percent ? 'Stop Offset (%)' : 'Stop Price ($)'}
                   value={ticker.stop_offset}
                   isPercent={ticker.stop_percent}
+                  mode="stop"
                   onChange={(v) => handleFieldChange('stop_offset', v)}
                   incrementStep={incrementStep}
                   decrementStep={decrementStep}
@@ -328,74 +337,141 @@ function ConfigSection({
 }
 
 /**
- * NegativeOffsetInput: Buy / Stop offset is always negative.
- * Shows a locked "–" prefix, user only types the magnitude (positive number).
- * Stored value is always negative.
+ * OffsetInput: Smart input that handles two modes:
+ * - Percent mode (buy/stop): locked "–" prefix, user types magnitude, stored negative
+ * - Percent mode (sell): regular positive percent input
+ * - Dollar mode: "$" prefix, user types the absolute target price (positive number)
  */
-function NegativeOffsetInput({
-  label, value, isPercent, onChange, incrementStep, decrementStep,
+function OffsetInput({
+  label, value, isPercent, mode, onChange, incrementStep, decrementStep,
 }: {
   label: string; value: number; isPercent: boolean;
+  mode: 'buy' | 'sell' | 'stop';
   onChange: (v: number) => void;
   incrementStep: number; decrementStep: number;
 }) {
-  // Magnitude is always positive for display
-  const magnitude = Math.abs(value);
+  const isNegativePercent = isPercent && (mode === 'buy' || mode === 'stop');
 
-  const handleMagnitudeChange = (raw: string) => {
-    const num = parseFloat(raw);
-    if (isNaN(num)) return;
-    onChange(-Math.abs(num)); // always store negative
-  };
+  if (!isPercent) {
+    // DOLLAR MODE: absolute target price (always positive)
+    return (
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
+        <div className="flex items-center">
+          <span className="flex items-center justify-center h-[26px] w-6 bg-emerald-500/15 text-emerald-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
+            $
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={value}
+            onChange={(e) => {
+              const num = parseFloat(e.target.value);
+              if (!isNaN(num) && num >= 0) onChange(num);
+            }}
+            className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
+            data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
+          />
+          <div className="flex flex-col h-[26px] shrink-0">
+            <button
+              onClick={() => onChange(parseFloat((value + incrementStep).toFixed(4)))}
+              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            >
+              <Plus size={8} />
+            </button>
+            <button
+              onClick={() => onChange(parseFloat(Math.max(0, value - decrementStep).toFixed(4)))}
+              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            >
+              <Minus size={8} />
+            </button>
+          </div>
+        </div>
+        <p className="text-[8px] text-muted-foreground/50 mt-0.5">
+          {mode === 'buy' ? 'Buy' : mode === 'sell' ? 'Sell' : 'Stop'} when price hits ${value.toFixed(2)}
+        </p>
+      </div>
+    );
+  }
 
-  const nudgeUp = () => {
-    // "Up" means less negative (closer to 0) — use increment step
-    const newMag = Math.max(0, magnitude - incrementStep);
-    onChange(-newMag);
-  };
+  if (isNegativePercent) {
+    // PERCENT MODE (buy/stop): locked "–" prefix, store negative
+    const magnitude = Math.abs(value);
+    return (
+      <div>
+        <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
+        <div className="flex items-center">
+          <span className="flex items-center justify-center h-[26px] w-6 bg-red-500/15 text-red-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
+            &ndash;
+          </span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={magnitude}
+            onChange={(e) => {
+              const num = parseFloat(e.target.value);
+              if (!isNaN(num)) onChange(-Math.abs(num));
+            }}
+            className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
+            data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
+          />
+          <div className="flex flex-col h-[26px] shrink-0">
+            <button
+              onClick={() => onChange(-Math.max(0, magnitude - incrementStep))}
+              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+              title={`+${incrementStep}`}
+            >
+              <Plus size={8} />
+            </button>
+            <button
+              onClick={() => onChange(-(magnitude + decrementStep))}
+              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+              title={`-${decrementStep}`}
+            >
+              <Minus size={8} />
+            </button>
+          </div>
+        </div>
+        <p className="text-[8px] text-muted-foreground/50 mt-0.5">{value}% from avg</p>
+      </div>
+    );
+  }
 
-  const nudgeDown = () => {
-    // "Down" means more negative (farther from 0) — use decrement step
-    onChange(-(magnitude + decrementStep));
-  };
-
+  // PERCENT MODE (sell): positive percent
   return (
     <div>
       <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
       <div className="flex items-center">
-        {/* Locked negative prefix */}
-        <span className="flex items-center justify-center h-[26px] w-6 bg-red-500/15 text-red-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
-          &ndash;
+        <span className="flex items-center justify-center h-[26px] w-6 bg-blue-500/15 text-blue-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
+          +
         </span>
         <input
           type="text"
           inputMode="decimal"
-          value={magnitude}
-          onChange={(e) => handleMagnitudeChange(e.target.value)}
+          value={value}
+          onChange={(e) => {
+            const num = parseFloat(e.target.value);
+            if (!isNaN(num)) onChange(Math.abs(num));
+          }}
           className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
-          data-testid={`input-${label.toLowerCase().replace(/\s/g, '-')}`}
+          data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
         />
-        {/* Custom stepper arrows */}
         <div className="flex flex-col h-[26px] shrink-0">
           <button
-            onClick={nudgeUp}
+            onClick={() => onChange(parseFloat((value + incrementStep).toFixed(4)))}
             className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            title={`+${incrementStep}`}
           >
             <Plus size={8} />
           </button>
           <button
-            onClick={nudgeDown}
+            onClick={() => onChange(parseFloat(Math.max(0, value - decrementStep).toFixed(4)))}
             className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            title={`-${decrementStep}`}
           >
             <Minus size={8} />
           </button>
         </div>
       </div>
-      <p className="text-[8px] text-muted-foreground/50 mt-0.5">
-        {isPercent ? `${value}%` : `$${value.toFixed(2)}`} from avg
-      </p>
+      <p className="text-[8px] text-muted-foreground/50 mt-0.5">+{value}% from avg</p>
     </div>
   );
 }

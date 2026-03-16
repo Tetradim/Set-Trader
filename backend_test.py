@@ -261,6 +261,102 @@ class BracketBotAPITester:
         
         return True
 
+    def test_dollar_vs_percent_mode(self):
+        """Test the dollar mode vs percent mode fix for buy/sell offset calculations"""
+        print("\n🔍 Testing Dollar Mode vs Percent Mode...")
+        
+        # First, get current tickers to see existing configuration
+        success, tickers = self.run_test("Get Tickers for Mode Testing", "GET", "/tickers")
+        if not success:
+            return False
+            
+        # Find AAPL and NVDA tickers
+        aapl_ticker = None
+        nvda_ticker = None
+        
+        if isinstance(tickers, list):
+            for ticker in tickers:
+                if ticker.get('symbol') == 'AAPL':
+                    aapl_ticker = ticker
+                elif ticker.get('symbol') == 'NVDA':
+                    nvda_ticker = ticker
+        
+        # Test AAPL in dollar mode configuration
+        if aapl_ticker:
+            print(f"  📋 AAPL Current Config: buy_percent={aapl_ticker.get('buy_percent')}, sell_percent={aapl_ticker.get('sell_percent')}")
+            print(f"      buy_offset={aapl_ticker.get('buy_offset')}, sell_offset={aapl_ticker.get('sell_offset')}")
+            
+            # Verify AAPL is in dollar mode
+            is_dollar_mode = (aapl_ticker.get('buy_percent') == False and aapl_ticker.get('sell_percent') == False)
+            self.log_result("AAPL - Dollar Mode Configuration", is_dollar_mode, 
+                          f"buy_percent={aapl_ticker.get('buy_percent')}, sell_percent={aapl_ticker.get('sell_percent')}")
+            
+            # Verify the expected buy/sell offset values
+            expected_buy = 250.0
+            expected_sell = 250.10
+            actual_buy = aapl_ticker.get('buy_offset')
+            actual_sell = aapl_ticker.get('sell_offset')
+            
+            self.log_result("AAPL - Buy Offset Value", abs(actual_buy - expected_buy) < 0.01, 
+                          f"Expected: {expected_buy}, Actual: {actual_buy}")
+            self.log_result("AAPL - Sell Offset Value", abs(actual_sell - expected_sell) < 0.01, 
+                          f"Expected: {expected_sell}, Actual: {actual_sell}")
+        else:
+            self.log_result("AAPL Ticker Found", False, "AAPL ticker not found for testing")
+        
+        # Test NVDA in percent mode configuration  
+        if nvda_ticker:
+            print(f"  📋 NVDA Current Config: buy_percent={nvda_ticker.get('buy_percent')}, sell_percent={nvda_ticker.get('sell_percent')}")
+            print(f"      buy_offset={nvda_ticker.get('buy_offset')}, sell_offset={nvda_ticker.get('sell_offset')}")
+            
+            # Verify NVDA is in percent mode (default)
+            is_percent_mode = (nvda_ticker.get('buy_percent') == True and nvda_ticker.get('sell_percent') == True)
+            self.log_result("NVDA - Percent Mode Configuration", is_percent_mode,
+                          f"buy_percent={nvda_ticker.get('buy_percent')}, sell_percent={nvda_ticker.get('sell_percent')}")
+            
+            # Check that offsets are reasonable percent values (negative for buy, positive for sell)
+            buy_offset = nvda_ticker.get('buy_offset', 0)
+            sell_offset = nvda_ticker.get('sell_offset', 0)
+            
+            self.log_result("NVDA - Buy Offset Negative", buy_offset < 0, f"Buy offset: {buy_offset}%")
+            self.log_result("NVDA - Sell Offset Positive", sell_offset > 0, f"Sell offset: {sell_offset}%")
+        else:
+            self.log_result("NVDA Ticker Found", False, "NVDA ticker not found for testing")
+        
+        # Test updating a ticker to switch between modes
+        test_updates = {
+            "buy_percent": False,
+            "sell_percent": False, 
+            "buy_offset": 100.50,
+            "sell_offset": 101.75
+        }
+        
+        success, updated_ticker = self.run_test("Update NVDA to Dollar Mode", "PUT", "/tickers/NVDA", 200, test_updates)
+        if success and updated_ticker:
+            self.log_result("NVDA - Updated to Dollar Mode", 
+                          updated_ticker.get('buy_percent') == False and updated_ticker.get('sell_percent') == False,
+                          f"buy_percent={updated_ticker.get('buy_percent')}, sell_percent={updated_ticker.get('sell_percent')}")
+            self.log_result("NVDA - Dollar Mode Buy Offset", abs(updated_ticker.get('buy_offset', 0) - 100.50) < 0.01,
+                          f"Expected: 100.50, Actual: {updated_ticker.get('buy_offset')}")
+            self.log_result("NVDA - Dollar Mode Sell Offset", abs(updated_ticker.get('sell_offset', 0) - 101.75) < 0.01,
+                          f"Expected: 101.75, Actual: {updated_ticker.get('sell_offset')}")
+        
+        # Switch back to percent mode
+        percent_updates = {
+            "buy_percent": True,
+            "sell_percent": True,
+            "buy_offset": -3.0,
+            "sell_offset": 3.0
+        }
+        
+        success, restored_ticker = self.run_test("Restore NVDA to Percent Mode", "PUT", "/tickers/NVDA", 200, percent_updates)
+        if success and restored_ticker:
+            self.log_result("NVDA - Restored to Percent Mode",
+                          restored_ticker.get('buy_percent') == True and restored_ticker.get('sell_percent') == True,
+                          f"buy_percent={restored_ticker.get('buy_percent')}, sell_percent={restored_ticker.get('sell_percent')}")
+        
+        return True
+
     def run_all_tests(self):
         """Run comprehensive API test suite"""
         print("🚀 Starting BracketBot API Test Suite")
@@ -278,6 +374,7 @@ class BracketBotAPITester:
         self.test_cash_reserve_endpoints()  # NEW: Test cash reserve endpoints
         self.test_take_profit_endpoints()    # NEW: Test take profit endpoints
         self.test_telegram_endpoints()  # NEW: Test Telegram-specific endpoints
+        self.test_dollar_vs_percent_mode()   # NEW: Test dollar vs percent mode fix
 
         # Print final results
         print("\n" + "=" * 60)

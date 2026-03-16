@@ -264,9 +264,10 @@ class TradingEngine:
         trail_pct = ticker_doc.get("trailing_percent", 2.0)
         base_power = ticker_doc.get("base_power", 100.0)
 
-        buy_target = round(avg * (1 + buy_off / 100) if is_buy_pct else avg + buy_off, 2)
-        sell_target = round(avg * (1 + sell_off / 100) if is_sell_pct else avg + sell_off, 2)
-        stop_target = round(avg * (1 + stop_off / 100) if is_stop_pct else avg + stop_off, 2)
+        # Percent mode: offset from average. Dollar mode: ABSOLUTE target price.
+        buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
+        sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
+        stop_target = round(avg * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
 
         pos = self._positions.get(sym, {"qty": 0, "avg_entry": 0})
 
