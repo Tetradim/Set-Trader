@@ -56,6 +56,16 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
 - [x] Backward compatible: existing tickers default to percent mode
 
+### 2026-03-16 - Windows Executable Packaging Workflow
+- [x] Created `build-windows.ps1` PowerShell build script (PyInstaller + frontend bundle)
+- [x] Created `start-bracketbot.bat` launcher for source and packaged modes
+- [x] Created `WINDOWS_BUILD.md` with full setup, build, and distribution instructions
+- [x] Backend server.py now serves built React frontend as static files when `static/` dir exists
+- [x] `package.json` build script fixed (skip tsc, use vite build directly)
+- [x] `tsconfig.json` updated with Vite client types
+- [x] Verified single-server mode: backend at :8001 serves both API + frontend
+- [x] Build output: `dist/BracketBot/BracketBot.exe` + `Start BracketBot.bat` launcher
+
 ### 2026-03-16 - Limit/Market Order Types + Wait-a-Day Toggle
 - [x] Added LIMIT/MARKET toggle for each rule section: Buy, Sell, Stop Loss, Trailing Stop
 - [x] Market orders execute immediately at current price; Limit orders use price targets

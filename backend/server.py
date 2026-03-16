@@ -819,6 +819,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve built frontend in desktop/packaged mode
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    from starlette.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(_static_dir / "index.html")
+
+    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="static-assets")
+
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        file = _static_dir / path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_static_dir / "index.html")
+
 
 # --- REST ENDPOINTS ---
 @api.get("/health")
