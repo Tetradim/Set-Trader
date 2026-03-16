@@ -1,4 +1,4 @@
-import React, { memo, useState, useCallback } from 'react';
+import React, { memo, useState, useCallback, useEffect } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
@@ -337,6 +337,40 @@ function ConfigSection({
 }
 
 /**
+ * useDecimalInput: hook that manages a local text buffer so the user can
+ * freely type decimals ("250.", "0.0") without the value snapping away.
+ * Commits the parsed number to the parent on blur.
+ */
+function useDecimalInput(externalValue: number, commit: (v: number) => void) {
+  const [text, setText] = useState(String(externalValue));
+  const [focused, setFocused] = useState(false);
+
+  // Sync from parent when NOT focused (e.g. arrow buttons, strategy presets)
+  useEffect(() => {
+    if (!focused) setText(String(externalValue));
+  }, [externalValue, focused]);
+
+  const handleChange = (raw: string) => {
+    // Allow empty, digits, one leading minus, one dot
+    if (/^-?\d*\.?\d*$/.test(raw)) {
+      setText(raw);
+    }
+  };
+
+  const handleBlur = () => {
+    setFocused(false);
+    const num = parseFloat(text);
+    if (!isNaN(num)) {
+      commit(num);
+    } else {
+      setText(String(externalValue));
+    }
+  };
+
+  return { text, setText, focused, setFocused, handleChange, handleBlur };
+}
+
+/**
  * OffsetInput: Smart input that handles two modes:
  * - Percent mode (buy/stop): locked "–" prefix, user types magnitude, stored negative
  * - Percent mode (sell): regular positive percent input
@@ -354,6 +388,7 @@ function OffsetInput({
 
   if (!isPercent) {
     // DOLLAR MODE: absolute target price (always positive)
+    const dec = useDecimalInput(value, (num) => onChange(Math.abs(num)));
     return (
       <div>
         <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
@@ -364,11 +399,10 @@ function OffsetInput({
           <input
             type="text"
             inputMode="decimal"
-            value={value}
-            onChange={(e) => {
-              const num = parseFloat(e.target.value);
-              if (!isNaN(num) && num >= 0) onChange(num);
-            }}
+            value={dec.text}
+            onChange={(e) => dec.handleChange(e.target.value)}
+            onFocus={() => dec.setFocused(true)}
+            onBlur={dec.handleBlur}
             className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
             data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
           />
@@ -397,6 +431,7 @@ function OffsetInput({
   if (isNegativePercent) {
     // PERCENT MODE (buy/stop): locked "–" prefix, store negative
     const magnitude = Math.abs(value);
+    const dec = useDecimalInput(magnitude, (num) => onChange(-Math.abs(num)));
     return (
       <div>
         <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
@@ -407,11 +442,10 @@ function OffsetInput({
           <input
             type="text"
             inputMode="decimal"
-            value={magnitude}
-            onChange={(e) => {
-              const num = parseFloat(e.target.value);
-              if (!isNaN(num)) onChange(-Math.abs(num));
-            }}
+            value={dec.text}
+            onChange={(e) => dec.handleChange(e.target.value)}
+            onFocus={() => dec.setFocused(true)}
+            onBlur={dec.handleBlur}
             className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
             data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
           />
@@ -438,6 +472,7 @@ function OffsetInput({
   }
 
   // PERCENT MODE (sell): positive percent
+  const dec = useDecimalInput(value, (num) => onChange(Math.abs(num)));
   return (
     <div>
       <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
@@ -448,11 +483,10 @@ function OffsetInput({
         <input
           type="text"
           inputMode="decimal"
-          value={value}
-          onChange={(e) => {
-            const num = parseFloat(e.target.value);
-            if (!isNaN(num)) onChange(Math.abs(num));
-          }}
+          value={dec.text}
+          onChange={(e) => dec.handleChange(e.target.value)}
+          onFocus={() => dec.setFocused(true)}
+          onBlur={dec.handleBlur}
           className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
           data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
         />
@@ -478,6 +512,7 @@ function OffsetInput({
 
 /**
  * SteppedInput: general number input with custom increment/decrement arrows.
+ * Uses local text buffer so decimals can be typed freely.
  */
 function SteppedInput({
   label, value, onChange, min, max, incrementStep, decrementStep,
@@ -486,6 +521,12 @@ function SteppedInput({
   min?: number; max?: number;
   incrementStep: number; decrementStep: number;
 }) {
+  const dec = useDecimalInput(value, (num) => {
+    if (min !== undefined && num < min) return;
+    if (max !== undefined && num > max) return;
+    onChange(num);
+  });
+
   const nudgeUp = () => {
     let next = value + incrementStep;
     if (max !== undefined) next = Math.min(next, max);
@@ -502,17 +543,12 @@ function SteppedInput({
       <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
       <div className="flex items-center">
         <input
-          type="number"
-          value={value}
-          min={min}
-          max={max}
-          step={incrementStep}
-          onChange={(e) => {
-            const num = Number(e.target.value);
-            if (min !== undefined && num < min) return;
-            if (max !== undefined && num > max) return;
-            onChange(num);
-          }}
+          type="text"
+          inputMode="decimal"
+          value={dec.text}
+          onChange={(e) => dec.handleChange(e.target.value)}
+          onFocus={() => dec.setFocused(true)}
+          onBlur={dec.handleBlur}
           className="w-full h-[26px] bg-background border border-border rounded-l px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <div className="flex flex-col h-[26px] shrink-0">

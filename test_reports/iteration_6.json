@@ -1,0 +1,61 @@
+{
+  "summary": "Comprehensive testing of decimal input bug fix completed successfully. All number inputs in TickerCard.tsx (Buy Price, Sell Price, Stop Offset, Buy Power) and SettingsTab.tsx (Increment Step, Decrement Step) now correctly accept decimal points using the useDecimalInput hook with local string state. The fix works by allowing free text editing via regex validation and only parsing float on blur.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "component": "WebSocket Connection",
+        "issue": "WebSocket connection fails but app functions via HTTP fallback",
+        "affected_selectors": "WebSocket to '/api/ws'",
+        "priority": "LOW"
+      },
+      {
+        "component": "TradeLogSidebar",
+        "issue": "React warning about duplicate keys in AnimatePresence (existing issue)",
+        "affected_selectors": "TradeLogSidebar component",
+        "priority": "LOW"
+      }
+    ],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "TEST 1: Buy Price ($) input - typed '250.50' successfully, decimal point accepted, value persisted after blur as '250.5'",
+    "TEST 2: Sell Price ($) input - typed '275.99' successfully, decimal accepted, persisted correctly",
+    "TEST 3: Stop Offset (%) input - typed '5.75' successfully, decimal accepted with minus prefix preserved",
+    "TEST 4: Buy Power ($) input - typed '150.75' successfully, decimal accepted and persisted",
+    "TEST 5: Stepper +/- buttons - increment (250.5→250.75) and decrement working correctly",
+    "TEST 6: Settings > Increment Step - typed '0.05' successfully, decimal accepted",
+    "TEST 7: Settings > Decrement Step - typed '0.10' successfully, decimal accepted",
+    "Header shows 'Connected' status",
+    "Header shows 'Market Open' status",
+    "Ticker cards display live prices (AAPL: ~$250, NVDA: ~$180, QBTS: ~$17.5)",
+    "LIVE ACTIVITY sidebar shows real-time trades"
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend only testing)",
+    "frontend": "100% (all 7 decimal input tests passed)"
+  },
+  "seed_data_creation": "None - tested with existing ticker data (AAPL, NVDA, QBTS, TSLA)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Decimal input fix verified working. The useDecimalInput hook in TickerCard.tsx (line 344) uses local string state with regex /^-?\\d*\\.?\\d*$/ to allow free text editing. Float is only parsed on blur. All inputs use type='text' with inputMode='decimal'. Settings tab step inputs also fixed using same pattern.",
+  "bug_fix_verification": {
+    "bug_description": "Users could not type decimal points (.) in number input fields",
+    "root_cause": "Premature parseFloat() calls were stripping trailing decimals",
+    "fix_implemented": "useDecimalInput hook with local string state, regex validation, parse on blur",
+    "fix_verified": true,
+    "components_fixed": [
+      "TickerCard.tsx - OffsetInput (Buy/Sell/Stop inputs)",
+      "TickerCard.tsx - SteppedInput (Buy Power, Avg Period, Trail %)",
+      "SettingsTab.tsx - Increment/Decrement step inputs"
+    ]
+  }
+}

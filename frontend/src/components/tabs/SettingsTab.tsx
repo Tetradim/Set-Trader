@@ -28,6 +28,8 @@ export function SettingsTab() {
   const [tgConnected, setTgConnected] = useState(false);
   const [incStep, setIncStep] = useState(0.5);
   const [decStep, setDecStep] = useState(0.5);
+  const [incText, setIncText] = useState('0.5');
+  const [decText, setDecText] = useState('0.5');
 
   useEffect(() => {
     apiFetch('/api/settings')
@@ -37,6 +39,8 @@ export function SettingsTab() {
         setTgConnected(data.telegram_connected || false);
         setIncStep(data.increment_step ?? 0.5);
         setDecStep(data.decrement_step ?? 0.5);
+        setIncText(String(data.increment_step ?? 0.5));
+        setDecText(String(data.decrement_step ?? 0.5));
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
         useStore.getState().setIncrementStep(data.increment_step ?? 0.5);
         useStore.getState().setDecrementStep(data.decrement_step ?? 0.5);
@@ -117,11 +121,23 @@ export function SettingsTab() {
             </label>
             <input
               data-testid="increment-step-input"
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={incStep}
-              onChange={(e) => setIncStep(Number(e.target.value))}
+              type="text"
+              inputMode="decimal"
+              value={incText}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (/^\d*\.?\d*$/.test(raw)) {
+                  setIncText(raw);
+                }
+              }}
+              onBlur={() => {
+                const num = parseFloat(incText);
+                if (!isNaN(num) && num >= 0.01) {
+                  setIncStep(num);
+                } else {
+                  setIncText(String(incStep));
+                }
+              }}
               className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
             />
             <p className="text-[10px] text-muted-foreground/60 mt-1">
@@ -134,11 +150,23 @@ export function SettingsTab() {
             </label>
             <input
               data-testid="decrement-step-input"
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={decStep}
-              onChange={(e) => setDecStep(Number(e.target.value))}
+              type="text"
+              inputMode="decimal"
+              value={decText}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (/^\d*\.?\d*$/.test(raw)) {
+                  setDecText(raw);
+                }
+              }}
+              onBlur={() => {
+                const num = parseFloat(decText);
+                if (!isNaN(num) && num >= 0.01) {
+                  setDecStep(num);
+                } else {
+                  setDecText(String(decStep));
+                }
+              }}
               className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
             />
             <p className="text-[10px] text-muted-foreground/60 mt-1">

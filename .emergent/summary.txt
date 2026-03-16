@@ -1,0 +1,189 @@
+<analysis>**original_problem_statement:**
+The user wants to refactor and productionize a trading bot. The original codebase, a mix of Streamlit and JavaScript, has been partially converted to a WebSocket and Zustand-based architecture with a FastAPI backend.
+
+**PRODUCT REQUIREMENTS:**
+- **Code Cleanup:** Remove all ghost code, dead files, and old JavaScript artifacts from the repository.
+- **Core Trading Logic:**
+    - Fetch average price over a customizable period (e.g., 1 month, 1 year).
+    - Implement bracket orders: buy when a stock drops by a customizable percentage or dollar amount, and sell at a customizable price target.
+    - Support for partial shares.
+    - Use profits from sales to compound buying power.
+- **Telegram Integration:**
+    - Commands: , ,  (add ticker),  (stop trading a ticker),  (global pause), , , , , , .
+    - Alerts for bot restarts and offline status.
+- **UI & UX:**
+    - A Radix/Lucide-powered dashboard with a dark theme (blues and purples).
+    - Per-stock cards that can be individually enabled/disabled for trading.
+    - Expandable cards to configure buy/sell rules, share quantities, and toggle trailing stops.
+    - Live price feed updating every ~1.8 seconds.
+    - A real-time log of all executed trades ().
+    - UI controls: , ,  checkbox.
+    - Tabbed UI: Watchlist, Positions, Trade History, Logs.
+    - Portfolio Overview: Real-time equity, cash, buying power, P&L metrics.
+    - Ability to delete tickers.
+    - Animated cards, toggles, and pop-up confirmations for high-risk actions.
+- **Profit Management:**
+    - Automated profit tracking for compounding.
+    - A Take Profit button to reset a ticker's P&L and move the profit to a cash reserve.
+- **Future/Advanced Features:**
+    - CI/CD workflow, Makefile, and  for improved developer experience.
+    - Prometheus/Grafana stack for monitoring.
+    - OpenTelemetry tracing.
+    - A live graph to visualize trailing stops.
+    - A comprehensive  with architecture diagrams and usage instructions.
+
+**User's preferred language**: English
+
+**what currently exists?**
+A fully rebuilt and functional trading bot application. The tech stack is FastAPI (Python) on the backend and React (TypeScript) on the frontend, with MongoDB for data persistence and WebSockets for real-time communication.
+
+The application features:
+- A dark-themed dashboard with live price updates from .
+- A watchlist of ticker cards, each with configurable buy/sell rules (both percentage and absolute dollar modes), stop-loss, and trailing stops.
+- Real-time trading engine that persists its state (, ) in MongoDB.
+- Full UI for managing tickers, viewing positions, trade history, and logs.
+- Telegram integration for commands (, , etc.) and alerts (startup, shutdown).
+- Profit compounding with a Take Profit feature to move gains into a cash reserve.
+- CI/CD, Docker, Makefile, and a comprehensive README.md have been created.
+
+**Last working item**:
+- **Last item agent was working:** Fixing a bug that prevents users from typing decimal points () into number input fields for setting prices or percentages (e.g., 0.05, 250.25).
+- **Reasoning:** The input's  handler was using  on the input value immediately. This function strips a trailing decimal (e.g.,  returns ), which caused the input to re-render without the decimal point, making it impossible to type fractional values.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** Frontend testing agent
+- **User Testing Done:** N
+
+**All Pending/In progress Issue list**:
+- **Issue 1:** Users cannot type decimal points in number inputs. (P0)
+
+**Issues Detail:**
+- **Issue 1: Cannot type decimal points in number inputs.**
+    - **Attempted fixes:** The agent started refactoring the input components (, , ) to use a local string state (). The plan is to keep the raw text value in the input while the user is typing and only parse it into a number and send it to the backend/store on blur or when stepper arrows are used. The code has been modified but not yet fully tested.
+    - **Next debug checklist:**
+        1.  Verify the implemented fix by manually trying to type decimal numbers into the Buy Price, Sell Price, and Stop Loss inputs in both dollar and percent modes.
+        2.  Check the Arrow Step Sizes inputs in the Settings tab.
+        3.  Ensure that after typing a decimal value and clicking away (blur), the correct numeric value is sent to the backend and reflected in the Zustand store.
+        4.  Run the frontend testing agent to ensure this fix doesn't introduce regressions in the input components.
+    - **Why fix this issue and what will be achieved with the fix?** This is a critical usability bug. Fixing it will allow users to set precise trade targets (e.g., buy at 50.50) and fractional percentages (e.g., a 0.5% stop loss), which is essential for a trading bot.
+    - **Status:** IN PROGRESS
+    - **Is recurring issue?** N
+    - **Should Test frontend/backend/both after fix?** Frontend
+    - **Blocked on other issue:** None
+
+**In progress Task List**:
+- None.
+
+**Upcoming and Future Tasks**
+- **Upcoming Tasks:**
+    - **Preset Strategies Tab (P1):** Implement the functionality to save and load trading configurations as presets (e.g., Conservative 1-year, Aggressive Dip-Buy).
+    - **Live Graph Chart (P1):** Create a new tab or view that displays a live chart for a selected ticker, plotting the price and the dynamic trailing stop-loss level.
+    - **Input Validation (P2):** Perform a full pass on all user inputs to add robust validation and user-friendly error messages (e.g., preventing non-numeric characters, ensuring valid ranges).
+    - **High-Risk Confirmations (P2):** Add pop-up confirmation dialogs for high-risk actions like deleting a ticker with an open position or enabling trading on a highly volatile stock.
+- **Future Tasks:**
+    - **Monitoring:** Integrate Prometheus and Grafana services to export and visualize metrics like win rate, drawdown, and Sharpe ratio.
+    - **Tracing:** Add OpenTelemetry tracing to track the lifecycle of every trade decision.
+    - **Restart Frontend Button:** Add a button in the UI to allow the user to force a frontend refresh, with a confirmation pop-up.
+
+**Completed work in this session**
+- **Full Application Rebuild:** Replaced the old codebase with a new FastAPI + React + MongoDB + WebSocket architecture.
+- **Code Cleanup:** Removed dozens of dead files and ghost code from the original repository.
+- **Core Trading Engine:** Implemented the trading logic with support for both percentage-offset and absolute-dollar-price modes.
+- **UI Dashboard:** Built the entire frontend dashboard from scratch, including the tabbed interface, ticker cards, header, and sidebar.
+- **State Persistence:** Fixed a critical bug where the bot's state (running/paused) would reset on server restarts by persisting it to MongoDB.
+- **Telegram Integration:** Added a  for commands (, ) and system alerts (startup/shutdown).
+- **Take Profit Feature:** Implemented a button to move a ticker's realized profits to a separate cash reserve, allowing for true profit tracking.
+- **Custom Input Increments:** Added a feature in the Settings tab to customize the step values for all number inputs.
+- **Dollar Mode Logic Fix:** Corrected a major bug where absolute dollar price targets were being misinterpreted as negative offsets.
+- **Trade Execution Fix:** Resolved an issue where the bot wouldn't trade by implementing state persistence and ensuring the Simulate 24/7 toggle worked correctly.
+- **Documentation & Tooling:** Created , , Docker Compose files, and a GitHub Actions CI workflow.
+
+**Earlier issues found/mentioned but not fixed**
+- None. The agent has been diligent in addressing all user-reported bugs. The remaining work consists of deferred features from the original request.
+
+**Known issue recurrence from previous fork**
+- None.
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Backend:** FastAPI, , , WebSockets, MongoDB ( async driver).
+- **Frontend:** React, TypeScript, Vite, Zustand, Tailwind CSS, shadcn/ui, Recharts.
+- **Architecture:** A service-oriented architecture where the React frontend communicates with the FastAPI backend via a combination of REST API for commands and a WebSocket for real-time data pushes (prices, trades, P&L).
+- **Data Persistence:** MongoDB is used to store ticker configurations, trade history, and the persistent state of the bot engine (, , ).
+
+**key DB schema**
+- ****: 
+- ****: 
+- ****: 
+- ****: 
+
+**changes in tech stack**
+- The original mixed Streamlit/JS project was completely migrated to a modern **FastAPI + React** stack.
+
+**All files of reference**
+- : Contains the entire backend logic, including the FastAPI app, Trading Engine, WebSocket handling, API endpoints, and  integration.
+- : The central Zustand store, which is the single source of truth for the frontend application's state.
+- : Manages the WebSocket connection and dispatches incoming data to the Zustand store.
+- : The complex component that displays all information for a single stock and handles user interactions for configuring its trading rules.
+- : The custom input component at the heart of the current bug, responsible for handling both percentage and dollar mode inputs.
+- : The component for the Settings tab, where Telegram and input increments are configured.
+
+**Areas that need refactoring**:
+- The input components in the frontend (, ) are currently being refactored to fix the decimal input bug. This work should be completed and verified.
+
+**key api endpoints**
+- **WebSocket:**  (for real-time updates)
+- **REST API:**
+    - : Add a new ticker.
+    - : Update a ticker's configuration.
+    - : Remove a ticker.
+    - : Start the trading engine.
+    - : Stop the trading engine.
+    - : Pause all trading.
+    - : Resume all trading.
+    - : Move a ticker's P&L to cash reserve.
+    - , : Manage application settings.
+
+**Critical Info for New Agent**
+- **State Persistence is Key:** The bot's core state (, , ) is persisted in the  MongoDB collection. Any server restart will restore the bot to its last known state. This was the fix for the bot not trading bug.
+- **Dollar vs. Percent Mode:** The trading logic and UI inputs behave differently for dollar vs. percent modes.
+    - **Percent Mode:** Values are treated as *offsets* from the average price. Buy/Stop-loss offsets are negative.
+    - **Dollar Mode:** Values are treated as *absolute price targets*. All values are positive. This logic is handled in both  and .
+- **Current Task:** You are in the middle of fixing a bug where decimal points cannot be typed. The approach is to use local string state in the input components and only parse the float value on blur. You must complete and verify this fix.
+
+**documents and test reports created in this job**
+- 
+- 
+-  through 
+
+**Last 10 User Messages and any pending HUMAN messages**
+1.  **User:** Reports the bot isn't buying AAPL even though the price has dropped below the target. (Status: Resolved)
+2.  **Agent:** Investigates and finds the bot state (, ) was not persistent and reset on server restarts. (Status: Resolved)
+3.  **Agent:** Implements state persistence in MongoDB. (Status: Resolved)
+4.  **Agent:** Confirms trades are now firing correctly and provides a screenshot of the live dashboard. (Status: Resolved)
+5.  **Agent:** Runs testing agent, confirming all 89 backend tests pass. (Status: Resolved)
+6.  **Agent:** Calls  to summarize the completed work.
+7.  **User:** Reports a new bug: decimal points () cannot be typed into the number inputs. (Status: In Progress)
+8.  **Agent:** Acknowledges and reproduces the bug, identifying the premature  call as the cause. (Status: In Progress)
+9.  **Agent:** Begins implementing the fix by refactoring input components to use local string state. (Status: In Progress)
+10. **Agent:** Updates  and  and starts verifying the fix. (Status: In Progress)
+
+**Project Health Check:**
+- **Functional:** The application is largely functional and feature-complete according to the primary requirements.
+- **Broken:** The ability to set precise decimal prices/percentages is currently broken due to the input bug. This is the active P0 issue.
+- **Mocked:** Market data is from , which is sufficient for this simulation but is not a real-time, tick-by-tick feed.
+
+**3rd Party Integrations**
+- **yfinance:** Used to fetch stock price data.
+- **python-telegram-bot:** Used to connect to the Telegram Bot API for commands and alerts. No special key management mentioned; the user provides their own keys via the UI.
+
+**Testing status**
+- **Testing agent used after significant changes:** YES. The testing agent was used successfully after every major feature implementation and bug fix cycle.
+- **Troubleshoot agent used after agent stuck in loop:** NO.
+- **Test files created:** None.
+- **Known regressions:** None.
+
+**Credentials to test flow:**
+- No credentials are required. The application runs in an open-access mode. A Telegram Bot Token and Chat ID can be entered in the UI's Settings tab to test Telegram functionality.</analysis>
