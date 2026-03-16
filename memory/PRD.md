@@ -34,6 +34,14 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Steps persist in MongoDB and sync via WebSocket
 - [x] Testing: 49/49 backend, 95% frontend pass
 
+### 2026-03-16 - Decimal Input Bug Fix (P0)
+- [x] Fixed: Users could not type decimal points (.) in number inputs
+- [x] Root cause: premature parseFloat() stripping trailing decimals
+- [x] Implemented useDecimalInput hook with local string state, regex validation, parse on blur
+- [x] Fixed OffsetInput (Buy/Sell/Stop), SteppedInput (Buy Power, Avg Period, Trail %), SettingsTab step inputs
+- [x] All inputs now use type="text" + inputMode="decimal"
+- [x] Testing: 7/7 decimal input tests passed (100%)
+
 ## Prioritized Backlog
 ### P1
 - Live broker connection (Alpaca paper trading)
