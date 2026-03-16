@@ -20,6 +20,10 @@ export interface TickerConfig {
   trailing_order_type: string;
   wait_day_after_buy: boolean;
   compound_profits: boolean;
+  max_daily_loss: number;
+  max_consecutive_losses: number;
+  auto_stopped: boolean;
+  auto_stop_reason: string;
   enabled: boolean;
   strategy: string;
   created_at: string;

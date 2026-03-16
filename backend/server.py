@@ -67,6 +67,10 @@ class TickerConfig(BaseModel):
     trailing_order_type: str = "limit"
     wait_day_after_buy: bool = False
     compound_profits: bool = True
+    max_daily_loss: float = 0  # 0 = disabled, positive $ amount
+    max_consecutive_losses: int = 0  # 0 = disabled
+    auto_stopped: bool = False
+    auto_stop_reason: str = ""
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -93,6 +97,10 @@ class TickerUpdate(BaseModel):
     trailing_order_type: Optional[str] = None
     wait_day_after_buy: Optional[bool] = None
     compound_profits: Optional[bool] = None
+    max_daily_loss: Optional[float] = None
+    max_consecutive_losses: Optional[int] = None
+    auto_stopped: Optional[bool] = None
+    auto_stop_reason: Optional[str] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -289,6 +297,8 @@ class TradingEngine:
         sym = ticker_doc["symbol"]
         if not ticker_doc.get("enabled", False):
             return
+        if ticker_doc.get("auto_stopped", False):
+            return
 
         # Per-symbol cooldown: skip if we traded too recently
         now = datetime.now(timezone.utc)
@@ -439,6 +449,58 @@ class TradingEngine:
             if doc:
                 await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
                 logger.info(f"COMPOUND: {symbol} buy power increased by ${pnl:.2f} to ${doc.get('base_power', 0):.2f}")
+
+        # Check auto-stop conditions on losses
+        if pnl < 0:
+            await self._check_auto_stop(symbol)
+
+    async def _check_auto_stop(self, symbol: str):
+        ticker_doc = await db.tickers.find_one({"symbol": symbol}, {"_id": 0})
+        if not ticker_doc:
+            return
+
+        max_daily = ticker_doc.get("max_daily_loss", 0)
+        max_consec = ticker_doc.get("max_consecutive_losses", 0)
+        reason = ""
+
+        # Check daily loss limit
+        if max_daily > 0:
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            pipeline = [
+                {"$match": {"symbol": symbol, "pnl": {"$lt": 0}, "timestamp": {"$gte": today_start}}},
+                {"$group": {"_id": None, "total_loss": {"$sum": "$pnl"}}}
+            ]
+            result = await db.trades.aggregate(pipeline).to_list(1)
+            if result:
+                daily_loss = abs(result[0]["total_loss"])
+                if daily_loss >= max_daily:
+                    reason = f"Daily loss ${daily_loss:.2f} exceeded limit ${max_daily:.2f}"
+
+        # Check consecutive losses
+        if not reason and max_consec > 0:
+            recent = await db.trades.find(
+                {"symbol": symbol, "side": {"$ne": "BUY"}},
+                {"_id": 0, "pnl": 1}
+            ).sort("timestamp", -1).limit(max_consec).to_list(max_consec)
+            if len(recent) >= max_consec and all(t.get("pnl", 0) < 0 for t in recent):
+                reason = f"{max_consec} consecutive losing trades"
+
+        if reason:
+            await db.tickers.update_one(
+                {"symbol": symbol},
+                {"$set": {"auto_stopped": True, "auto_stop_reason": reason, "enabled": False}}
+            )
+            doc = await db.tickers.find_one({"symbol": symbol}, {"_id": 0})
+            if doc:
+                await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+            logger.warning(f"AUTO-STOP: {symbol} — {reason}")
+            # Telegram alert
+            try:
+                await telegram_service._broadcast_alert(
+                    f"AUTO-STOP {symbol}\n{reason}\nTrading disabled. Manual re-enable required."
+                )
+            except Exception:
+                pass
 
 engine = TradingEngine()
 

@@ -112,7 +112,14 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
               onCheckedChange={() => toggleChart(ticker.symbol)}
               className="h-3.5 w-3.5 data-[state=checked]:bg-accent data-[state=checked]:border-accent"
             />
-            <h3 className="text-lg font-bold tracking-tight text-foreground">{ticker.symbol}</h3>
+            <h3 className={`text-lg font-bold tracking-tight ${
+              ticker.auto_stopped ? 'text-red-500 animate-pulse' : 'text-foreground'
+            }`}>{ticker.symbol}</h3>
+            {ticker.auto_stopped && (
+              <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-500 border border-red-500/40 tracking-wider" data-testid={`auto-stopped-badge-${ticker.symbol}`}>
+                AUTO-STOPPED
+              </span>
+            )}
             <span
               className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
                 isActive
@@ -262,6 +269,50 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                   />
                 </div>
               </div>
+
+              {/* Auto-stop alert banner */}
+              {ticker.auto_stopped && (
+                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30" data-testid={`auto-stop-banner-${ticker.symbol}`}>
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert size={14} className="text-red-500 shrink-0" />
+                    <p className="text-xs text-red-400">
+                      <span className="font-bold">Auto-stopped:</span> {ticker.auto_stop_reason || 'Loss limit reached'}
+                    </p>
+                  </div>
+                  <button
+                    data-testid={`re-enable-${ticker.symbol}`}
+                    onClick={() => {
+                      handleFieldChange('auto_stopped', false);
+                      handleFieldChange('auto_stop_reason', '');
+                      handleFieldChange('enabled', true);
+                    }}
+                    className="text-[10px] font-bold uppercase px-3 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40 transition-colors shrink-0"
+                  >
+                    Re-enable
+                  </button>
+                </div>
+              )}
+
+              {/* Risk Controls */}
+              <ConfigSection title="Risk Controls" icon={ShieldAlert} color="text-orange-400">
+                <SteppedInput
+                  label="Max Daily Loss ($)"
+                  value={ticker.max_daily_loss ?? 0}
+                  onChange={(v) => handleFieldChange('max_daily_loss', v)}
+                  min={0} max={99999}
+                  incrementStep={incrementStep} decrementStep={decrementStep}
+                />
+                <SteppedInput
+                  label="Max Consec. Losses"
+                  value={ticker.max_consecutive_losses ?? 0}
+                  onChange={(v) => handleFieldChange('max_consecutive_losses', Math.round(v))}
+                  min={0} max={100}
+                  incrementStep={1} decrementStep={1}
+                />
+                <div className="col-span-2 text-[9px] text-muted-foreground/60">
+                  Set to 0 to disable. When triggered, ticker is disabled and requires manual re-enable.
+                </div>
+              </ConfigSection>
 
               {/* Buy Rules */}
               <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
