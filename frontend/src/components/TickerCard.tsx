@@ -237,6 +237,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
             <div className="p-4 border-t border-border bg-secondary/20 space-y-4">
               {/* Buy Rules */}
               <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
+                <OrderTypeToggle
+                  value={(ticker.buy_order_type ?? 'limit') as 'limit' | 'market'}
+                  onChange={(v) => handleFieldChange('buy_order_type', v)}
+                  testId={`buy-order-type-${ticker.symbol}`}
+                />
                 <OffsetInput
                   label={ticker.buy_percent ? 'Buy Offset (%)' : 'Buy Price ($)'}
                   value={ticker.buy_offset}
@@ -258,6 +263,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
 
               {/* Sell Rules */}
               <ConfigSection title="Sell Rules" icon={TrendingUp} color="text-blue-400">
+                <OrderTypeToggle
+                  value={(ticker.sell_order_type ?? 'limit') as 'limit' | 'market'}
+                  onChange={(v) => handleFieldChange('sell_order_type', v)}
+                  testId={`sell-order-type-${ticker.symbol}`}
+                />
                 <OffsetInput
                   label={ticker.sell_percent ? 'Sell Offset (%)' : 'Sell Price ($)'}
                   value={ticker.sell_offset}
@@ -273,6 +283,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
 
               {/* Stop Loss */}
               <ConfigSection title="Stop Loss" icon={ShieldAlert} color="text-red-400">
+                <OrderTypeToggle
+                  value={(ticker.stop_order_type ?? 'limit') as 'limit' | 'market'}
+                  onChange={(v) => handleFieldChange('stop_order_type', v)}
+                  testId={`stop-order-type-${ticker.symbol}`}
+                />
                 <OffsetInput
                   label={ticker.stop_percent ? 'Stop Offset (%)' : 'Stop Price ($)'}
                   value={ticker.stop_offset}
@@ -296,6 +311,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                 />
                 {ticker.trailing_enabled && (
                   <>
+                    <OrderTypeToggle
+                      value={(ticker.trailing_order_type ?? 'limit') as 'limit' | 'market'}
+                      onChange={(v) => handleFieldChange('trailing_order_type', v)}
+                      testId={`trailing-order-type-${ticker.symbol}`}
+                    />
                     <SteppedInput
                       label={(ticker.trailing_percent_mode ?? true) ? 'Trail %' : 'Trail $'}
                       value={ticker.trailing_percent}
@@ -419,6 +439,41 @@ function ConfigSection({
         <Icon size={11} /> {title}
       </p>
       <div className="grid grid-cols-2 gap-2">{children}</div>
+    </div>
+  );
+}
+
+function OrderTypeToggle({
+  value, onChange, testId,
+}: {
+  value: 'limit' | 'market'; onChange: (v: string) => void; testId: string;
+}) {
+  return (
+    <div className="col-span-2 flex items-center gap-1 p-0.5 rounded-md bg-secondary/60 border border-border/40" data-testid={testId}>
+      <button
+        type="button"
+        onClick={() => onChange('limit')}
+        className={`flex-1 text-[10px] font-bold uppercase tracking-wider py-1 rounded transition-all ${
+          value === 'limit'
+            ? 'bg-primary/20 text-primary shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+        data-testid={`${testId}-limit`}
+      >
+        Limit
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('market')}
+        className={`flex-1 text-[10px] font-bold uppercase tracking-wider py-1 rounded transition-all ${
+          value === 'market'
+            ? 'bg-amber-400/20 text-amber-400 shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+        data-testid={`${testId}-market`}
+      >
+        Market
+      </button>
     </div>
   );
 }

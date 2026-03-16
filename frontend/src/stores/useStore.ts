@@ -7,13 +7,17 @@ export interface TickerConfig {
   avg_days: number;
   buy_offset: number;
   buy_percent: boolean;
+  buy_order_type: string;
   sell_offset: number;
   sell_percent: boolean;
+  sell_order_type: string;
   stop_offset: number;
   stop_percent: boolean;
+  stop_order_type: string;
   trailing_enabled: boolean;
   trailing_percent: number;
   trailing_percent_mode: boolean;
+  trailing_order_type: string;
   enabled: boolean;
   strategy: string;
   created_at: string;

@@ -54,13 +54,17 @@ class TickerConfig(BaseModel):
     avg_days: int = 30
     buy_offset: float = -3.0
     buy_percent: bool = True
+    buy_order_type: str = "limit"  # "limit" or "market"
     sell_offset: float = 3.0
     sell_percent: bool = True
+    sell_order_type: str = "limit"
     stop_offset: float = -6.0
     stop_percent: bool = True
+    stop_order_type: str = "limit"
     trailing_enabled: bool = False
     trailing_percent: float = 2.0
     trailing_percent_mode: bool = True
+    trailing_order_type: str = "limit"
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -74,13 +78,17 @@ class TickerUpdate(BaseModel):
     avg_days: Optional[int] = None
     buy_offset: Optional[float] = None
     buy_percent: Optional[bool] = None
+    buy_order_type: Optional[str] = None
     sell_offset: Optional[float] = None
     sell_percent: Optional[bool] = None
+    sell_order_type: Optional[str] = None
     stop_offset: Optional[float] = None
     stop_percent: Optional[bool] = None
+    stop_order_type: Optional[str] = None
     trailing_enabled: Optional[bool] = None
     trailing_percent: Optional[float] = None
     trailing_percent_mode: Optional[bool] = None
+    trailing_order_type: Optional[str] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -290,13 +298,17 @@ class TradingEngine:
 
         buy_off = ticker_doc.get("buy_offset", -3.0)
         is_buy_pct = ticker_doc.get("buy_percent", True)
+        buy_otype = ticker_doc.get("buy_order_type", "limit")
         sell_off = ticker_doc.get("sell_offset", 3.0)
         is_sell_pct = ticker_doc.get("sell_percent", True)
+        sell_otype = ticker_doc.get("sell_order_type", "limit")
         stop_off = ticker_doc.get("stop_offset", -6.0)
         is_stop_pct = ticker_doc.get("stop_percent", True)
+        stop_otype = ticker_doc.get("stop_order_type", "limit")
         trailing = ticker_doc.get("trailing_enabled", False)
         trail_pct = ticker_doc.get("trailing_percent", 2.0)
         trail_is_pct = ticker_doc.get("trailing_percent_mode", True)
+        trail_otype = ticker_doc.get("trailing_order_type", "limit")
         base_power = ticker_doc.get("base_power", 100.0)
 
         # Percent mode: offset from average. Dollar mode: ABSOLUTE target price.
@@ -306,16 +318,20 @@ class TradingEngine:
 
         pos = self._positions.get(sym, {"qty": 0, "avg_entry": 0})
 
-        # BUY logic
-        if pos["qty"] == 0 and price <= buy_target:
-            qty = round(base_power / price, 4)
-            if qty > 0:
-                self._positions[sym] = {"qty": qty, "avg_entry": price}
-                trade = TradeRecord(
-                    symbol=sym, side="BUY", price=price, quantity=qty,
-                    reason=f"Price ${price} <= buy target ${buy_target}"
-                )
-                await self._record_trade(trade)
+        # BUY logic: market = buy immediately when no position, limit = buy when price <= target
+        if pos["qty"] == 0:
+            should_buy = (buy_otype == "market") or (price <= buy_target)
+            if should_buy:
+                exec_price = price  # market orders execute at current price
+                qty = round(base_power / exec_price, 4)
+                if qty > 0:
+                    self._positions[sym] = {"qty": qty, "avg_entry": exec_price}
+                    order_label = "MKT" if buy_otype == "market" else "LMT"
+                    trade = TradeRecord(
+                        symbol=sym, side="BUY", price=exec_price, quantity=qty,
+                        reason=f"[{order_label}] Price ${exec_price} {'(market)' if buy_otype == 'market' else f'<= buy target ${buy_target}'}"
+                    )
+                    await self._record_trade(trade)
 
         # SELL / STOP / TRAILING logic
         elif pos["qty"] > 0:
@@ -330,11 +346,14 @@ class TradingEngine:
                     trail_stop = round(high * (1 - trail_pct / 100), 2)
                 else:
                     trail_stop = round(high - trail_pct, 2)
-                if price <= trail_stop:
-                    pnl = round((price - entry) * pos["qty"], 2)
+                should_trail = (trail_otype == "market") or (price <= trail_stop)
+                if should_trail:
+                    exec_price = price
+                    pnl = round((exec_price - entry) * pos["qty"], 2)
+                    order_label = "MKT" if trail_otype == "market" else "LMT"
                     trade = TradeRecord(
-                        symbol=sym, side="TRAILING_STOP", price=price,
-                        quantity=pos["qty"], reason=f"Trailing stop hit ${trail_stop} (high ${high})", pnl=pnl
+                        symbol=sym, side="TRAILING_STOP", price=exec_price,
+                        quantity=pos["qty"], reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})", pnl=pnl
                     )
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -342,27 +361,34 @@ class TradingEngine:
                     await self._update_profit(sym, pnl)
                     return
 
-            if price >= sell_target:
-                pnl = round((price - entry) * pos["qty"], 2)
+            should_sell = (sell_otype == "market") or (price >= sell_target)
+            if should_sell:
+                exec_price = price
+                pnl = round((exec_price - entry) * pos["qty"], 2)
+                order_label = "MKT" if sell_otype == "market" else "LMT"
                 trade = TradeRecord(
-                    symbol=sym, side="SELL", price=price, quantity=pos["qty"],
-                    reason=f"Price ${price} >= sell target ${sell_target}", pnl=pnl
+                    symbol=sym, side="SELL", price=exec_price, quantity=pos["qty"],
+                    reason=f"[{order_label}] Price ${exec_price} {'(market)' if sell_otype == 'market' else f'>= sell target ${sell_target}'}", pnl=pnl
                 )
                 await self._record_trade(trade)
                 self._positions[sym] = {"qty": 0, "avg_entry": 0}
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl)
 
-            elif price <= stop_target:
-                pnl = round((price - entry) * pos["qty"], 2)
-                trade = TradeRecord(
-                    symbol=sym, side="STOP", price=price, quantity=pos["qty"],
-                    reason=f"Stop-loss hit ${price} <= ${stop_target}", pnl=pnl
-                )
-                await self._record_trade(trade)
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
-                self._trailing_highs.pop(sym, None)
-                await self._update_profit(sym, pnl)
+            elif price <= stop_target or stop_otype == "market":
+                should_stop = (stop_otype == "market") or (price <= stop_target)
+                if should_stop:
+                    exec_price = price
+                    pnl = round((exec_price - entry) * pos["qty"], 2)
+                    order_label = "MKT" if stop_otype == "market" else "LMT"
+                    trade = TradeRecord(
+                        symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
+                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${stop_target}'}", pnl=pnl
+                    )
+                    await self._record_trade(trade)
+                    self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                    self._trailing_highs.pop(sym, None)
+                    await self._update_profit(sym, pnl)
 
     async def _record_trade(self, trade: TradeRecord):
         doc = trade.model_dump()
@@ -859,13 +885,17 @@ async def apply_strategy(symbol: str, preset: str):
         "avg_days": current_doc.get("avg_days"),
         "buy_offset": current_doc.get("buy_offset"),
         "buy_percent": current_doc.get("buy_percent"),
+        "buy_order_type": current_doc.get("buy_order_type", "limit"),
         "sell_offset": current_doc.get("sell_offset"),
         "sell_percent": current_doc.get("sell_percent"),
+        "sell_order_type": current_doc.get("sell_order_type", "limit"),
         "stop_offset": current_doc.get("stop_offset"),
         "stop_percent": current_doc.get("stop_percent"),
+        "stop_order_type": current_doc.get("stop_order_type", "limit"),
         "trailing_enabled": current_doc.get("trailing_enabled"),
         "trailing_percent": current_doc.get("trailing_percent"),
         "trailing_percent_mode": current_doc.get("trailing_percent_mode", True),
+        "trailing_order_type": current_doc.get("trailing_order_type", "limit"),
     }
     updates = strategy.model_dump()
     updates.pop("name")
@@ -1178,13 +1208,17 @@ async def ws_endpoint(websocket: WebSocket):
                         "avg_days": current_doc.get("avg_days"),
                         "buy_offset": current_doc.get("buy_offset"),
                         "buy_percent": current_doc.get("buy_percent"),
+                        "buy_order_type": current_doc.get("buy_order_type", "limit"),
                         "sell_offset": current_doc.get("sell_offset"),
                         "sell_percent": current_doc.get("sell_percent"),
+                        "sell_order_type": current_doc.get("sell_order_type", "limit"),
                         "stop_offset": current_doc.get("stop_offset"),
                         "stop_percent": current_doc.get("stop_percent"),
+                        "stop_order_type": current_doc.get("stop_order_type", "limit"),
                         "trailing_enabled": current_doc.get("trailing_enabled"),
                         "trailing_percent": current_doc.get("trailing_percent"),
                         "trailing_percent_mode": current_doc.get("trailing_percent_mode", True),
+                        "trailing_order_type": current_doc.get("trailing_order_type", "limit"),
                     }
                     updates = strategy.model_dump()
                     updates.pop("name")
