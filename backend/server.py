@@ -65,6 +65,7 @@ class TickerConfig(BaseModel):
     trailing_percent: float = 2.0
     trailing_percent_mode: bool = True
     trailing_order_type: str = "limit"
+    wait_day_after_buy: bool = False
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -89,6 +90,7 @@ class TickerUpdate(BaseModel):
     trailing_percent: Optional[float] = None
     trailing_percent_mode: Optional[bool] = None
     trailing_order_type: Optional[str] = None
+    wait_day_after_buy: Optional[bool] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -336,6 +338,20 @@ class TradingEngine:
         # SELL / STOP / TRAILING logic
         elif pos["qty"] > 0:
             entry = pos["avg_entry"]
+
+            # Wait-a-day guard: skip sell logic if last buy was today
+            wait_day = ticker_doc.get("wait_day_after_buy", False)
+            if wait_day:
+                last_buy = await db.trades.find_one(
+                    {"symbol": sym, "side": "BUY"},
+                    {"_id": 0, "timestamp": 1},
+                    sort=[("timestamp", -1)]
+                )
+                if last_buy:
+                    buy_date = datetime.fromisoformat(last_buy["timestamp"]).date()
+                    today = datetime.now(timezone.utc).date()
+                    if buy_date >= today:
+                        return  # skip all sell logic until next trading day
 
             if trailing:
                 high = self._trailing_highs.get(sym, price)

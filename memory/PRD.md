@@ -56,6 +56,15 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
 - [x] Backward compatible: existing tickers default to percent mode
 
+### 2026-03-16 - Limit/Market Order Types + Wait-a-Day Toggle
+- [x] Added LIMIT/MARKET toggle for each rule section: Buy, Sell, Stop Loss, Trailing Stop
+- [x] Market orders execute immediately at current price; Limit orders use price targets
+- [x] Trade reasons labeled [MKT] or [LMT] in history
+- [x] Added "Wait 1 day before selling" checkbox in top-right of expanded card config
+- [x] When enabled, skips all sell/stop/trailing logic until the next trading day after a buy
+- [x] All fields persist in MongoDB, included in preset strategy backup/restore
+- [x] Testing: Backend API verified, frontend UI verified
+
 ### 2026-03-16 - Live Price Chart + Preset Strategy Toggle
 - [x] Live chart: checkbox next to ticker name toggles embedded Recharts LineChart
 - [x] Card expands to col-span-2 when chart enabled, pushing other cards below
