@@ -9,6 +9,7 @@ import { SettingsTab } from './tabs/SettingsTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
 import { CommandPalette } from './CommandPalette';
 import { LayoutDashboard, Crosshair, History, ScrollText, Settings } from 'lucide-react';
+import { ErrorBoundary } from './ErrorBoundary';
 
 const TABS = [
   { id: 'watchlist', label: 'Watchlist', icon: LayoutDashboard },
@@ -57,11 +58,13 @@ export function Dashboard() {
 
           {/* Tab content */}
           <div className="flex-1 overflow-auto p-6" data-testid="tab-content">
-            {activeTab === 'watchlist' && <WatchlistTab />}
-            {activeTab === 'positions' && <PositionsTab />}
-            {activeTab === 'history' && <HistoryTab />}
-            {activeTab === 'logs' && <LogsTab />}
-            {activeTab === 'settings' && <SettingsTab />}
+            <ErrorBoundary fallbackLabel="Tab failed to render">
+              {activeTab === 'watchlist' && <WatchlistTab />}
+              {activeTab === 'positions' && <PositionsTab />}
+              {activeTab === 'history' && <HistoryTab />}
+              {activeTab === 'logs' && <LogsTab />}
+              {activeTab === 'settings' && <SettingsTab />}
+            </ErrorBoundary>
           </div>
         </div>
 

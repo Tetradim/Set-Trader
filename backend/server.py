@@ -372,10 +372,13 @@ async def price_broadcast_loop():
                 for sym, pos in engine._positions.items():
                     if pos["qty"] > 0:
                         cp = prices.get(sym, 0)
+                        mv = round(cp * pos["qty"], 2)
                         positions[sym] = {
+                            "symbol": sym,
                             "quantity": pos["qty"],
                             "avg_entry": pos["avg_entry"],
                             "current_price": cp,
+                            "market_value": mv,
                             "unrealized_pnl": round((cp - pos["avg_entry"]) * pos["qty"], 2)
                         }
 
