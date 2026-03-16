@@ -56,6 +56,15 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
 - [x] Backward compatible: existing tickers default to percent mode
 
+### 2026-03-16 - Live Price Chart + Preset Strategy Toggle
+- [x] Live chart: checkbox next to ticker name toggles embedded Recharts LineChart
+- [x] Card expands to col-span-2 when chart enabled, pushing other cards below
+- [x] Chart shows rolling price history (~120 pts) + trailing stop dashed line (amber)
+- [x] Price data accumulated from WebSocket PRICE_UPDATE in Zustand store
+- [x] Preset strategy toggle: clicking active preset restores custom_backup from MongoDB
+- [x] Custom config saved before applying preset, restored on deactivation
+- [x] Testing: 8/8 backend + 100% frontend
+
 ## Prioritized Backlog
 ### P1
 - Live broker connection (Alpaca paper trading)
