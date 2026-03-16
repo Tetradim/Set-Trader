@@ -74,6 +74,10 @@ class BracketBotAPITester:
             self.log_result("Health - Status Field", "status" in data, f"Status: {data.get('status', 'missing')}")
             self.log_result("Health - Running Field", "running" in data, f"Running: {data.get('running', 'missing')}")
             self.log_result("Health - Market Open Field", "market_open" in data, f"Market Open: {data.get('market_open', 'missing')}")
+            # NEW: Test telegram field in health endpoint
+            self.log_result("Health - Telegram Field", "telegram" in data, f"Telegram: {data.get('telegram', 'missing')}")
+            telegram_value = data.get('telegram')
+            self.log_result("Health - Telegram Boolean", isinstance(telegram_value, bool), f"Telegram type: {type(telegram_value)}")
         return success
 
     def test_tickers_crud(self):
@@ -171,13 +175,36 @@ class BracketBotAPITester:
             expected_fields = ["simulate_24_7", "telegram"]
             missing_fields = [field for field in expected_fields if field not in data]
             self.log_result("Settings - Required Fields", len(missing_fields) == 0, f"Missing: {missing_fields}")
+            
+            # NEW: Test telegram_connected field
+            self.log_result("Settings - Telegram Connected Field", "telegram_connected" in data, f"Telegram Connected: {data.get('telegram_connected', 'missing')}")
+            telegram_connected = data.get('telegram_connected')
+            self.log_result("Settings - Telegram Connected Boolean", isinstance(telegram_connected, bool), f"Type: {type(telegram_connected)}")
 
-        # Test update settings
+        # Test update settings with telegram config
         settings_update = {
-            "telegram": {"bot_token": "test_token", "chat_ids": ["123456"]},
+            "telegram": {"bot_token": "test_token_fake", "chat_ids": ["123456789"]},
             "simulate_24_7": True
         }
-        success, _ = self.run_test("Update Settings", "POST", "/settings", 200, settings_update)
+        success, response_data = self.run_test("Update Settings", "POST", "/settings", 200, settings_update)
+        if success and response_data:
+            # NEW: Test telegram_running status in response
+            self.log_result("Settings Update - Telegram Running Field", "telegram_running" in response_data, f"Telegram Running: {response_data.get('telegram_running', 'missing')}")
+        
+        return True
+
+    def test_telegram_endpoints(self):
+        """Test Telegram-specific endpoints"""
+        print("\n🔍 Testing Telegram Endpoints...")
+        
+        # Test telegram test endpoint when bot not connected
+        # This should return 400 because no real token is configured
+        success, data = self.run_test("Telegram Test (No Connection)", "POST", "/settings/telegram/test", 400)
+        if not success:
+            # If it didn't return 400, check if it returned some other error indicating not connected
+            _, actual_response = self.run_test("Telegram Test Check Response", "POST", "/settings/telegram/test", expected_status=None)
+            # The test should fail with 400, so if it passes, that's wrong too
+            self.log_result("Telegram Test - Correct Error Response", False, "Expected 400 status when bot not connected")
         
         return True
 
@@ -195,6 +222,7 @@ class BracketBotAPITester:
         self.test_trades_endpoint()
         self.test_bot_control()
         self.test_settings_endpoints()
+        self.test_telegram_endpoints()  # NEW: Test Telegram-specific endpoints
 
         # Print final results
         print("\n" + "=" * 60)

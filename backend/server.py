@@ -4,6 +4,7 @@ import os
 import logging
 import random
 import uuid
+import signal
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,14 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ConfigDict
+
+# Telegram
+try:
+    from telegram import Bot, Update
+    from telegram.ext import Application, CommandHandler, ContextTypes
+    TG_AVAILABLE = True
+except ImportError:
+    TG_AVAILABLE = False
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -318,10 +327,13 @@ class TradingEngine:
         doc = trade.model_dump()
         await db.trades.insert_one(doc)
         logger.info(f"TRADE: {trade.side} {trade.symbol} @ ${trade.price} x{trade.quantity}")
-        await ws_manager.broadcast({
-            "type": "TRADE",
-            "trade": {k: v for k, v in doc.items() if k != "_id"}
-        })
+        clean = {k: v for k, v in doc.items() if k != "_id"}
+        await ws_manager.broadcast({"type": "TRADE", "trade": clean})
+        # Telegram alert
+        try:
+            await telegram_service.send_trade_alert(clean)
+        except Exception:
+            pass
 
     async def _update_profit(self, symbol: str, pnl: float):
         await db.profits.update_one(
@@ -332,6 +344,258 @@ class TradingEngine:
         )
 
 engine = TradingEngine()
+
+
+# --- TELEGRAM SERVICE ---
+class TelegramService:
+    """Manages the Telegram bot lifecycle: polling, commands, alerts."""
+
+    def __init__(self):
+        self._app: Optional[Any] = None
+        self._task: Optional[asyncio.Task] = None
+        self.running = False
+        self.bot_token = ""
+        self.chat_ids: List[str] = []
+
+    # ---- lifecycle ----
+
+    async def start(self, token: str, chat_ids: List[str]):
+        """Start (or restart) the Telegram bot with a new token."""
+        await self.stop()
+        if not TG_AVAILABLE or not token:
+            logger.info("Telegram: skipping start (no library or no token)")
+            return
+        self.bot_token = token
+        self.chat_ids = chat_ids
+        try:
+            self._app = (
+                Application.builder()
+                .token(token)
+                .build()
+            )
+            self._register_handlers()
+            await self._app.initialize()
+            await self._app.start()
+            await self._app.updater.start_polling(drop_pending_updates=True)
+            self.running = True
+            logger.info("Telegram bot started (polling)")
+            await self._broadcast_alert("BracketBot is now ONLINE and connected to Telegram.")
+        except Exception as e:
+            logger.error(f"Telegram start error: {e}")
+            self.running = False
+
+    async def stop(self):
+        """Gracefully shut down the bot and notify chat IDs."""
+        if self._app and self.running:
+            try:
+                await self._broadcast_alert("BracketBot is going OFFLINE. You will be notified when it restarts.")
+            except Exception:
+                pass
+            try:
+                await self._app.updater.stop()
+                await self._app.stop()
+                await self._app.shutdown()
+            except Exception as e:
+                logger.warning(f"Telegram stop error: {e}")
+            self.running = False
+            self._app = None
+
+    async def reload_from_db(self):
+        """Load config from MongoDB and start if a token is present."""
+        doc = await db.settings.find_one({"key": "telegram"}, {"_id": 0})
+        if doc and doc.get("value"):
+            token = doc["value"].get("bot_token", "")
+            ids = doc["value"].get("chat_ids", [])
+            if token:
+                await self.start(token, ids)
+
+    # ---- alert helpers ----
+
+    async def _broadcast_alert(self, text: str):
+        """Send a message to every registered chat_id."""
+        if not self._app or not self.chat_ids:
+            return
+        bot = self._app.bot
+        for cid in self.chat_ids:
+            try:
+                await bot.send_message(chat_id=int(cid), text=f"[BracketBot] {text}")
+            except Exception as e:
+                logger.warning(f"Telegram send to {cid} failed: {e}")
+
+    async def send_trade_alert(self, trade: dict):
+        """Push a trade notification to all chats."""
+        side = trade.get("side", "?")
+        sym = trade.get("symbol", "?")
+        price = trade.get("price", 0)
+        qty = trade.get("quantity", 0)
+        pnl = trade.get("pnl", 0)
+        reason = trade.get("reason", "")
+        pnl_str = f"  P&L: {'+'if pnl>=0 else ''}{pnl:.2f}" if pnl != 0 else ""
+        msg = f"TRADE  {side} {sym}\nPrice: ${price:.2f}  Qty: {qty:.4f}{pnl_str}\n{reason}"
+        await self._broadcast_alert(msg)
+
+    # ---- command handlers ----
+
+    def _register_handlers(self):
+        app = self._app
+        app.add_handler(CommandHandler("pause", self._cmd_pause))
+        app.add_handler(CommandHandler("resume", self._cmd_resume))
+        app.add_handler(CommandHandler("start", self._cmd_start_bot))
+        app.add_handler(CommandHandler("stop", self._cmd_stop_bot))
+        app.add_handler(CommandHandler("status", self._cmd_status))
+        app.add_handler(CommandHandler("portfolio", self._cmd_portfolio))
+        app.add_handler(CommandHandler("new", self._cmd_new))
+        app.add_handler(CommandHandler("cancel", self._cmd_cancel))
+        app.add_handler(CommandHandler("cancelall", self._cmd_cancelall))
+        app.add_handler(CommandHandler("history", self._cmd_history))
+        app.add_handler(CommandHandler("help", self._cmd_help))
+
+    def _authorised(self, update: Update) -> bool:
+        cid = str(update.effective_chat.id)
+        if not self.chat_ids:
+            return True
+        return cid in self.chat_ids
+
+    async def _cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        engine.paused = True
+        await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": True})
+        await update.message.reply_text("All trading PAUSED.")
+        await self._broadcast_alert("Trading has been PAUSED via Telegram command.")
+
+    async def _cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        engine.paused = False
+        await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": False})
+        await update.message.reply_text("Trading RESUMED.")
+        await self._broadcast_alert("Trading has been RESUMED via Telegram command.")
+
+    async def _cmd_start_bot(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        engine.running = True
+        await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": engine.paused})
+        await update.message.reply_text("Bot engine STARTED.")
+
+    async def _cmd_stop_bot(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        engine.running = False
+        await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": engine.paused})
+        await update.message.reply_text("Bot engine STOPPED.")
+
+    async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        tickers = await db.tickers.find({}, {"_id": 0}).to_list(100)
+        active = sum(1 for t in tickers if t.get("enabled"))
+        profits_cursor = db.profits.find({}, {"_id": 0})
+        profits_list = await profits_cursor.to_list(100)
+        total_pnl = sum(p.get("total_pnl", 0) for p in profits_list)
+        lines = [
+            f"Running: {'YES' if engine.running else 'NO'}",
+            f"Paused: {'YES' if engine.paused else 'NO'}",
+            f"Market: {'OPEN' if engine.is_market_open() else 'CLOSED'}",
+            f"Tickers: {active}/{len(tickers)} active",
+            f"Total P&L: ${total_pnl:.2f}",
+        ]
+        await update.message.reply_text("\n".join(lines))
+
+    async def _cmd_portfolio(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        profits_cursor = db.profits.find({}, {"_id": 0})
+        profits_list = await profits_cursor.to_list(100)
+        if not profits_list:
+            return await update.message.reply_text("No profit data yet.")
+        lines = ["Symbol | P&L"]
+        total = 0
+        for p in profits_list:
+            pnl = p.get("total_pnl", 0)
+            total += pnl
+            lines.append(f"{p['symbol']}: {'+'if pnl>=0 else ''}{pnl:.2f}")
+        lines.append(f"\nTotal: {'+'if total>=0 else ''}{total:.2f}")
+        await update.message.reply_text("\n".join(lines))
+
+    async def _cmd_new(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        parts = (update.message.text or "").split()
+        if len(parts) < 2:
+            return await update.message.reply_text("Usage: /new SYMBOL [POWER]\nExample: /new MSFT 200")
+        sym = parts[1].upper().strip()
+        power = float(parts[2]) if len(parts) >= 3 else 100.0
+        existing = await db.tickers.find_one({"symbol": sym})
+        if existing:
+            return await update.message.reply_text(f"{sym} already exists.")
+        t = TickerConfig(symbol=sym, base_power=power)
+        doc = t.model_dump()
+        await db.tickers.insert_one(doc)
+        doc.pop("_id", None)
+        await ws_manager.broadcast({"type": "TICKER_ADDED", "ticker": doc})
+        await update.message.reply_text(f"Added {sym} with ${power:.0f} buy power.")
+
+    async def _cmd_cancel(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        parts = (update.message.text or "").split()
+        if len(parts) < 2:
+            return await update.message.reply_text("Usage: /cancel SYMBOL")
+        sym = parts[1].upper()
+        result = await db.tickers.update_one({"symbol": sym}, {"$set": {"enabled": False}})
+        if result.matched_count == 0:
+            return await update.message.reply_text(f"{sym} not found.")
+        engine._positions.pop(sym, None)
+        engine._trailing_highs.pop(sym, None)
+        doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if doc:
+            await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+        await update.message.reply_text(f"{sym} disabled and orders cancelled.")
+
+    async def _cmd_cancelall(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        await db.tickers.update_many({}, {"$set": {"enabled": False}})
+        engine._positions.clear()
+        engine._trailing_highs.clear()
+        tickers = await db.tickers.find({}, {"_id": 0}).to_list(100)
+        for t in tickers:
+            await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": t})
+        await update.message.reply_text("All tickers disabled and orders cancelled.")
+
+    async def _cmd_history(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        trades = await db.trades.find({}, {"_id": 0}).sort("timestamp", -1).to_list(10)
+        if not trades:
+            return await update.message.reply_text("No trade history.")
+        lines = ["Recent Trades:"]
+        for t in trades:
+            pnl_str = f" P&L:{t.get('pnl',0):+.2f}" if t.get("pnl", 0) != 0 else ""
+            lines.append(f"{t['side']} {t['symbol']} @${t['price']:.2f} x{t['quantity']:.4f}{pnl_str}")
+        await update.message.reply_text("\n".join(lines))
+
+    async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        text = (
+            "BracketBot Commands:\n"
+            "/pause   - Pause all trading\n"
+            "/resume  - Resume trading\n"
+            "/start   - Start trading engine\n"
+            "/stop    - Stop trading engine\n"
+            "/status  - Bot status overview\n"
+            "/portfolio - P&L by symbol\n"
+            "/new SYMBOL [POWER] - Add ticker\n"
+            "/cancel SYMBOL - Disable ticker\n"
+            "/cancelall - Disable all tickers\n"
+            "/history - Recent 10 trades\n"
+            "/help    - This message"
+        )
+        await update.message.reply_text(text)
+
+
+telegram_service = TelegramService()
 
 
 # --- PRESET STRATEGIES ---
@@ -428,8 +692,18 @@ async def lifespan(app: FastAPI):
             )
     asyncio.create_task(price_broadcast_loop())
     asyncio.create_task(trading_loop())
+    # Start Telegram if token exists in DB
+    try:
+        await telegram_service.reload_from_db()
+    except Exception as e:
+        logger.warning(f"Telegram auto-start failed: {e}")
     logger.info("BracketBot Engine started")
     yield
+    # Shutdown: send offline alert then close
+    try:
+        await telegram_service.stop()
+    except Exception:
+        pass
     mongo_client.close()
 
 
@@ -455,6 +729,7 @@ async def health():
         "paused": engine.paused,
         "market_open": engine.is_market_open(),
         "yfinance": YF_AVAILABLE,
+        "telegram": telegram_service.running,
         "ws_clients": len(ws_manager.active),
     }
 
@@ -613,7 +888,15 @@ async def update_settings(body: SettingsUpdate):
         await db.settings.update_one(
             {"key": "telegram"}, {"$set": {"value": doc}}, upsert=True
         )
-    return {"ok": True}
+        # (Re)start or stop Telegram bot based on new token
+        if doc.get("bot_token"):
+            try:
+                await telegram_service.start(doc["bot_token"], doc.get("chat_ids", []))
+            except Exception as e:
+                logger.error(f"Telegram start failed: {e}")
+        else:
+            await telegram_service.stop()
+    return {"ok": True, "telegram_running": telegram_service.running}
 
 @api.get("/settings")
 async def get_settings():
@@ -621,7 +904,16 @@ async def get_settings():
     return {
         "simulate_24_7": engine.simulate_24_7,
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
+        "telegram_connected": telegram_service.running,
     }
+
+@api.post("/settings/telegram/test")
+async def test_telegram():
+    """Send a test alert to all registered chat IDs."""
+    if not telegram_service.running:
+        raise HTTPException(400, "Telegram bot is not connected. Save a valid token first.")
+    await telegram_service._broadcast_alert("Test alert from BracketBot! Connection verified.")
+    return {"ok": True, "sent_to": telegram_service.chat_ids}
 
 # --- WEBSOCKET ---
 @api.websocket("/ws")
