@@ -85,6 +85,16 @@ interface BotState {
   telegramToken: string;
   telegramChatIds: string[];
   setTelegramConfig: (token: string, chatIds: string[]) => void;
+
+  // Cash reserve from Take Profit
+  cashReserve: number;
+  setCashReserve: (v: number) => void;
+
+  // Custom step increments
+  incrementStep: number;
+  decrementStep: number;
+  setIncrementStep: (v: number) => void;
+  setDecrementStep: (v: number) => void;
 }
 
 export const useStore = create<BotState>((set) => ({
@@ -139,4 +149,12 @@ export const useStore = create<BotState>((set) => ({
   telegramToken: '',
   telegramChatIds: [],
   setTelegramConfig: (telegramToken, telegramChatIds) => set({ telegramToken, telegramChatIds }),
+
+  cashReserve: 0,
+  setCashReserve: (cashReserve) => set({ cashReserve }),
+
+  incrementStep: 0.5,
+  decrementStep: 0.5,
+  setIncrementStep: (incrementStep) => set({ incrementStep }),
+  setDecrementStep: (decrementStep) => set({ decrementStep }),
 }));

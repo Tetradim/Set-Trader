@@ -13,6 +13,9 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  SlidersHorizontal,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -23,6 +26,8 @@ export function SettingsTab() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [tgConnected, setTgConnected] = useState(false);
+  const [incStep, setIncStep] = useState(0.5);
+  const [decStep, setDecStep] = useState(0.5);
 
   useEffect(() => {
     apiFetch('/api/settings')
@@ -30,7 +35,11 @@ export function SettingsTab() {
         setToken(data.telegram?.bot_token || '');
         setChatIds(data.telegram?.chat_ids || []);
         setTgConnected(data.telegram_connected || false);
+        setIncStep(data.increment_step ?? 0.5);
+        setDecStep(data.decrement_step ?? 0.5);
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
+        useStore.getState().setIncrementStep(data.increment_step ?? 0.5);
+        useStore.getState().setDecrementStep(data.decrement_step ?? 0.5);
       })
       .catch(() => {});
   }, []);
@@ -43,8 +52,13 @@ export function SettingsTab() {
         body: JSON.stringify({
           telegram: { bot_token: token, chat_ids: chatIds },
           simulate_24_7: useStore.getState().simulate247,
+          increment_step: incStep,
+          decrement_step: decStep,
         }),
       });
+      // Update store with new step values
+      useStore.getState().setIncrementStep(incStep);
+      useStore.getState().setDecrementStep(decStep);
       setTgConnected(res.telegram_running || false);
       if (res.telegram_running) {
         toast.success('Settings saved. Telegram bot connected!');
@@ -86,6 +100,61 @@ export function SettingsTab() {
 
   return (
     <div className="max-w-2xl space-y-8" data-testid="settings-tab">
+      {/* Input Increment/Decrement Steps */}
+      <section className="glass rounded-xl border border-border p-6 space-y-5">
+        <div className="flex items-center gap-2 mb-2">
+          <SlidersHorizontal size={18} className="text-accent" />
+          <h3 className="text-sm font-bold text-foreground">Arrow Step Sizes</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Customize how much the up/down arrows on ticker card inputs change values.
+          Set different amounts for increasing vs decreasing.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
+              <ArrowUp size={10} className="text-emerald-400" /> Increase Step
+            </label>
+            <input
+              data-testid="increment-step-input"
+              type="number"
+              min={0.01}
+              step={0.01}
+              value={incStep}
+              onChange={(e) => setIncStep(Number(e.target.value))}
+              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
+            />
+            <p className="text-[10px] text-muted-foreground/60 mt-1">
+              e.g. 0.05 means each up-arrow click adds 0.05
+            </p>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
+              <ArrowDown size={10} className="text-red-400" /> Decrease Step
+            </label>
+            <input
+              data-testid="decrement-step-input"
+              type="number"
+              min={0.01}
+              step={0.01}
+              value={decStep}
+              onChange={(e) => setDecStep(Number(e.target.value))}
+              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
+            />
+            <p className="text-[10px] text-muted-foreground/60 mt-1">
+              e.g. 0.10 means each down-arrow click subtracts 0.10
+            </p>
+          </div>
+        </div>
+        <div className="rounded-lg bg-secondary/50 border border-border p-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-mono text-primary">{incStep}</span>
+          <ArrowUp size={10} className="text-emerald-400" /> /
+          <span className="font-mono text-primary">{decStep}</span>
+          <ArrowDown size={10} className="text-red-400" />
+          <span>applies to all ticker card number inputs</span>
+        </div>
+      </section>
+
       {/* Telegram Integration */}
       <section className="glass rounded-xl border border-border p-6 space-y-5">
         <div className="flex items-center justify-between mb-2">

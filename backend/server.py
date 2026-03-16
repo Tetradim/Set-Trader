@@ -108,6 +108,8 @@ class TelegramConfig(BaseModel):
 class SettingsUpdate(BaseModel):
     telegram: Optional[TelegramConfig] = None
     simulate_24_7: Optional[bool] = None
+    increment_step: Optional[float] = None
+    decrement_step: Optional[float] = None
 
 class PresetStrategy(BaseModel):
     name: str
@@ -650,11 +652,15 @@ async def price_broadcast_loop():
                 profits_list = await profits_cursor.to_list(100)
                 profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
 
+                cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+                cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
+
                 await ws_manager.broadcast({
                     "type": "PRICE_UPDATE",
                     "prices": prices,
                     "positions": positions,
                     "profits": profits,
+                    "cash_reserve": cash_reserve,
                     "paused": engine.paused,
                     "running": engine.running,
                     "market_open": engine.is_market_open(),
@@ -879,10 +885,65 @@ async def pause_bot():
     await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": engine.paused})
     return {"paused": engine.paused}
 
+# Take Profit: zero out P&L for a symbol, move to cash reserve
+@api.post("/tickers/{symbol}/take-profit")
+async def take_profit(symbol: str):
+    sym = symbol.upper()
+    profit_doc = await db.profits.find_one({"symbol": sym}, {"_id": 0})
+    if not profit_doc or profit_doc.get("total_pnl", 0) <= 0:
+        raise HTTPException(400, f"No positive profit to take for {sym}")
+    amount = profit_doc.get("total_pnl", 0)
+    # Record the cash withdrawal
+    await db.cash_ledger.insert_one({
+        "symbol": sym,
+        "amount": amount,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "type": "TAKE_PROFIT",
+    })
+    # Accumulate total cash
+    await db.settings.update_one(
+        {"key": "cash_reserve"},
+        {"$inc": {"value": amount}},
+        upsert=True,
+    )
+    # Zero out the symbol's profit
+    await db.profits.update_one(
+        {"symbol": sym},
+        {"$set": {"total_pnl": 0, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    logger.info(f"TAKE PROFIT: {sym} ${amount:.2f} moved to cash reserve")
+    # Broadcast updated profits
+    profits_cursor = db.profits.find({}, {"_id": 0})
+    profits_list = await profits_cursor.to_list(100)
+    profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
+    cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+    cash_total = cash_doc.get("value", 0) if cash_doc else 0
+    await ws_manager.broadcast({
+        "type": "PROFITS_UPDATE",
+        "profits": profits,
+        "cash_reserve": round(cash_total, 2),
+    })
+    return {"taken": round(amount, 2), "symbol": sym, "cash_reserve": round(cash_total, 2)}
+
+@api.get("/cash-reserve")
+async def get_cash_reserve():
+    cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+    cash_total = cash_doc.get("value", 0) if cash_doc else 0
+    ledger = await db.cash_ledger.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    return {"total": round(cash_total, 2), "ledger": ledger}
+
 @api.post("/settings")
 async def update_settings(body: SettingsUpdate):
     if body.simulate_24_7 is not None:
         engine.simulate_24_7 = body.simulate_24_7
+    if body.increment_step is not None:
+        await db.settings.update_one(
+            {"key": "increment_step"}, {"$set": {"value": body.increment_step}}, upsert=True
+        )
+    if body.decrement_step is not None:
+        await db.settings.update_one(
+            {"key": "decrement_step"}, {"$set": {"value": body.decrement_step}}, upsert=True
+        )
     if body.telegram:
         doc = body.telegram.model_dump()
         await db.settings.update_one(
@@ -901,10 +962,16 @@ async def update_settings(body: SettingsUpdate):
 @api.get("/settings")
 async def get_settings():
     tg = await db.settings.find_one({"key": "telegram"}, {"_id": 0})
+    inc_doc = await db.settings.find_one({"key": "increment_step"}, {"_id": 0})
+    dec_doc = await db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
+    cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
     return {
         "simulate_24_7": engine.simulate_24_7,
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": telegram_service.running,
+        "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
+        "decrement_step": dec_doc.get("value", 0.5) if dec_doc else 0.5,
+        "cash_reserve": round(cash_doc.get("value", 0), 2) if cash_doc else 0,
     }
 
 @api.post("/settings/telegram/test")
@@ -929,11 +996,20 @@ async def ws_endpoint(websocket: WebSocket):
         profits_list = await profits_cursor.to_list(100)
         profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
 
+        cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+        cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
+
+        inc_doc = await db.settings.find_one({"key": "increment_step"}, {"_id": 0})
+        dec_doc = await db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
+
         await websocket.send_json({
             "type": "INITIAL_STATE",
             "tickers": tickers,
             "prices": prices,
             "profits": profits,
+            "cash_reserve": cash_reserve,
+            "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
+            "decrement_step": dec_doc.get("value", 0.5) if dec_doc else 0.5,
             "paused": engine.paused,
             "running": engine.running,
             "market_open": engine.is_market_open(),
@@ -995,6 +1071,34 @@ async def ws_endpoint(websocket: WebSocket):
                     doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:
                         await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+
+            elif action == "TAKE_PROFIT":
+                sym = msg.get("symbol", "").upper()
+                profit_doc = await db.profits.find_one({"symbol": sym}, {"_id": 0})
+                if profit_doc and profit_doc.get("total_pnl", 0) > 0:
+                    amount = profit_doc["total_pnl"]
+                    await db.cash_ledger.insert_one({
+                        "symbol": sym, "amount": amount,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "type": "TAKE_PROFIT",
+                    })
+                    await db.settings.update_one(
+                        {"key": "cash_reserve"}, {"$inc": {"value": amount}}, upsert=True
+                    )
+                    await db.profits.update_one(
+                        {"symbol": sym},
+                        {"$set": {"total_pnl": 0, "updated_at": datetime.now(timezone.utc).isoformat()}}
+                    )
+                    profits_cursor = db.profits.find({}, {"_id": 0})
+                    profits_list = await profits_cursor.to_list(100)
+                    profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
+                    cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+                    cash_total = round(cash_doc.get("value", 0), 2) if cash_doc else 0
+                    await ws_manager.broadcast({
+                        "type": "PROFITS_UPDATE",
+                        "profits": profits,
+                        "cash_reserve": cash_total,
+                    })
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)

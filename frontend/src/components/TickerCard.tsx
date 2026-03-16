@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useCallback } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
@@ -12,8 +12,12 @@ import {
   Zap,
   ShieldAlert,
   BarChart3,
+  Banknote,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 
 interface Props {
   ticker: TickerConfig;
@@ -24,8 +28,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   const price = useStore((s) => s.prices[ticker.symbol] ?? 0);
   const pnl = useStore((s) => s.profits[ticker.symbol] ?? 0);
   const position = useStore((s) => s.positions[ticker.symbol]);
+  const incrementStep = useStore((s) => s.incrementStep);
+  const decrementStep = useStore((s) => s.decrementStep);
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmTP, setConfirmTP] = useState(false);
 
   const isPositive = pnl >= 0;
   const isActive = ticker.enabled;
@@ -43,8 +50,19 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
     send('DELETE_TICKER', { symbol: ticker.symbol });
   };
 
-  const handleFieldChange = (field: string, value: any) => {
+  const handleFieldChange = useCallback((field: string, value: any) => {
     send('UPDATE_TICKER', { symbol: ticker.symbol, [field]: value });
+  }, [send, ticker.symbol]);
+
+  const handleTakeProfit = () => {
+    if (!confirmTP) {
+      setConfirmTP(true);
+      setTimeout(() => setConfirmTP(false), 4000);
+      return;
+    }
+    send('TAKE_PROFIT', { symbol: ticker.symbol });
+    setConfirmTP(false);
+    toast.success(`Took profit for ${ticker.symbol}: $${pnl.toFixed(2)} moved to cash`);
   };
 
   const avgPrice = price > 0 ? price : 100;
@@ -69,7 +87,6 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
         glass hover:border-primary/40
       `}
     >
-      {/* Ambient glow */}
       {isActive && (
         <div
           className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-3xl opacity-20 ${
@@ -78,7 +95,6 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
         />
       )}
 
-      {/* Card header */}
       <div className="relative p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
@@ -122,7 +138,7 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
           </div>
         </div>
 
-        {/* Quick stats row */}
+        {/* Quick stats */}
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
           <span className="flex items-center gap-1">
             <TrendingDown size={10} className="text-emerald-400" /> Buy: ${buyTarget}
@@ -148,7 +164,7 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
           </div>
         )}
 
-        {/* Expand / Delete controls */}
+        {/* Controls row: Expand / Take Profit / Delete */}
         <div className="flex items-center justify-between mt-3">
           <button
             data-testid={`ticker-expand-${ticker.symbol}`}
@@ -158,18 +174,37 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             {expanded ? 'Collapse' : 'Configure'}
           </button>
-          <button
-            data-testid={`ticker-delete-${ticker.symbol}`}
-            onClick={handleDelete}
-            className={`flex items-center gap-1 text-xs transition-all ${
-              confirmDelete
-                ? 'text-red-400 font-bold animate-pulse'
-                : 'text-muted-foreground hover:text-red-400'
-            }`}
-          >
-            <Trash2 size={12} />
-            {confirmDelete ? 'Confirm?' : 'Remove'}
-          </button>
+
+          <div className="flex items-center gap-3">
+            {/* Take Profit button — only shows when there's P&L */}
+            {pnl !== 0 && (
+              <button
+                data-testid={`take-profit-${ticker.symbol}`}
+                onClick={handleTakeProfit}
+                className={`flex items-center gap-1 text-xs transition-all ${
+                  confirmTP
+                    ? 'text-amber-400 font-bold animate-pulse'
+                    : 'text-emerald-400 hover:text-emerald-300'
+                }`}
+              >
+                <Banknote size={12} />
+                {confirmTP ? `Take $${pnl.toFixed(2)}?` : 'Take Profit'}
+              </button>
+            )}
+
+            <button
+              data-testid={`ticker-delete-${ticker.symbol}`}
+              onClick={handleDelete}
+              className={`flex items-center gap-1 text-xs transition-all ${
+                confirmDelete
+                  ? 'text-red-400 font-bold animate-pulse'
+                  : 'text-muted-foreground hover:text-red-400'
+              }`}
+            >
+              <Trash2 size={12} />
+              {confirmDelete ? 'Confirm?' : 'Remove'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -184,33 +219,44 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
           >
             <div className="p-4 border-t border-border bg-secondary/20 space-y-4">
               {/* Buy Rules */}
-              <ConfigSection
-                title="Buy Rules"
-                icon={TrendingDown}
-                color="text-emerald-400"
-              >
-                <ConfigRow label="Offset" value={ticker.buy_offset}
-                  onChange={(v) => handleFieldChange('buy_offset', v)} />
+              <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
+                <NegativeOffsetInput
+                  label="Buy Offset"
+                  value={ticker.buy_offset}
+                  isPercent={ticker.buy_percent}
+                  onChange={(v) => handleFieldChange('buy_offset', v)}
+                  incrementStep={incrementStep}
+                  decrementStep={decrementStep}
+                />
                 <ConfigToggle label="Use %" checked={ticker.buy_percent}
                   onChange={(v) => handleFieldChange('buy_percent', v)} />
-                <ConfigRow label="Buy Power ($)" value={ticker.base_power}
-                  onChange={(v) => handleFieldChange('base_power', v)} min={1} />
-                <ConfigRow label="Avg Period (days)" value={ticker.avg_days}
-                  onChange={(v) => handleFieldChange('avg_days', Math.round(v))} min={1} max={365} />
+                <SteppedInput label="Buy Power ($)" value={ticker.base_power}
+                  onChange={(v) => handleFieldChange('base_power', v)} min={1}
+                  incrementStep={incrementStep} decrementStep={decrementStep} />
+                <SteppedInput label="Avg Period (days)" value={ticker.avg_days}
+                  onChange={(v) => handleFieldChange('avg_days', Math.round(v))} min={1} max={365}
+                  incrementStep={1} decrementStep={1} />
               </ConfigSection>
 
               {/* Sell Rules */}
               <ConfigSection title="Sell Rules" icon={TrendingUp} color="text-blue-400">
-                <ConfigRow label="Offset" value={ticker.sell_offset}
-                  onChange={(v) => handleFieldChange('sell_offset', v)} />
+                <SteppedInput label="Sell Offset" value={ticker.sell_offset}
+                  onChange={(v) => handleFieldChange('sell_offset', v)}
+                  incrementStep={incrementStep} decrementStep={decrementStep} />
                 <ConfigToggle label="Use %" checked={ticker.sell_percent}
                   onChange={(v) => handleFieldChange('sell_percent', v)} />
               </ConfigSection>
 
               {/* Stop Loss */}
               <ConfigSection title="Stop Loss" icon={ShieldAlert} color="text-red-400">
-                <ConfigRow label="Stop Offset" value={ticker.stop_offset}
-                  onChange={(v) => handleFieldChange('stop_offset', v)} />
+                <NegativeOffsetInput
+                  label="Stop Offset"
+                  value={ticker.stop_offset}
+                  isPercent={ticker.stop_percent}
+                  onChange={(v) => handleFieldChange('stop_offset', v)}
+                  incrementStep={incrementStep}
+                  decrementStep={decrementStep}
+                />
                 <ConfigToggle label="Use %" checked={ticker.stop_percent}
                   onChange={(v) => handleFieldChange('stop_percent', v)} />
               </ConfigSection>
@@ -224,8 +270,9 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                   accent
                 />
                 {ticker.trailing_enabled && (
-                  <ConfigRow label="Trail %" value={ticker.trailing_percent}
-                    onChange={(v) => handleFieldChange('trailing_percent', v)} min={0.1} max={50} step={0.1} />
+                  <SteppedInput label="Trail %" value={ticker.trailing_percent}
+                    onChange={(v) => handleFieldChange('trailing_percent', v)} min={0.1} max={50}
+                    incrementStep={incrementStep} decrementStep={decrementStep} />
                 )}
               </ConfigSection>
 
@@ -263,16 +310,12 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   );
 });
 
+/* --- SUB COMPONENTS --- */
+
 function ConfigSection({
-  title,
-  icon: Icon,
-  color,
-  children,
+  title, icon: Icon, color, children,
 }: {
-  title: string;
-  icon: any;
-  color: string;
-  children: React.ReactNode;
+  title: string; icon: any; color: string; children: React.ReactNode;
 }) {
   return (
     <div>
@@ -284,47 +327,143 @@ function ConfigSection({
   );
 }
 
-function ConfigRow({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step = 0.5,
+/**
+ * NegativeOffsetInput: Buy / Stop offset is always negative.
+ * Shows a locked "–" prefix, user only types the magnitude (positive number).
+ * Stored value is always negative.
+ */
+function NegativeOffsetInput({
+  label, value, isPercent, onChange, incrementStep, decrementStep,
 }: {
-  label: string;
-  value: number;
+  label: string; value: number; isPercent: boolean;
   onChange: (v: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
+  incrementStep: number; decrementStep: number;
 }) {
+  // Magnitude is always positive for display
+  const magnitude = Math.abs(value);
+
+  const handleMagnitudeChange = (raw: string) => {
+    const num = parseFloat(raw);
+    if (isNaN(num)) return;
+    onChange(-Math.abs(num)); // always store negative
+  };
+
+  const nudgeUp = () => {
+    // "Up" means less negative (closer to 0) — use increment step
+    const newMag = Math.max(0, magnitude - incrementStep);
+    onChange(-newMag);
+  };
+
+  const nudgeDown = () => {
+    // "Down" means more negative (farther from 0) — use decrement step
+    onChange(-(magnitude + decrementStep));
+  };
+
   return (
     <div>
       <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full bg-background border border-border rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-      />
+      <div className="flex items-center">
+        {/* Locked negative prefix */}
+        <span className="flex items-center justify-center h-[26px] w-6 bg-red-500/15 text-red-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
+          &ndash;
+        </span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={magnitude}
+          onChange={(e) => handleMagnitudeChange(e.target.value)}
+          className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
+          data-testid={`input-${label.toLowerCase().replace(/\s/g, '-')}`}
+        />
+        {/* Custom stepper arrows */}
+        <div className="flex flex-col h-[26px] shrink-0">
+          <button
+            onClick={nudgeUp}
+            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            title={`+${incrementStep}`}
+          >
+            <Plus size={8} />
+          </button>
+          <button
+            onClick={nudgeDown}
+            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            title={`-${decrementStep}`}
+          >
+            <Minus size={8} />
+          </button>
+        </div>
+      </div>
+      <p className="text-[8px] text-muted-foreground/50 mt-0.5">
+        {isPercent ? `${value}%` : `$${value.toFixed(2)}`} from avg
+      </p>
+    </div>
+  );
+}
+
+/**
+ * SteppedInput: general number input with custom increment/decrement arrows.
+ */
+function SteppedInput({
+  label, value, onChange, min, max, incrementStep, decrementStep,
+}: {
+  label: string; value: number; onChange: (v: number) => void;
+  min?: number; max?: number;
+  incrementStep: number; decrementStep: number;
+}) {
+  const nudgeUp = () => {
+    let next = value + incrementStep;
+    if (max !== undefined) next = Math.min(next, max);
+    onChange(parseFloat(next.toFixed(4)));
+  };
+  const nudgeDown = () => {
+    let next = value - decrementStep;
+    if (min !== undefined) next = Math.max(next, min);
+    onChange(parseFloat(next.toFixed(4)));
+  };
+
+  return (
+    <div>
+      <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
+      <div className="flex items-center">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={incrementStep}
+          onChange={(e) => {
+            const num = Number(e.target.value);
+            if (min !== undefined && num < min) return;
+            if (max !== undefined && num > max) return;
+            onChange(num);
+          }}
+          className="w-full h-[26px] bg-background border border-border rounded-l px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <div className="flex flex-col h-[26px] shrink-0">
+          <button
+            onClick={nudgeUp}
+            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            title={`+${incrementStep}`}
+          >
+            <Plus size={8} />
+          </button>
+          <button
+            onClick={nudgeDown}
+            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
+            title={`-${decrementStep}`}
+          >
+            <Minus size={8} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 function ConfigToggle({
-  label,
-  checked,
-  onChange,
-  accent,
+  label, checked, onChange, accent,
 }: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  accent?: boolean;
+  label: string; checked: boolean; onChange: (v: boolean) => void; accent?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">

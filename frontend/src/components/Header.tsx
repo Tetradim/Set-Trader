@@ -13,6 +13,7 @@ import {
   DollarSign,
   Zap,
   Command,
+  Banknote,
 } from 'lucide-react';
 
 export function Header() {
@@ -24,6 +25,7 @@ export function Header() {
   const profits = useStore((s) => s.profits);
   const prices = useStore((s) => s.prices);
   const tickers = useStore((s) => s.tickers);
+  const cashReserve = useStore((s) => s.cashReserve);
 
   const totalPnl = Object.values(profits).reduce((a, b) => a + b, 0);
   const tickerCount = Object.keys(tickers).length;
@@ -92,6 +94,15 @@ export function Header() {
             value={`${activeTickers}/${tickerCount}`}
             icon={Zap}
           />
+          {cashReserve > 0 && (
+            <MetricPill
+              testId="metric-cash"
+              label="Cash Reserve"
+              value={`$${cashReserve.toFixed(2)}`}
+              positive={true}
+              icon={Banknote}
+            />
+          )}
         </div>
 
         {/* Right: Controls */}

@@ -172,24 +172,77 @@ class BracketBotAPITester:
         # Test get settings
         success, data = self.run_test("Get Settings", "GET", "/settings")
         if success and data:
-            expected_fields = ["simulate_24_7", "telegram"]
+            expected_fields = ["simulate_24_7", "telegram", "increment_step", "decrement_step", "cash_reserve"]
             missing_fields = [field for field in expected_fields if field not in data]
             self.log_result("Settings - Required Fields", len(missing_fields) == 0, f"Missing: {missing_fields}")
+            
+            # NEW: Test increment/decrement step fields
+            self.log_result("Settings - Increment Step Field", "increment_step" in data, f"Increment Step: {data.get('increment_step', 'missing')}")
+            self.log_result("Settings - Decrement Step Field", "decrement_step" in data, f"Decrement Step: {data.get('decrement_step', 'missing')}")
+            self.log_result("Settings - Cash Reserve Field", "cash_reserve" in data, f"Cash Reserve: {data.get('cash_reserve', 'missing')}")
+            
+            # Test that step values are numbers
+            inc_step = data.get('increment_step')
+            dec_step = data.get('decrement_step')
+            cash_reserve = data.get('cash_reserve')
+            self.log_result("Settings - Increment Step Number", isinstance(inc_step, (int, float)), f"Type: {type(inc_step)}")
+            self.log_result("Settings - Decrement Step Number", isinstance(dec_step, (int, float)), f"Type: {type(dec_step)}")
+            self.log_result("Settings - Cash Reserve Number", isinstance(cash_reserve, (int, float)), f"Type: {type(cash_reserve)}")
             
             # NEW: Test telegram_connected field
             self.log_result("Settings - Telegram Connected Field", "telegram_connected" in data, f"Telegram Connected: {data.get('telegram_connected', 'missing')}")
             telegram_connected = data.get('telegram_connected')
             self.log_result("Settings - Telegram Connected Boolean", isinstance(telegram_connected, bool), f"Type: {type(telegram_connected)}")
 
-        # Test update settings with telegram config
+        # Test update settings with telegram config and step sizes
         settings_update = {
             "telegram": {"bot_token": "test_token_fake", "chat_ids": ["123456789"]},
-            "simulate_24_7": True
+            "simulate_24_7": True,
+            "increment_step": 0.25,
+            "decrement_step": 0.75
         }
         success, response_data = self.run_test("Update Settings", "POST", "/settings", 200, settings_update)
         if success and response_data:
             # NEW: Test telegram_running status in response
             self.log_result("Settings Update - Telegram Running Field", "telegram_running" in response_data, f"Telegram Running: {response_data.get('telegram_running', 'missing')}")
+        
+        # Test get settings again to verify step updates were saved
+        success, updated_data = self.run_test("Get Updated Settings", "GET", "/settings")
+        if success and updated_data:
+            self.log_result("Updated Settings - Increment Step Saved", updated_data.get('increment_step') == 0.25, f"Expected: 0.25, Got: {updated_data.get('increment_step')}")
+            self.log_result("Updated Settings - Decrement Step Saved", updated_data.get('decrement_step') == 0.75, f"Expected: 0.75, Got: {updated_data.get('decrement_step')}")
+        
+        return True
+
+    def test_cash_reserve_endpoints(self):
+        """Test cash reserve endpoints"""
+        print("\n🔍 Testing Cash Reserve Endpoints...")
+        
+        # Test get cash reserve
+        success, data = self.run_test("Get Cash Reserve", "GET", "/cash-reserve")
+        if success and data:
+            expected_fields = ["total", "ledger"]
+            missing_fields = [field for field in expected_fields if field not in data]
+            self.log_result("Cash Reserve - Required Fields", len(missing_fields) == 0, f"Missing: {missing_fields}")
+            
+            # Test field types
+            total = data.get('total')
+            ledger = data.get('ledger')
+            self.log_result("Cash Reserve - Total Number", isinstance(total, (int, float)), f"Total type: {type(total)}")
+            self.log_result("Cash Reserve - Ledger List", isinstance(ledger, list), f"Ledger type: {type(ledger)}")
+        
+        return success
+
+    def test_take_profit_endpoints(self):
+        """Test take profit endpoints"""
+        print("\n🔍 Testing Take Profit Endpoints...")
+        
+        # Test take profit for TSLA (should return 400 if no positive profit)
+        success, data = self.run_test("Take Profit TSLA (No Profit)", "POST", "/tickers/TSLA/take-profit", 400)
+        # This should fail with 400 because typically there's no positive P&L to take
+        
+        # Test with invalid symbol
+        success, data = self.run_test("Take Profit Invalid Symbol", "POST", "/tickers/INVALID/take-profit", 400)
         
         return True
 
@@ -222,6 +275,8 @@ class BracketBotAPITester:
         self.test_trades_endpoint()
         self.test_bot_control()
         self.test_settings_endpoints()
+        self.test_cash_reserve_endpoints()  # NEW: Test cash reserve endpoints
+        self.test_take_profit_endpoints()    # NEW: Test take profit endpoints
         self.test_telegram_endpoints()  # NEW: Test Telegram-specific endpoints
 
         # Print final results

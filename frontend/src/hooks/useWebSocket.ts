@@ -34,6 +34,9 @@ export function useWebSocket() {
           if (data.tickers) store.setTickers(data.tickers);
           if (data.prices) store.setPrices(data.prices);
           if (data.profits) store.setProfits(data.profits);
+          if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
+          if (data.increment_step !== undefined) store.setIncrementStep(data.increment_step);
+          if (data.decrement_step !== undefined) store.setDecrementStep(data.decrement_step);
           store.setPaused(data.paused ?? false);
           store.setRunning(data.running ?? false);
           store.setMarketOpen(data.market_open ?? false);
@@ -43,9 +46,15 @@ export function useWebSocket() {
           if (data.prices) store.setPrices(data.prices);
           if (data.positions) store.setPositions(data.positions);
           if (data.profits) store.setProfits(data.profits);
+          if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
           store.setPaused(data.paused ?? store.paused);
           store.setRunning(data.running ?? store.running);
           store.setMarketOpen(data.market_open ?? store.marketOpen);
+        }
+
+        if (data.type === 'PROFITS_UPDATE') {
+          if (data.profits) store.setProfits(data.profits);
+          if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
         }
 
         if (data.type === 'TRADE') {
