@@ -1,18 +1,9 @@
 import { create } from 'zustand';
 
-export interface TradeLog {
+export interface TickerConfig {
   id: string;
   symbol: string;
-  type: 'BUY' | 'SELL' | 'STOP';
-  price: number;
-  timestamp: string;
-}
-
-// Matches TickerConfig in main.py
-export interface Ticker {
-  symbol: string;
   base_power: number;
-  enabled: boolean;
   avg_days: number;
   buy_offset: number;
   buy_percent: boolean;
@@ -20,62 +11,132 @@ export interface Ticker {
   sell_percent: boolean;
   stop_offset: number;
   stop_percent: boolean;
+  trailing_enabled: boolean;
+  trailing_percent: number;
+  enabled: boolean;
+  strategy: string;
+  created_at: string;
+}
+
+export interface TradeLog {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL' | 'STOP' | 'TRAILING_STOP';
+  price: number;
+  quantity: number;
+  reason: string;
+  pnl: number;
+  timestamp: string;
+}
+
+export interface PositionData {
+  symbol: string;
+  quantity: number;
+  avg_entry: number;
+  current_price: number;
+  market_value: number;
+  unrealized_pnl: number;
 }
 
 interface BotState {
-  tickers: Record<string, Ticker>;
-  profits: Record<string, number>; // Backend sends this separately
+  // Connection
   connected: boolean;
+  setConnected: (s: boolean) => void;
+
+  // Bot status
+  running: boolean;
   paused: boolean;
-  logs: TradeLog[];
-  
-  // Actions
-  setTickers: (tickers: Record<string, Ticker>) => void;
-  setProfits: (profits: Record<string, number>) => void;
-  updateTicker: (symbol: string, updates: Partial<Ticker>) => void;
-  setConnected: (status: boolean) => void;
-  setPaused: (status: boolean) => void;
+  marketOpen: boolean;
+  setRunning: (s: boolean) => void;
+  setPaused: (s: boolean) => void;
+  setMarketOpen: (s: boolean) => void;
+
+  // Tickers
+  tickers: Record<string, TickerConfig>;
+  setTickers: (t: TickerConfig[]) => void;
+  addTicker: (t: TickerConfig) => void;
+  updateTicker: (symbol: string, updates: Partial<TickerConfig>) => void;
   removeTicker: (symbol: string) => void;
-  addLog: (log: TradeLog) => void;
+
+  // Prices
+  prices: Record<string, number>;
+  setPrices: (p: Record<string, number>) => void;
+
+  // Profits
+  profits: Record<string, number>;
+  setProfits: (p: Record<string, number>) => void;
+
+  // Positions
+  positions: Record<string, PositionData>;
+  setPositions: (p: Record<string, PositionData>) => void;
+
+  // Trade logs
+  trades: TradeLog[];
+  addTrade: (t: TradeLog) => void;
+  setTrades: (t: TradeLog[]) => void;
+
+  // Active tab
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+
+  // Settings
+  simulate247: boolean;
+  setSimulate247: (s: boolean) => void;
+  telegramToken: string;
+  telegramChatIds: string[];
+  setTelegramConfig: (token: string, chatIds: string[]) => void;
 }
 
 export const useStore = create<BotState>((set) => ({
-  tickers: {},
-  profits: {},
   connected: false,
-  paused: false,
-  logs: [],
+  setConnected: (connected) => set({ connected }),
 
-  setTickers: (tickers) => set({ tickers }),
-  
+  running: false,
+  paused: false,
+  marketOpen: false,
+  setRunning: (running) => set({ running }),
+  setPaused: (paused) => set({ paused }),
+  setMarketOpen: (marketOpen) => set({ marketOpen }),
+
+  tickers: {},
+  setTickers: (arr) => set({
+    tickers: arr.reduce((acc, t) => ({ ...acc, [t.symbol]: t }), {} as Record<string, TickerConfig>)
+  }),
+  addTicker: (t) => set((state) => ({
+    tickers: { ...state.tickers, [t.symbol]: t }
+  })),
+  updateTicker: (symbol, updates) => set((state) => {
+    const existing = state.tickers[symbol];
+    if (!existing) return state;
+    return { tickers: { ...state.tickers, [symbol]: { ...existing, ...updates } } };
+  }),
+  removeTicker: (symbol) => set((state) => {
+    const copy = { ...state.tickers };
+    delete copy[symbol];
+    return { tickers: copy };
+  }),
+
+  prices: {},
+  setPrices: (prices) => set({ prices }),
+
+  profits: {},
   setProfits: (profits) => set({ profits }),
 
-  updateTicker: (symbol, updates) =>
-    set((state) => {
-      const existingTicker = state.tickers[symbol];
-      if (!existingTicker) return state;
+  positions: {},
+  setPositions: (positions) => set({ positions }),
 
-      return {
-        tickers: {
-          ...state.tickers,
-          [symbol]: { ...existingTicker, ...updates },
-        },
-      };
-    }),
+  trades: [],
+  addTrade: (t) => set((state) => ({
+    trades: [t, ...state.trades].slice(0, 200)
+  })),
+  setTrades: (trades) => set({ trades }),
 
-  setConnected: (status) => set({ connected: status }),
+  activeTab: 'watchlist',
+  setActiveTab: (activeTab) => set({ activeTab }),
 
-  setPaused: (status) => set({ paused: status }),
-
-  removeTicker: (symbol) =>
-    set((state) => {
-      const newTickers = { ...state.tickers };
-      delete newTickers[symbol];
-      return { tickers: newTickers };
-    }),
-
-  addLog: (log) =>
-    set((state) => ({
-      logs: [log, ...state.logs].slice(0, 50),
-    })),
+  simulate247: false,
+  setSimulate247: (simulate247) => set({ simulate247 }),
+  telegramToken: '',
+  telegramChatIds: [],
+  setTelegramConfig: (telegramToken, telegramChatIds) => set({ telegramToken, telegramChatIds }),
 }));

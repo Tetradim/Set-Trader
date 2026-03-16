@@ -1,73 +1,101 @@
-import { useEffect, useRef } from 'react'
-import { useStore } from '@/stores/useStore'
-import { toast } from 'sonner'
+import { useEffect, useRef, useCallback } from 'react';
+import { useStore } from '@/stores/useStore';
 
-export const useWebSocket = () => {
-  const socket = useRef<WebSocket | null>(null)
-  const reconnectTimeout = useRef<NodeJS.Timeout | null>(null)
-  const { setTickers, setConnected, setPaused, setProfits } = useStore()
+const BACKEND_URL = import.meta.env.REACT_APP_BACKEND_URL || '';
 
-  const connect = () => {
-    // 127.0.0.1 is more reliable than 'localhost' on Windows
-    const WS_URL = 'ws://127.0.0.1:8000/ws'
-    
-    if (socket.current?.readyState === WebSocket.OPEN) return
+function getWsUrl(): string {
+  if (BACKEND_URL) {
+    const url = new URL(BACKEND_URL);
+    const proto = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${url.host}/api/ws`;
+  }
+  return `ws://${window.location.hostname}:8001/api/ws`;
+}
 
-    socket.current = new WebSocket(WS_URL)
+export function useWebSocket() {
+  const socket = useRef<WebSocket | null>(null);
+  const reconnect = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const store = useStore();
 
-    socket.current.onopen = () => {
-      setConnected(true)
-      toast.success('Connected to Bot Engine')
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
-    }
+  const connect = useCallback(() => {
+    if (socket.current?.readyState === WebSocket.OPEN) return;
+    const ws = new WebSocket(getWsUrl());
+    socket.current = ws;
 
-    socket.current.onmessage = (event) => {
+    ws.onopen = () => {
+      store.setConnected(true);
+    };
+
+    ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
-        
+        const data = JSON.parse(event.data);
+
         if (data.type === 'INITIAL_STATE') {
-          setTickers(data.tickers)
-          setPaused(data.paused)
-          // WE MUST SET PROFITS HERE OR THE CARDS WON'T SHOW DATA
-          if (data.profits) setProfits(data.profits)
-        } 
-        
-        if (data.type === 'TRADE_LOG') {
-           useStore.getState().addLog(data.log)
+          if (data.tickers) store.setTickers(data.tickers);
+          if (data.prices) store.setPrices(data.prices);
+          if (data.profits) store.setProfits(data.profits);
+          store.setPaused(data.paused ?? false);
+          store.setRunning(data.running ?? false);
+          store.setMarketOpen(data.market_open ?? false);
+        }
+
+        if (data.type === 'PRICE_UPDATE') {
+          if (data.prices) store.setPrices(data.prices);
+          if (data.positions) store.setPositions(data.positions);
+          if (data.profits) store.setProfits(data.profits);
+          store.setPaused(data.paused ?? store.paused);
+          store.setRunning(data.running ?? store.running);
+          store.setMarketOpen(data.market_open ?? store.marketOpen);
+        }
+
+        if (data.type === 'TRADE') {
+          store.addTrade(data.trade);
+        }
+
+        if (data.type === 'TICKER_ADDED') {
+          store.addTicker(data.ticker);
+        }
+
+        if (data.type === 'TICKER_UPDATED') {
+          store.updateTicker(data.ticker.symbol, data.ticker);
+        }
+
+        if (data.type === 'TICKER_DELETED') {
+          store.removeTicker(data.symbol);
+        }
+
+        if (data.type === 'BOT_STATUS') {
+          store.setRunning(data.running ?? store.running);
+          store.setPaused(data.paused ?? store.paused);
         }
       } catch (err) {
-        console.error("WS Message Error:", err)
+        console.error('WS parse error:', err);
       }
-    }
+    };
 
-    socket.current.onclose = () => {
-      setConnected(false)
-      // Attempt to reconnect every 3 seconds
-      reconnectTimeout.current = setTimeout(connect, 3000)
-    }
+    ws.onclose = () => {
+      store.setConnected(false);
+      reconnect.current = setTimeout(connect, 3000);
+    };
 
-    socket.current.onerror = (err) => {
-      console.error("WebSocket Error:", err)
-      socket.current?.close()
-    }
-  }
+    ws.onerror = () => {
+      ws.close();
+    };
+  }, []);
 
   useEffect(() => {
-    connect()
+    connect();
     return () => {
-      if (reconnectTimeout.current) clearTimeout(reconnectTimeout.current)
-      socket.current?.close()
-    }
-  }, [])
+      if (reconnect.current) clearTimeout(reconnect.current);
+      socket.current?.close();
+    };
+  }, [connect]);
 
-  const sendMessage = (action: string, payload: any = {}) => {
+  const send = useCallback((action: string, payload: Record<string, any> = {}) => {
     if (socket.current?.readyState === WebSocket.OPEN) {
-      const message = JSON.stringify({ action, ...payload })
-      socket.current.send(message)
-    } else {
-      toast.error('Not connected to backend')
+      socket.current.send(JSON.stringify({ action, ...payload }));
     }
-  }
+  }, []);
 
-  return { sendMessage }
+  return { send };
 }
