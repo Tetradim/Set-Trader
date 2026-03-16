@@ -1,56 +1,88 @@
-name: Build Bracket Bot Executable
+name: Build, Test & Release
 
 on:
   push:
-    tags:
-      - 'v*'
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      build_windows:
-        description: 'Build Windows'
-        type: boolean
-        default: true
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
-      - name: Build backend
-        working-directory: backend
+      - name: Start services
+        run: docker compose up -d --wait --build
+
+      - name: Backend smoke test
         run: |
-          pip install -r requirements.txt pyinstaller
-          pyinstaller --onefile --name bracket-bot-server main.py
+          curl -sf http://localhost:8001/api/health | jq .
+          curl -sf http://localhost:8001/api/tickers | jq .
 
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm install
-          npm run build
+      - name: Frontend smoke test
+        run: curl -sf http://localhost:3000 > /dev/null
 
-      - name: Build Electron app
-        working-directory: desktop
-        run: |
-          npm install
-          mkdir -p resources/backend resources/frontend
-          copy ..\backend\dist\bracket-bot-server.exe resources\backend\
-          xcopy /E /I ..\frontend\dist resources\frontend
-          npm run dist:win
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
 
-      - name: Upload Windows builds
-        uses: actions/upload-artifact@v4
+  build-and-push:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          name: Bracket-Bot-Windows
-          path: desktop/dist/*.exe
-          retention-days: 30
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          file: ./${{ matrix.service }}/Dockerfile.prod
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Docker Images
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.sha }}
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.sha }}
+            ```
