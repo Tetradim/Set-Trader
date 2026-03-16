@@ -42,6 +42,12 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] All inputs now use type="text" + inputMode="decimal"
 - [x] Testing: 7/7 decimal input tests passed (100%)
 
+### 2026-03-16 - Trade Dedup + Condensed Display
+- [x] Backend: Added 30-second per-symbol trade cooldown to prevent rapid-fire duplicate trades
+- [x] Frontend Sidebar: Grouped consecutive same-symbol/side trades into expandable single lines (e.g., "B NVDA x9 $180.14")
+- [x] Frontend History Tab: Collapsible grouped rows with count badge, avg price, total qty, net P&L
+- [x] Testing: 10/10 backend tests, 90% frontend (WebSocket intermittent in test env)
+
 ## Prioritized Backlog
 ### P1
 - Live broker connection (Alpaca paper trading)
