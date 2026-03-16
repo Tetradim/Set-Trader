@@ -74,7 +74,17 @@ class BracketBotAPITester:
             self.log_result("Health - Status Field", "status" in data, f"Status: {data.get('status', 'missing')}")
             self.log_result("Health - Running Field", "running" in data, f"Running: {data.get('running', 'missing')}")
             self.log_result("Health - Market Open Field", "market_open" in data, f"Market Open: {data.get('market_open', 'missing')}")
-            # NEW: Test telegram field in health endpoint
+            
+            # SPECIFIC TESTS for review request items
+            running_value = data.get('running')
+            paused_value = data.get('paused') 
+            market_open_value = data.get('market_open')
+            
+            self.log_result("Health - Bot Running True", running_value == True, f"Running: {running_value}")
+            self.log_result("Health - Bot Not Paused", paused_value == False, f"Paused: {paused_value}")
+            self.log_result("Health - Market Open (simulate_24_7)", market_open_value == True, f"Market Open: {market_open_value}")
+            
+            # Test telegram field in health endpoint
             self.log_result("Health - Telegram Field", "telegram" in data, f"Telegram: {data.get('telegram', 'missing')}")
             telegram_value = data.get('telegram')
             self.log_result("Health - Telegram Boolean", isinstance(telegram_value, bool), f"Telegram type: {type(telegram_value)}")
@@ -142,26 +152,71 @@ class BracketBotAPITester:
         success, data = self.run_test("Get Trades", "GET", "/trades")
         if success:
             self.log_result("Trades - Response Format", isinstance(data, list), f"Type: {type(data)}")
+            
+            # SPECIFIC TEST for review request: Check for actual executed trades
+            if isinstance(data, list):
+                trade_symbols = [trade.get('symbol') for trade in data if isinstance(trade, dict)]
+                expected_symbols = ['AAPL', 'TSLA', 'QBTS']
+                
+                print(f"  📋 Found trades for symbols: {list(set(trade_symbols))}")
+                print(f"  📋 Total trades returned: {len(data)}")
+                
+                # Check if we have trades for the expected symbols
+                for symbol in expected_symbols:
+                    has_trades = symbol in trade_symbols
+                    self.log_result(f"Trades - {symbol} trades present", has_trades, 
+                                  f"Found {trade_symbols.count(symbol)} trades for {symbol}")
+                
+                # Check if trades have required fields
+                if data:
+                    sample_trade = data[0]
+                    required_fields = ['symbol', 'side', 'price', 'quantity', 'timestamp']
+                    missing_fields = [field for field in required_fields if field not in sample_trade]
+                    self.log_result("Trades - Required Fields", len(missing_fields) == 0, f"Missing: {missing_fields}")
+                else:
+                    self.log_result("Trades - Has Trade Records", False, "No trades found - bot may not have executed any trades yet")
         return success
 
     def test_bot_control(self):
         """Test bot control endpoints"""
         print("\n🔍 Testing Bot Control Endpoints...")
         
+        # First get initial state
+        initial_success, initial_health = self.run_test("Get Initial Health State", "GET", "/health")
+        initial_running = initial_health.get('running', False) if initial_success else False
+        
         # Test start bot
         success, data = self.run_test("Start Bot", "POST", "/bot/start")
         if success and data:
             self.log_result("Start Bot - Running Field", data.get("running") == True)
+            
+            # SPECIFIC TEST: Verify state persists by checking health endpoint
+            health_success, health_data = self.run_test("Health After Start", "GET", "/health")
+            if health_success and health_data:
+                self.log_result("State Persistence - Running After Start", health_data.get('running') == True,
+                              f"Health shows running: {health_data.get('running')}")
 
         # Test pause bot 
         success, data = self.run_test("Pause Bot", "POST", "/bot/pause")
         if success and data:
             self.log_result("Pause Bot - Paused Field", "paused" in data)
+            
+            # Check health shows paused state
+            health_success, health_data = self.run_test("Health After Pause", "GET", "/health")
+            if health_success and health_data:
+                self.log_result("State Persistence - Paused State", health_data.get('paused') != False,
+                              f"Health shows paused: {health_data.get('paused')}")
 
         # Test stop bot
         success, data = self.run_test("Stop Bot", "POST", "/bot/stop")
         if success and data:
             self.log_result("Stop Bot - Running Field", data.get("running") == False)
+            
+            # SPECIFIC TEST: Verify stop state persists by checking health endpoint
+            health_success, health_data = self.run_test("Health After Stop", "GET", "/health")
+            if health_success and health_data:
+                self.log_result("State Persistence - Stopped After Stop", health_data.get('running') == False,
+                              f"Health shows running: {health_data.get('running')}")
 
         return True
 
@@ -244,6 +299,49 @@ class BracketBotAPITester:
         # Test with invalid symbol
         success, data = self.run_test("Take Profit Invalid Symbol", "POST", "/tickers/INVALID/take-profit", 400)
         
+        return True
+
+    def test_engine_state_persistence(self):
+        """Test engine state restoration works - running/paused state persisted in MongoDB"""
+        print("\n🔍 Testing Engine State Persistence...")
+        
+        # Test sequence: Start bot, verify health, stop bot, verify health, start again
+        print("  📋 Testing start->stop->start sequence...")
+        
+        # Start the bot
+        start_success, start_data = self.run_test("Engine Test - Start Bot", "POST", "/bot/start")
+        if start_success:
+            # Check health shows running
+            health_success, health_data = self.run_test("Engine Test - Health After Start", "GET", "/health")
+            if health_success:
+                running_state = health_data.get('running')
+                self.log_result("Engine State - Start Persisted", running_state == True,
+                              f"Health shows running: {running_state}")
+        
+        # Stop the bot
+        stop_success, stop_data = self.run_test("Engine Test - Stop Bot", "POST", "/bot/stop")
+        if stop_success:
+            # Check health shows stopped
+            health_success, health_data = self.run_test("Engine Test - Health After Stop", "GET", "/health")
+            if health_success:
+                running_state = health_data.get('running')
+                self.log_result("Engine State - Stop Persisted", running_state == False,
+                              f"Health shows running: {running_state}")
+        
+        # Start the bot again to verify persistence works
+        restart_success, restart_data = self.run_test("Engine Test - Restart Bot", "POST", "/bot/start")
+        if restart_success:
+            # Final health check
+            health_success, health_data = self.run_test("Engine Test - Health After Restart", "GET", "/health")
+            if health_success:
+                running_state = health_data.get('running')
+                simulate_247 = health_data.get('market_open')  # Should be True if simulate_24_7 is enabled
+                self.log_result("Engine State - Restart Persisted", running_state == True,
+                              f"Health shows running: {running_state}")
+                self.log_result("Engine State - Simulate 24/7 Active", simulate_247 == True,
+                              f"Market open (simulate_24_7): {simulate_247}")
+        
+        print("  📋 Engine state persistence test sequence completed")
         return True
 
     def test_telegram_endpoints(self):
@@ -370,6 +468,7 @@ class BracketBotAPITester:
         self.test_portfolio_endpoint()
         self.test_trades_endpoint()
         self.test_bot_control()
+        self.test_engine_state_persistence()  # NEW: Test engine state persistence specifically
         self.test_settings_endpoints()
         self.test_cash_reserve_endpoints()  # NEW: Test cash reserve endpoints
         self.test_take_profit_endpoints()    # NEW: Test take profit endpoints

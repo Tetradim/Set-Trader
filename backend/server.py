@@ -232,6 +232,28 @@ class TradingEngine:
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
 
+    async def save_state(self):
+        """Persist running/paused/simulate_24_7 to MongoDB so they survive restarts."""
+        await db.settings.update_one(
+            {"key": "engine_state"},
+            {"$set": {"value": {
+                "running": self.running,
+                "paused": self.paused,
+                "simulate_24_7": self.simulate_24_7,
+            }}},
+            upsert=True,
+        )
+
+    async def load_state(self):
+        """Restore running/paused state from MongoDB on startup."""
+        doc = await db.settings.find_one({"key": "engine_state"}, {"_id": 0})
+        if doc and doc.get("value"):
+            v = doc["value"]
+            self.running = v.get("running", False)
+            self.paused = v.get("paused", False)
+            self.simulate_24_7 = v.get("simulate_24_7", False)
+            logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}")
+
     def is_market_open(self) -> bool:
         if self.simulate_24_7:
             return True
@@ -463,6 +485,7 @@ class TelegramService:
         if not self._authorised(update):
             return await update.message.reply_text("Unauthorised.")
         engine.paused = True
+        await engine.save_state()
         await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": True})
         await update.message.reply_text("All trading PAUSED.")
         await self._broadcast_alert("Trading has been PAUSED via Telegram command.")
@@ -471,6 +494,7 @@ class TelegramService:
         if not self._authorised(update):
             return await update.message.reply_text("Unauthorised.")
         engine.paused = False
+        await engine.save_state()
         await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": False})
         await update.message.reply_text("Trading RESUMED.")
         await self._broadcast_alert("Trading has been RESUMED via Telegram command.")
@@ -479,6 +503,7 @@ class TelegramService:
         if not self._authorised(update):
             return await update.message.reply_text("Unauthorised.")
         engine.running = True
+        await engine.save_state()
         await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": engine.paused})
         await update.message.reply_text("Bot engine STARTED.")
 
@@ -486,6 +511,7 @@ class TelegramService:
         if not self._authorised(update):
             return await update.message.reply_text("Unauthorised.")
         engine.running = False
+        await engine.save_state()
         await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": engine.paused})
         await update.message.reply_text("Bot engine STOPPED.")
 
@@ -677,7 +703,13 @@ async def trading_loop():
             if engine.running and not engine.paused and engine.is_market_open():
                 tickers = await db.tickers.find({"enabled": True}, {"_id": 0}).to_list(100)
                 for t in tickers:
-                    await engine.evaluate_ticker(t)
+                    try:
+                        await engine.evaluate_ticker(t)
+                    except Exception as te:
+                        logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
+            elif engine.running and not engine.paused and not engine.is_market_open():
+                # Log once per minute that market is closed
+                pass
         except Exception as e:
             logger.error(f"Trading loop error: {e}")
         await asyncio.sleep(5)
@@ -697,6 +729,8 @@ async def lifespan(app: FastAPI):
             await db.tickers.update_one(
                 {"symbol": sym}, {"$setOnInsert": t.model_dump()}, upsert=True
             )
+    # Restore engine state from DB (survives restarts)
+    await engine.load_state()
     asyncio.create_task(price_broadcast_loop())
     asyncio.create_task(trading_loop())
     # Start Telegram if token exists in DB
@@ -871,19 +905,25 @@ async def get_logs(limit: int = Query(100, le=500), level: str = "ALL"):
 @api.post("/bot/start")
 async def start_bot():
     engine.running = True
+    await engine.save_state()
     await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": engine.paused})
+    logger.info("Bot STARTED via API")
     return {"running": True}
 
 @api.post("/bot/stop")
 async def stop_bot():
     engine.running = False
+    await engine.save_state()
     await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": engine.paused})
+    logger.info("Bot STOPPED via API")
     return {"running": False}
 
 @api.post("/bot/pause")
 async def pause_bot():
     engine.paused = not engine.paused
+    await engine.save_state()
     await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": engine.paused})
+    logger.info(f"Bot {'PAUSED' if engine.paused else 'UNPAUSED'} via API")
     return {"paused": engine.paused}
 
 # Take Profit: zero out P&L for a symbol, move to cash reserve
@@ -937,6 +977,7 @@ async def get_cash_reserve():
 async def update_settings(body: SettingsUpdate):
     if body.simulate_24_7 is not None:
         engine.simulate_24_7 = body.simulate_24_7
+        await engine.save_state()
     if body.increment_step is not None:
         await db.settings.update_one(
             {"key": "increment_step"}, {"$set": {"value": body.increment_step}}, upsert=True
@@ -1050,14 +1091,17 @@ async def ws_endpoint(websocket: WebSocket):
 
             elif action == "GLOBAL_PAUSE":
                 engine.paused = msg.get("pause", False)
+                await engine.save_state()
                 await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": engine.paused})
 
             elif action == "START_BOT":
                 engine.running = True
+                await engine.save_state()
                 await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": engine.paused})
 
             elif action == "STOP_BOT":
                 engine.running = False
+                await engine.save_state()
                 await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": engine.paused})
 
             elif action == "APPLY_STRATEGY":
