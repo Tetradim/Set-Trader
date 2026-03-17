@@ -30,84 +30,74 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Cash Reserve tracking (ledger + total) shown in header when > 0
 - [x] Buy/Stop Offset always negative: locked dash prefix, user types magnitude only
 - [x] Custom stepper arrows replacing browser default spinners on all number inputs
-- [x] Settings tab: separate Increase Step and Decrease Step inputs (e.g. +0.05 / -0.10)
+- [x] Settings tab: separate Increase Step and Decrease Step inputs
 - [x] Steps persist in MongoDB and sync via WebSocket
-- [x] Testing: 49/49 backend, 95% frontend pass
 
 ### 2026-03-16 - Decimal Input Bug Fix (P0)
 - [x] Fixed: Users could not type decimal points (.) in number inputs
-- [x] Root cause: premature parseFloat() stripping trailing decimals
 - [x] Implemented useDecimalInput hook with local string state, regex validation, parse on blur
-- [x] Fixed OffsetInput (Buy/Sell/Stop), SteppedInput (Buy Power, Avg Period, Trail %), SettingsTab step inputs
-- [x] All inputs now use type="text" + inputMode="decimal"
-- [x] Testing: 7/7 decimal input tests passed (100%)
 
 ### 2026-03-16 - Trade Dedup + Condensed Display
-- [x] Backend: Added 30-second per-symbol trade cooldown to prevent rapid-fire duplicate trades
-- [x] Frontend Sidebar: Grouped consecutive same-symbol/side trades into expandable single lines (e.g., "B NVDA x9 $180.14")
+- [x] Backend: Added 30-second per-symbol trade cooldown
+- [x] Frontend Sidebar: Grouped consecutive same-symbol/side trades
 - [x] Frontend History Tab: Collapsible grouped rows with count badge, avg price, total qty, net P&L
-- [x] Testing: 10/10 backend tests, 90% frontend (WebSocket intermittent in test env)
 
 ### 2026-03-16 - Trailing Stop Percent/Dollar Mode
-- [x] Added `trailing_percent_mode` field to ticker schema (backend + frontend)
-- [x] Trailing stop now supports both percent (trail by X%) and dollar (trail by $X) modes
-- [x] Min value 0.01 for both modes
-- [x] Backend: `high - $value` for dollar mode, `high * (1 - %/100)` for percent mode
-- [x] Frontend: "Use %" toggle + dynamic "Trail %" / "Trail $" label
-- [x] Backward compatible: existing tickers default to percent mode
+- [x] Added trailing_percent_mode field to ticker schema
+- [x] Backend: dollar mode = high - $value, percent mode = high * (1 - %/100)
 
 ### 2026-03-16 - Auto Rebracket Feature
-- [x] Detects when price drifts beyond bracket by configurable threshold ($)
-- [x] Auto-sets new bracket using rolling recent low + configurable spread ($)
-- [x] Telegram notification on each rebracket with old/new bracket details
-- [x] Frontend: toggle + threshold/spread inputs in expanded card config
+- [x] Detects when price drifts beyond bracket by configurable threshold
+- [x] Auto-sets new bracket using rolling recent low + configurable spread
+- [x] Telegram notification on each rebracket
 
 ### 2026-03-16 - Compound Profits Toggle
-- [x] Added `compound_profits: bool = True` to ticker schema (default ON)
-- [x] When enabled, positive P&L from sells/stops is added to the ticker's `base_power` (buy power)
-- [x] When disabled, buy power stays fixed at the manually set amount
-- [x] Backend broadcasts updated ticker after compounding so UI reflects new buy power
-- [x] Green checkbox in expanded card config, paired with "Wait 1 day" toggle
+- [x] When enabled, positive P&L from sells is added to the ticker's buy power
 
 ### 2026-03-16 - Windows Executable Packaging Workflow
-- [x] Created `build-windows.ps1` PowerShell build script (PyInstaller + frontend bundle)
-- [x] Created `start-bracketbot.bat` launcher for source and packaged modes
-- [x] Created `WINDOWS_BUILD.md` with full setup, build, and distribution instructions
-- [x] Backend server.py now serves built React frontend as static files when `static/` dir exists
-- [x] `package.json` build script fixed (skip tsc, use vite build directly)
-- [x] `tsconfig.json` updated with Vite client types
-- [x] Verified single-server mode: backend at :8001 serves both API + frontend
-- [x] Build output: `dist/BracketBot/BracketBot.exe` + `Start BracketBot.bat` launcher
+- [x] PyInstaller + GitHub Actions workflow
 
 ### 2026-03-16 - Limit/Market Order Types + Wait-a-Day Toggle
 - [x] Added LIMIT/MARKET toggle for each rule section: Buy, Sell, Stop Loss, Trailing Stop
-- [x] Market orders execute immediately at current price; Limit orders use price targets
-- [x] Trade reasons labeled [MKT] or [LMT] in history
-- [x] Added "Wait 1 day before selling" checkbox in top-right of expanded card config
-- [x] When enabled, skips all sell/stop/trailing logic until the next trading day after a buy
-- [x] All fields persist in MongoDB, included in preset strategy backup/restore
-- [x] Testing: Backend API verified, frontend UI verified
 
 ### 2026-03-16 - Live Price Chart + Preset Strategy Toggle
 - [x] Live chart: checkbox next to ticker name toggles embedded Recharts LineChart
-- [x] Card expands to col-span-2 when chart enabled, pushing other cards below
-- [x] Chart shows rolling price history (~120 pts) + trailing stop dashed line (amber)
-- [x] Price data accumulated from WebSocket PRICE_UPDATE in Zustand store
 - [x] Preset strategy toggle: clicking active preset restores custom_backup from MongoDB
-- [x] Custom config saved before applying preset, restored on deactivation
-- [x] Testing: 8/8 backend + 100% frontend
+
+### 2026-03-17 - Rich Trade Logging & Metadata
+- [x] Expanded TradeRecord with 14 new metadata fields: order_type, rule_mode, entry_price, target_price, total_value, buy_power, avg_price, sell_target, stop_target, trail_high, trail_trigger, trail_value, trail_mode
+- [x] All 4 trade types (BUY, SELL, STOP, TRAILING_STOP) now log full context
+- [x] History tab redesigned: 6 stat cards, filter pills (All/Buys/Sells/Stops/Trail/Losses), expandable trade details with MKT/LMT + PERCENT/DOLLAR badges
+- [x] Sidebar shows order type badges, loss count, entry→target info per trade
+- [x] Backend logger outputs rich trade info: order type, mode, target, entry, value, power, P&L
+- [x] Telegram alerts enriched with metadata
+
+### 2026-03-17 - Loss Trade Log Files
+- [x] Each losing trade generates a .txt file in /backend/trade_logs/losses/YYYY-MM-DD/
+- [x] Files contain: Trade ID, Timestamp, Symbol, Side, Order Info, Prices, Position, Targets, P&L, % Change, Reason
+- [x] Trailing stop losses include trail_high, trail_trigger, trail_value, trail_mode
+- [x] API: GET /api/loss-logs (list dates/files), GET /api/loss-logs/{date}/{filename} (view content)
+- [x] Frontend Logs tab: LossLogViewer with date folders, file list, inline text viewer
+
+### 2026-03-17 - Auto Rebracket Custom Inputs for Volatile Tickers
+- [x] Added 3 new configurable fields: rebracket_cooldown (seconds), rebracket_lookback (ticks), rebracket_buffer ($)
+- [x] Cooldown prevents rapid-fire rebrackets on volatile stocks
+- [x] Lookback controls how many recent price ticks to use for finding recent low
+- [x] Buffer controls how far below recent low to place the new buy target
+- [x] All fields in backend schema, API, frontend UI, and preset strategy backup/restore
+- [x] Testing: 12/12 backend tests passed, 100% frontend verified
 
 ## Prioritized Backlog
 ### P1
 - Live broker connection (Alpaca paper trading)
 - Confirmation dialogs for high-risk actions
 ### P2
+- Input validation pass across all fields
 - Prometheus + Grafana monitoring
-- Live trailing stop chart per ticker
 ### P3
 - Authentication system, multi-broker support, CSV export
 
 ## Next Tasks
 1. Confirmation dialogs for high-risk/volatile stock actions
-2. Live trailing stop chart using Recharts
+2. Input validation pass
 3. Alpaca paper trading API integration
