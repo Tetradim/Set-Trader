@@ -7,10 +7,8 @@ import {
   WifiOff,
   Play,
   Square,
-  Pause,
   TrendingUp,
   TrendingDown,
-  DollarSign,
   Zap,
   Command,
   Banknote,
@@ -20,7 +18,6 @@ export function Header() {
   const { send } = useWebSocket();
   const connected = useStore((s) => s.connected);
   const running = useStore((s) => s.running);
-  const paused = useStore((s) => s.paused);
   const marketOpen = useStore((s) => s.marketOpen);
   const profits = useStore((s) => s.profits);
   const prices = useStore((s) => s.prices);
@@ -39,7 +36,7 @@ export function Header() {
           <div className="flex items-center gap-3">
             <div className="relative">
               <Activity className="w-7 h-7 text-primary" />
-              {running && !paused && (
+              {running && (
                 <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse" />
               )}
             </div>
@@ -130,19 +127,6 @@ export function Header() {
               <Square size={13} fill="currentColor" /> Stop Bot
             </button>
           )}
-
-          <button
-            data-testid="pause-bot-btn"
-            onClick={() => send('GLOBAL_PAUSE', { pause: !paused })}
-            className={`p-2 rounded-lg transition-all border ${
-              paused
-                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
-            }`}
-            title={paused ? 'Resume trading' : 'Pause all trading'}
-          >
-            <Pause size={15} />
-          </button>
         </div>
       </div>
     </header>

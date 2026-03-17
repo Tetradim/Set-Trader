@@ -658,8 +658,7 @@ class TelegramService:
 
     def _register_handlers(self):
         app = self._app
-        app.add_handler(CommandHandler("pause", self._cmd_pause))
-        app.add_handler(CommandHandler("resume", self._cmd_resume))
+        app.add_handler(CommandHandler("stop", self._cmd_stop))
         app.add_handler(CommandHandler("start", self._cmd_start_bot))
         app.add_handler(CommandHandler("stop", self._cmd_stop_bot))
         app.add_handler(CommandHandler("status", self._cmd_status))
@@ -676,23 +675,24 @@ class TelegramService:
             return True
         return cid in self.chat_ids
 
-    async def _cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    async def _cmd_stop(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Toggle bot: if running → stop, if stopped → start."""
         if not self._authorised(update):
             return await update.message.reply_text("Unauthorised.")
-        engine.paused = True
-        await engine.save_state()
-        await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": True})
-        await update.message.reply_text("All trading PAUSED.")
-        await self._broadcast_alert("Trading has been PAUSED via Telegram command.")
-
-    async def _cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._authorised(update):
-            return await update.message.reply_text("Unauthorised.")
-        engine.paused = False
-        await engine.save_state()
-        await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": False})
-        await update.message.reply_text("Trading RESUMED.")
-        await self._broadcast_alert("Trading has been RESUMED via Telegram command.")
+        if engine.running:
+            engine.running = False
+            engine.paused = False
+            await engine.save_state()
+            await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": False})
+            await update.message.reply_text("Bot STOPPED.")
+            await self._broadcast_alert("Bot has been STOPPED via Telegram /stop command.")
+        else:
+            engine.running = True
+            engine.paused = False
+            await engine.save_state()
+            await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": False})
+            await update.message.reply_text("Bot STARTED.")
+            await self._broadcast_alert("Bot has been STARTED via Telegram /stop command.")
 
     async def _cmd_start_bot(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorised(update):
@@ -1165,13 +1165,6 @@ async def stop_bot():
     logger.info("Bot STOPPED via API")
     return {"running": False}
 
-@api.post("/bot/pause")
-async def pause_bot():
-    engine.paused = not engine.paused
-    await engine.save_state()
-    await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": engine.paused})
-    logger.info(f"Bot {'PAUSED' if engine.paused else 'UNPAUSED'} via API")
-    return {"paused": engine.paused}
 
 # Take Profit: zero out P&L for a symbol, move to cash reserve
 @api.post("/tickers/{symbol}/take-profit")
@@ -1344,20 +1337,17 @@ async def ws_endpoint(websocket: WebSocket):
                     if doc:
                         await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
 
-            elif action == "GLOBAL_PAUSE":
-                engine.paused = msg.get("pause", False)
-                await engine.save_state()
-                await ws_manager.broadcast({"type": "BOT_STATUS", "running": engine.running, "paused": engine.paused})
-
             elif action == "START_BOT":
                 engine.running = True
+                engine.paused = False
                 await engine.save_state()
-                await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": engine.paused})
+                await ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": False})
 
             elif action == "STOP_BOT":
                 engine.running = False
+                engine.paused = False
                 await engine.save_state()
-                await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": engine.paused})
+                await ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": False})
 
             elif action == "APPLY_STRATEGY":
                 sym = msg.get("symbol", "").upper()

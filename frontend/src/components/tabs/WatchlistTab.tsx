@@ -1,14 +1,10 @@
 import { useStore } from '@/stores/useStore';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { TickerCard } from '../TickerCard';
 import { Checkbox } from '@/components/ui/checkbox';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle } from 'lucide-react';
 
 export function WatchlistTab() {
-  const { send } = useWebSocket();
   const tickers = useStore((s) => Object.values(s.tickers));
-  const paused = useStore((s) => s.paused);
   const running = useStore((s) => s.running);
   const connected = useStore((s) => s.connected);
   const simulate247 = useStore((s) => s.simulate247);
@@ -22,19 +18,6 @@ export function WatchlistTab() {
       {/* Control bar */}
       <div className="flex items-center justify-between p-3 rounded-lg glass border border-border">
         <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Checkbox
-              data-testid="global-pause-checkbox"
-              checked={paused}
-              onCheckedChange={(checked: boolean) => send('GLOBAL_PAUSE', { pause: checked })}
-              className="data-[state=checked]:bg-amber-500 data-[state=checked]:border-amber-500"
-            />
-            <label className="text-xs font-medium text-muted-foreground cursor-pointer flex items-center gap-1.5">
-              <AlertTriangle size={12} className="text-amber-400" />
-              Emergency Pause
-            </label>
-          </div>
-
           <div className="flex items-center gap-2">
             <Checkbox
               data-testid="simulate-247-checkbox"
@@ -53,7 +36,7 @@ export function WatchlistTab() {
           </span>
           <div className={`h-2 w-2 rounded-full ${
             connected
-              ? running && !paused ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]' : 'bg-emerald-400'
+              ? running ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]' : 'bg-emerald-400'
               : 'bg-red-400 animate-ping'
           }`} />
         </div>
