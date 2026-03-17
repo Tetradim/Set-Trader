@@ -1,43 +1,39 @@
-import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { memo, useState, useCallback, useMemo } from 'react';
 import { useStore, TickerConfig, PricePoint } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  ChevronDown,
-  ChevronUp,
   Trash2,
   TrendingUp,
   TrendingDown,
   Zap,
   ShieldAlert,
-  BarChart3,
   Banknote,
-  Minus,
-  Plus,
   Activity,
+  GripVertical,
+  Settings2,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface Props {
   ticker: TickerConfig;
+  onConfigOpen: (symbol: string) => void;
 }
 
-export const TickerCard = memo(function TickerCard({ ticker }: Props) {
+export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Props) {
   const { send } = useWebSocket();
   const price = useStore((s) => s.prices[ticker.symbol] ?? 0);
   const pnl = useStore((s) => s.profits[ticker.symbol] ?? 0);
   const position = useStore((s) => s.positions[ticker.symbol]);
-  const incrementStep = useStore((s) => s.incrementStep);
-  const decrementStep = useStore((s) => s.decrementStep);
   const chartEnabled = useStore((s) => s.chartEnabled[ticker.symbol] ?? false);
   const toggleChart = useStore((s) => s.toggleChart);
   const priceHistory = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
-  const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP, setConfirmTP] = useState(false);
 
@@ -57,23 +53,6 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
     send('DELETE_TICKER', { symbol: ticker.symbol });
   };
 
-  const handleFieldChange = useCallback((field: string, value: any) => {
-    // When switching from percent to dollar mode, convert negative offsets to absolute price
-    if (field === 'buy_percent' && value === false && ticker.buy_offset < 0) {
-      send('UPDATE_TICKER', { symbol: ticker.symbol, buy_percent: false, buy_offset: Math.abs(ticker.buy_offset) });
-      return;
-    }
-    if (field === 'sell_percent' && value === false && ticker.sell_offset < 0) {
-      send('UPDATE_TICKER', { symbol: ticker.symbol, sell_percent: false, sell_offset: Math.abs(ticker.sell_offset) });
-      return;
-    }
-    if (field === 'stop_percent' && value === false && ticker.stop_offset < 0) {
-      send('UPDATE_TICKER', { symbol: ticker.symbol, stop_percent: false, stop_offset: Math.abs(ticker.stop_offset) });
-      return;
-    }
-    send('UPDATE_TICKER', { symbol: ticker.symbol, [field]: value });
-  }, [send, ticker.symbol, ticker.buy_offset, ticker.sell_offset, ticker.stop_offset]);
-
   const handleTakeProfit = () => {
     if (!confirmTP) {
       setConfirmTP(true);
@@ -88,19 +67,36 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   const avgPrice = price > 0 ? price : 100;
   const entryPrice = position?.avg_entry || 0;
 
-  // Buy target: always relative to current avg
   const buyTarget = ticker.buy_percent
     ? (avgPrice * (1 + ticker.buy_offset / 100)).toFixed(2)
     : ticker.buy_offset.toFixed(2);
 
-  // Sell target: when holding a position in % mode, anchor to entry price
   const sellAnchor = (entryPrice > 0 && ticker.sell_percent) ? entryPrice : avgPrice;
   const sellTarget = ticker.sell_percent
     ? (sellAnchor * (1 + ticker.sell_offset / 100)).toFixed(2)
     : ticker.sell_offset.toFixed(2);
 
+  /* dnd-kit sortable */
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: ticker.symbol });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : 'auto' as any,
+  };
+
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       data-testid={`ticker-card-${ticker.symbol}`}
       className={`
         relative overflow-hidden rounded-xl border transition-all duration-300
@@ -112,18 +108,28 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
         }
         glass hover:border-primary/40
       `}
+      onDoubleClick={() => onConfigOpen(ticker.symbol)}
     >
       {isActive && (
-        <div
-          className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-3xl opacity-20 ${
-            isPositive ? 'bg-emerald-500' : 'bg-red-500'
-          }`}
-        />
+        <div className={`absolute -right-8 -top-8 h-24 w-24 rounded-full blur-3xl opacity-20 ${
+          isPositive ? 'bg-emerald-500' : 'bg-red-500'
+        }`} />
       )}
 
       <div className="relative p-4">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {/* Drag handle */}
+            <button
+              {...attributes}
+              {...listeners}
+              className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground transition-colors touch-none"
+              data-testid={`drag-handle-${ticker.symbol}`}
+              title="Drag to reorder"
+            >
+              <GripVertical size={14} />
+            </button>
+
             <Checkbox
               data-testid={`chart-toggle-${ticker.symbol}`}
               checked={chartEnabled}
@@ -138,19 +144,13 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                 AUTO-STOPPED
               </span>
             )}
-            <span
-              className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-                isActive
-                  ? 'bg-primary/20 text-primary border border-primary/30'
-                  : 'bg-secondary text-muted-foreground'
-              }`}
-            >
+            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+              isActive ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-secondary text-muted-foreground'
+            }`}>
               {isActive ? 'LIVE' : 'OFF'}
             </span>
             {ticker.trailing_enabled && (
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">
-                TRAIL
-              </span>
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">TRAIL</span>
             )}
           </div>
           <Switch
@@ -165,9 +165,7 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
         <div className="grid grid-cols-2 gap-4 mb-3">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Price</p>
-            <p className="font-mono text-xl font-bold tracking-tight text-foreground">
-              ${price.toFixed(2)}
-            </p>
+            <p className="font-mono text-xl font-bold tracking-tight text-foreground">${price.toFixed(2)}</p>
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Net P&L</p>
@@ -206,27 +204,24 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
         {/* Live Price Chart */}
         {chartEnabled && <LivePriceChart ticker={ticker} priceHistory={priceHistory} />}
 
-        {/* Controls row: Expand / Take Profit / Delete */}
+        {/* Controls row */}
         <div className="flex items-center justify-between mt-3">
           <button
             data-testid={`ticker-expand-${ticker.symbol}`}
-            onClick={() => setExpanded(!expanded)}
+            onClick={() => onConfigOpen(ticker.symbol)}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            {expanded ? 'Collapse' : 'Configure'}
+            <Settings2 size={14} />
+            Configure
           </button>
 
           <div className="flex items-center gap-3">
-            {/* Take Profit button — only shows when there's P&L */}
             {pnl !== 0 && (
               <button
                 data-testid={`take-profit-${ticker.symbol}`}
                 onClick={handleTakeProfit}
                 className={`flex items-center gap-1 text-xs transition-all ${
-                  confirmTP
-                    ? 'text-amber-400 font-bold animate-pulse'
-                    : 'text-emerald-400 hover:text-emerald-300'
+                  confirmTP ? 'text-amber-400 font-bold animate-pulse' : 'text-emerald-400 hover:text-emerald-300'
                 }`}
               >
                 <Banknote size={12} />
@@ -238,9 +233,7 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
               data-testid={`ticker-delete-${ticker.symbol}`}
               onClick={handleDelete}
               className={`flex items-center gap-1 text-xs transition-all ${
-                confirmDelete
-                  ? 'text-red-400 font-bold animate-pulse'
-                  : 'text-muted-foreground hover:text-red-400'
+                confirmDelete ? 'text-red-400 font-bold animate-pulse' : 'text-muted-foreground hover:text-red-400'
               }`}
             >
               <Trash2 size={12} />
@@ -249,273 +242,11 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
           </div>
         </div>
       </div>
-
-      {/* Expanded config */}
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="p-4 border-t border-border bg-secondary/20 space-y-4">
-              {/* Top config toggles */}
-              <div className="flex items-center justify-end gap-4">
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-muted-foreground font-medium cursor-pointer" htmlFor={`compound-${ticker.symbol}`}>
-                    Compound profits
-                  </label>
-                  <Checkbox
-                    id={`compound-${ticker.symbol}`}
-                    data-testid={`compound-toggle-${ticker.symbol}`}
-                    checked={ticker.compound_profits ?? true}
-                    onCheckedChange={(v) => handleFieldChange('compound_profits', !!v)}
-                    className="h-3.5 w-3.5 data-[state=checked]:bg-emerald-400 data-[state=checked]:border-emerald-400"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-muted-foreground font-medium cursor-pointer" htmlFor={`wait-day-${ticker.symbol}`}>
-                    Wait 1 day before selling
-                  </label>
-                  <Checkbox
-                    id={`wait-day-${ticker.symbol}`}
-                    data-testid={`wait-day-toggle-${ticker.symbol}`}
-                    checked={ticker.wait_day_after_buy ?? false}
-                    onCheckedChange={(v) => handleFieldChange('wait_day_after_buy', !!v)}
-                    className="h-3.5 w-3.5 data-[state=checked]:bg-amber-400 data-[state=checked]:border-amber-400"
-                  />
-                </div>
-              </div>
-
-              {/* Auto-stop alert banner */}
-              {ticker.auto_stopped && (
-                <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30" data-testid={`auto-stop-banner-${ticker.symbol}`}>
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert size={14} className="text-red-500 shrink-0" />
-                    <p className="text-xs text-red-400">
-                      <span className="font-bold">Auto-stopped:</span> {ticker.auto_stop_reason || 'Loss limit reached'}
-                    </p>
-                  </div>
-                  <button
-                    data-testid={`re-enable-${ticker.symbol}`}
-                    onClick={() => {
-                      handleFieldChange('auto_stopped', false);
-                      handleFieldChange('auto_stop_reason', '');
-                      handleFieldChange('enabled', true);
-                    }}
-                    className="text-[10px] font-bold uppercase px-3 py-1 rounded bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40 transition-colors shrink-0"
-                  >
-                    Re-enable
-                  </button>
-                </div>
-              )}
-
-              {/* Risk Controls */}
-              <ConfigSection title="Risk Controls" icon={ShieldAlert} color="text-orange-400">
-                <SteppedInput
-                  label="Max Daily Loss ($)"
-                  value={ticker.max_daily_loss ?? 0}
-                  onChange={(v) => handleFieldChange('max_daily_loss', v)}
-                  min={0} max={99999}
-                  incrementStep={incrementStep} decrementStep={decrementStep}
-                />
-                <SteppedInput
-                  label="Max Consec. Losses"
-                  value={ticker.max_consecutive_losses ?? 0}
-                  onChange={(v) => handleFieldChange('max_consecutive_losses', Math.round(v))}
-                  min={0} max={100}
-                  incrementStep={1} decrementStep={1}
-                />
-                <div className="col-span-2 text-[9px] text-muted-foreground/60">
-                  Set to 0 to disable. When triggered, ticker is disabled and requires manual re-enable.
-                </div>
-              </ConfigSection>
-
-              {/* Auto Rebracket */}
-              <ConfigSection title="Auto Rebracket" icon={Activity} color="text-cyan-400">
-                <div className="col-span-2">
-                  <ConfigToggle
-                    label="Enable Auto Rebracket"
-                    checked={ticker.auto_rebracket ?? false}
-                    onChange={(v) => handleFieldChange('auto_rebracket', v)}
-                    accent
-                  />
-                </div>
-                {(ticker.auto_rebracket ?? false) && (
-                  <>
-                    <SteppedInput
-                      label="Threshold ($)"
-                      value={ticker.rebracket_threshold ?? 2.0}
-                      onChange={(v) => handleFieldChange('rebracket_threshold', v)}
-                      min={0.01} max={99999}
-                      incrementStep={incrementStep} decrementStep={decrementStep}
-                    />
-                    <SteppedInput
-                      label="Spread ($)"
-                      value={ticker.rebracket_spread ?? 0.80}
-                      onChange={(v) => handleFieldChange('rebracket_spread', v)}
-                      min={0.01} max={99999}
-                      incrementStep={incrementStep} decrementStep={decrementStep}
-                    />
-                    <SteppedInput
-                      label="Cooldown (s)"
-                      value={ticker.rebracket_cooldown ?? 0}
-                      onChange={(v) => handleFieldChange('rebracket_cooldown', v)}
-                      min={0} max={3600}
-                      incrementStep={5} decrementStep={5}
-                    />
-                    <SteppedInput
-                      label="Lookback Ticks"
-                      value={ticker.rebracket_lookback ?? 10}
-                      onChange={(v) => handleFieldChange('rebracket_lookback', v)}
-                      min={2} max={100}
-                      incrementStep={1} decrementStep={1}
-                    />
-                    <SteppedInput
-                      label="Buffer ($)"
-                      value={ticker.rebracket_buffer ?? 0.10}
-                      onChange={(v) => handleFieldChange('rebracket_buffer', v)}
-                      min={0} max={99999}
-                      incrementStep={incrementStep} decrementStep={decrementStep}
-                    />
-                    <div className="col-span-2 text-[9px] text-muted-foreground/60">
-                      Threshold: drift distance to trigger. Spread: new bracket width. Cooldown: min seconds between rebrackets (0 = none). Lookback: price ticks to find recent low. Buffer: gap below recent low for new buy.
-                    </div>
-                  </>
-                )}
-              </ConfigSection>
-
-              {/* Buy Rules */}
-              <ConfigSection title="Buy Rules" icon={TrendingDown} color="text-emerald-400">
-                <OrderTypeToggle
-                  value={(ticker.buy_order_type ?? 'limit') as 'limit' | 'market'}
-                  onChange={(v) => handleFieldChange('buy_order_type', v)}
-                  testId={`buy-order-type-${ticker.symbol}`}
-                />
-                <OffsetInput
-                  label={ticker.buy_percent ? 'Buy Offset (%)' : 'Buy Price ($)'}
-                  value={ticker.buy_offset}
-                  isPercent={ticker.buy_percent}
-                  mode="buy"
-                  onChange={(v) => handleFieldChange('buy_offset', v)}
-                  incrementStep={incrementStep}
-                  decrementStep={decrementStep}
-                />
-                <ConfigToggle label="Use %" checked={ticker.buy_percent}
-                  onChange={(v) => handleFieldChange('buy_percent', v)} />
-                <SteppedInput label="Buy Power ($)" value={ticker.base_power}
-                  onChange={(v) => handleFieldChange('base_power', v)} min={1}
-                  incrementStep={incrementStep} decrementStep={decrementStep} />
-                <SteppedInput label="Avg Period (days)" value={ticker.avg_days}
-                  onChange={(v) => handleFieldChange('avg_days', Math.round(v))} min={1} max={365}
-                  incrementStep={1} decrementStep={1} />
-              </ConfigSection>
-
-              {/* Sell Rules */}
-              <ConfigSection title="Sell Rules" icon={TrendingUp} color="text-blue-400">
-                <OrderTypeToggle
-                  value={(ticker.sell_order_type ?? 'limit') as 'limit' | 'market'}
-                  onChange={(v) => handleFieldChange('sell_order_type', v)}
-                  testId={`sell-order-type-${ticker.symbol}`}
-                />
-                <OffsetInput
-                  label={ticker.sell_percent ? 'Sell Offset (%)' : 'Sell Price ($)'}
-                  value={ticker.sell_offset}
-                  isPercent={ticker.sell_percent}
-                  mode="sell"
-                  onChange={(v) => handleFieldChange('sell_offset', v)}
-                  incrementStep={incrementStep}
-                  decrementStep={decrementStep}
-                />
-                <ConfigToggle label="Use %" checked={ticker.sell_percent}
-                  onChange={(v) => handleFieldChange('sell_percent', v)} />
-              </ConfigSection>
-
-              {/* Stop Loss */}
-              <ConfigSection title="Stop Loss" icon={ShieldAlert} color="text-red-400">
-                <OrderTypeToggle
-                  value={(ticker.stop_order_type ?? 'limit') as 'limit' | 'market'}
-                  onChange={(v) => handleFieldChange('stop_order_type', v)}
-                  testId={`stop-order-type-${ticker.symbol}`}
-                />
-                <OffsetInput
-                  label={ticker.stop_percent ? 'Stop Offset (%)' : 'Stop Price ($)'}
-                  value={ticker.stop_offset}
-                  isPercent={ticker.stop_percent}
-                  mode="stop"
-                  onChange={(v) => handleFieldChange('stop_offset', v)}
-                  incrementStep={incrementStep}
-                  decrementStep={decrementStep}
-                />
-                <ConfigToggle label="Use %" checked={ticker.stop_percent}
-                  onChange={(v) => handleFieldChange('stop_percent', v)} />
-              </ConfigSection>
-
-              {/* Trailing Stop */}
-              <ConfigSection title="Trailing Stop" icon={BarChart3} color="text-accent">
-                <ConfigToggle
-                  label="Enable Trailing"
-                  checked={ticker.trailing_enabled}
-                  onChange={(v) => handleFieldChange('trailing_enabled', v)}
-                  accent
-                />
-                {ticker.trailing_enabled && (
-                  <>
-                    <OrderTypeToggle
-                      value={(ticker.trailing_order_type ?? 'limit') as 'limit' | 'market'}
-                      onChange={(v) => handleFieldChange('trailing_order_type', v)}
-                      testId={`trailing-order-type-${ticker.symbol}`}
-                    />
-                    <SteppedInput
-                      label={(ticker.trailing_percent_mode ?? true) ? 'Trail %' : 'Trail $'}
-                      value={ticker.trailing_percent}
-                      onChange={(v) => handleFieldChange('trailing_percent', v)}
-                      min={0.01} max={(ticker.trailing_percent_mode ?? true) ? 50 : 99999}
-                      incrementStep={incrementStep} decrementStep={decrementStep}
-                    />
-                    <ConfigToggle label="Use %" checked={ticker.trailing_percent_mode ?? true}
-                      onChange={(v) => handleFieldChange('trailing_percent_mode', v)} />
-                  </>
-                )}
-              </ConfigSection>
-
-              {/* Strategy Presets */}
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
-                  Preset Strategies
-                </p>
-                <div className="flex gap-2 flex-wrap">
-                  {[
-                    { id: 'conservative_1y', label: 'Conservative 1Y' },
-                    { id: 'aggressive_monthly', label: 'Aggressive Monthly' },
-                    { id: 'swing_trader', label: 'Swing Trader' },
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      data-testid={`strategy-${s.id}-${ticker.symbol}`}
-                      onClick={() => send('APPLY_STRATEGY', { symbol: ticker.symbol, preset: s.id })}
-                      className={`text-[10px] px-2.5 py-1 rounded-full border transition-all ${
-                        ticker.strategy === s.id
-                          ? 'bg-primary/20 text-primary border-primary/40'
-                          : 'bg-secondary text-muted-foreground border-border hover:border-primary/30 hover:text-foreground'
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 });
 
-/* --- SUB COMPONENTS --- */
-
+/* --- LivePriceChart --- */
 function LivePriceChart({ ticker, priceHistory }: { ticker: TickerConfig; priceHistory: PricePoint[] }) {
   const chartData = useMemo(() => {
     if (priceHistory.length < 2) return [];
@@ -525,9 +256,7 @@ function LivePriceChart({ ticker, priceHistory }: { ticker: TickerConfig; priceH
       const trailMode = ticker.trailing_percent_mode ?? true;
       const trailVal = ticker.trailing_percent;
       const trailStop = ticker.trailing_enabled
-        ? trailMode
-          ? runningHigh * (1 - trailVal / 100)
-          : runningHigh - trailVal
+        ? trailMode ? runningHigh * (1 - trailVal / 100) : runningHigh - trailVal
         : undefined;
       return {
         time: new Date(p.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -575,313 +304,6 @@ function LivePriceChart({ ticker, priceHistory }: { ticker: TickerConfig; priceH
           )}
         </LineChart>
       </ResponsiveContainer>
-    </div>
-  );
-}
-
-function ConfigSection({
-  title, icon: Icon, color, children,
-}: {
-  title: string; icon: any; color: string; children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <p className={`text-[10px] uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5 ${color}`}>
-        <Icon size={11} /> {title}
-      </p>
-      <div className="grid grid-cols-2 gap-2">{children}</div>
-    </div>
-  );
-}
-
-function OrderTypeToggle({
-  value, onChange, testId,
-}: {
-  value: 'limit' | 'market'; onChange: (v: string) => void; testId: string;
-}) {
-  return (
-    <div className="col-span-2 flex items-center gap-1 p-0.5 rounded-md bg-secondary/60 border border-border/40" data-testid={testId}>
-      <button
-        type="button"
-        onClick={() => onChange('limit')}
-        className={`flex-1 text-[10px] font-bold uppercase tracking-wider py-1 rounded transition-all ${
-          value === 'limit'
-            ? 'bg-primary/20 text-primary shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-        data-testid={`${testId}-limit`}
-      >
-        Limit
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('market')}
-        className={`flex-1 text-[10px] font-bold uppercase tracking-wider py-1 rounded transition-all ${
-          value === 'market'
-            ? 'bg-amber-400/20 text-amber-400 shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-        data-testid={`${testId}-market`}
-      >
-        Market
-      </button>
-    </div>
-  );
-}
-
-/**
- * useDecimalInput: hook that manages a local text buffer so the user can
- * freely type decimals ("250.", "0.0") without the value snapping away.
- * Commits the parsed number to the parent on blur.
- */
-function useDecimalInput(externalValue: number, commit: (v: number) => void) {
-  const [text, setText] = useState(String(externalValue));
-  const [focused, setFocused] = useState(false);
-
-  // Sync from parent when NOT focused (e.g. arrow buttons, strategy presets)
-  useEffect(() => {
-    if (!focused) setText(String(externalValue));
-  }, [externalValue, focused]);
-
-  const handleChange = (raw: string) => {
-    // Allow empty, digits, one leading minus, one dot
-    if (/^-?\d*\.?\d*$/.test(raw)) {
-      setText(raw);
-    }
-  };
-
-  const handleBlur = () => {
-    setFocused(false);
-    const num = parseFloat(text);
-    if (!isNaN(num)) {
-      commit(num);
-    } else {
-      setText(String(externalValue));
-    }
-  };
-
-  return { text, setText, focused, setFocused, handleChange, handleBlur };
-}
-
-/**
- * OffsetInput: Smart input that handles two modes:
- * - Percent mode (buy/stop): locked "–" prefix, user types magnitude, stored negative
- * - Percent mode (sell): regular positive percent input
- * - Dollar mode: "$" prefix, user types the absolute target price (positive number)
- */
-function OffsetInput({
-  label, value, isPercent, mode, onChange, incrementStep, decrementStep,
-}: {
-  label: string; value: number; isPercent: boolean;
-  mode: 'buy' | 'sell' | 'stop';
-  onChange: (v: number) => void;
-  incrementStep: number; decrementStep: number;
-}) {
-  const isNegativePercent = isPercent && (mode === 'buy' || mode === 'stop');
-
-  if (!isPercent) {
-    // DOLLAR MODE: absolute target price (always positive)
-    const dec = useDecimalInput(Math.abs(value), (num) => onChange(Math.abs(num)));
-    return (
-      <div>
-        <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
-        <div className="flex items-center">
-          <span className="flex items-center justify-center h-[26px] w-6 bg-emerald-500/15 text-emerald-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
-            $
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={dec.text}
-            onChange={(e) => dec.handleChange(e.target.value)}
-            onFocus={() => dec.setFocused(true)}
-            onBlur={dec.handleBlur}
-            className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
-            data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
-          />
-          <div className="flex flex-col h-[26px] shrink-0">
-            <button
-              onClick={() => onChange(parseFloat((value + incrementStep).toFixed(4)))}
-              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            >
-              <Plus size={8} />
-            </button>
-            <button
-              onClick={() => onChange(parseFloat(Math.max(0, value - decrementStep).toFixed(4)))}
-              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            >
-              <Minus size={8} />
-            </button>
-          </div>
-        </div>
-        <p className="text-[8px] text-muted-foreground/50 mt-0.5">
-          {mode === 'buy' ? 'Buy' : mode === 'sell' ? 'Sell' : 'Stop'} when price hits ${Math.abs(value).toFixed(2)}
-        </p>
-      </div>
-    );
-  }
-
-  if (isNegativePercent) {
-    // PERCENT MODE (buy/stop): locked "–" prefix, store negative
-    const magnitude = Math.abs(value);
-    const dec = useDecimalInput(magnitude, (num) => onChange(-Math.abs(num)));
-    return (
-      <div>
-        <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
-        <div className="flex items-center">
-          <span className="flex items-center justify-center h-[26px] w-6 bg-red-500/15 text-red-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
-            &ndash;
-          </span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={dec.text}
-            onChange={(e) => dec.handleChange(e.target.value)}
-            onFocus={() => dec.setFocused(true)}
-            onBlur={dec.handleBlur}
-            className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
-            data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
-          />
-          <div className="flex flex-col h-[26px] shrink-0">
-            <button
-              onClick={() => onChange(-Math.max(0, magnitude - incrementStep))}
-              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-              title={`+${incrementStep}`}
-            >
-              <Plus size={8} />
-            </button>
-            <button
-              onClick={() => onChange(-(magnitude + decrementStep))}
-              className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-              title={`-${decrementStep}`}
-            >
-              <Minus size={8} />
-            </button>
-          </div>
-        </div>
-        <p className="text-[8px] text-muted-foreground/50 mt-0.5">{value}% from avg</p>
-      </div>
-    );
-  }
-
-  // PERCENT MODE (sell): positive percent
-  const dec = useDecimalInput(value, (num) => onChange(Math.abs(num)));
-  return (
-    <div>
-      <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
-      <div className="flex items-center">
-        <span className="flex items-center justify-center h-[26px] w-6 bg-blue-500/15 text-blue-400 border border-border border-r-0 rounded-l text-xs font-bold shrink-0">
-          +
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={dec.text}
-          onChange={(e) => dec.handleChange(e.target.value)}
-          onFocus={() => dec.setFocused(true)}
-          onBlur={dec.handleBlur}
-          className="w-full h-[26px] bg-background border-y border-border px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground text-center"
-          data-testid={`input-${label.toLowerCase().replace(/[\s()$%]/g, '-')}`}
-        />
-        <div className="flex flex-col h-[26px] shrink-0">
-          <button
-            onClick={() => onChange(parseFloat((value + incrementStep).toFixed(4)))}
-            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-          >
-            <Plus size={8} />
-          </button>
-          <button
-            onClick={() => onChange(parseFloat(Math.max(0, value - decrementStep).toFixed(4)))}
-            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-          >
-            <Minus size={8} />
-          </button>
-        </div>
-      </div>
-      <p className="text-[8px] text-muted-foreground/50 mt-0.5">+{value}% from avg</p>
-    </div>
-  );
-}
-
-/**
- * SteppedInput: general number input with custom increment/decrement arrows.
- * Uses local text buffer so decimals can be typed freely.
- */
-function SteppedInput({
-  label, value, onChange, min, max, incrementStep, decrementStep,
-}: {
-  label: string; value: number; onChange: (v: number) => void;
-  min?: number; max?: number;
-  incrementStep: number; decrementStep: number;
-}) {
-  const dec = useDecimalInput(value, (num) => {
-    if (min !== undefined && num < min) return;
-    if (max !== undefined && num > max) return;
-    onChange(num);
-  });
-
-  const nudgeUp = () => {
-    let next = value + incrementStep;
-    if (max !== undefined) next = Math.min(next, max);
-    onChange(parseFloat(next.toFixed(4)));
-  };
-  const nudgeDown = () => {
-    let next = value - decrementStep;
-    if (min !== undefined) next = Math.max(next, min);
-    onChange(parseFloat(next.toFixed(4)));
-  };
-
-  return (
-    <div>
-      <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
-      <div className="flex items-center">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={dec.text}
-          onChange={(e) => dec.handleChange(e.target.value)}
-          onFocus={() => dec.setFocused(true)}
-          onBlur={dec.handleBlur}
-          className="w-full h-[26px] bg-background border border-border rounded-l px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        />
-        <div className="flex flex-col h-[26px] shrink-0">
-          <button
-            onClick={nudgeUp}
-            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 rounded-tr text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            title={`+${incrementStep}`}
-          >
-            <Plus size={8} />
-          </button>
-          <button
-            onClick={nudgeDown}
-            className="flex items-center justify-center h-[13px] w-5 bg-secondary border border-border border-l-0 border-t-0 rounded-br text-muted-foreground hover:text-foreground hover:bg-primary/20 transition-colors"
-            title={`-${decrementStep}`}
-          >
-            <Minus size={8} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConfigToggle({
-  label, checked, onChange, accent,
-}: {
-  label: string; checked: boolean; onChange: (v: boolean) => void; accent?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <Checkbox
-        checked={checked}
-        onCheckedChange={onChange}
-        className={`${
-          accent
-            ? 'data-[state=checked]:bg-accent data-[state=checked]:border-accent'
-            : 'data-[state=checked]:bg-primary data-[state=checked]:border-primary'
-        }`}
-      />
-      <label className="text-[10px] text-muted-foreground cursor-pointer">{label}</label>
     </div>
   );
 }

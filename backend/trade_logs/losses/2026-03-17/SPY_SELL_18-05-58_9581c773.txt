@@ -1,0 +1,36 @@
+============================================================
+  LOSS TRADE LOG — SPY
+============================================================
+
+Trade ID:       9581c773-fd0c-4f8e-9eab-08752859c04f
+Timestamp:      2026-03-17 18:05:58 UTC
+Symbol:         SPY
+Side:           SELL
+
+--- ORDER INFO ---
+Order Type:     LIMIT
+Rule Mode:      DOLLAR
+
+--- PRICES ---
+Fill Price:     $672.13
+Entry Price:    $672.48
+Target Price:   $672.13
+Avg Price (MA): $680.37
+
+--- POSITION ---
+Quantity:       15.8089
+Total Value:    $10625.64
+Buy Power:      $10631.17
+
+--- TARGETS AT TIME OF TRADE ---
+Sell Target:    $672.13
+Stop Target:    $638.86
+
+--- P&L ---
+P&L:            $-5.53
+% Change:       -0.05%
+
+--- REASON ---
+[LMT] Price $672.13 >= sell target $672.13
+
+============================================================

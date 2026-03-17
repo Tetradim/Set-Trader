@@ -79,6 +79,7 @@ class TickerConfig(BaseModel):
     rebracket_buffer: float = 0.10     # $ below recent low for new buy target
     enabled: bool = True
     strategy: str = "custom"
+    sort_order: int = 0
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class TickerCreate(BaseModel):
@@ -1170,7 +1171,7 @@ async def health():
 
 @api.get("/tickers")
 async def get_tickers():
-    docs = await db.tickers.find({}, {"_id": 0}).to_list(100)
+    docs = await db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
     return docs
 
 @api.post("/tickers")
@@ -1179,7 +1180,10 @@ async def add_ticker(body: TickerCreate):
     existing = await db.tickers.find_one({"symbol": sym})
     if existing:
         raise HTTPException(400, f"{sym} already exists")
-    t = TickerConfig(symbol=sym, base_power=body.base_power)
+    # Auto-assign sort_order: put new tickers at the end
+    max_order = await db.tickers.find_one(sort=[("sort_order", -1)], projection={"sort_order": 1})
+    next_order = (max_order.get("sort_order", 0) + 1) if max_order else 0
+    t = TickerConfig(symbol=sym, base_power=body.base_power, sort_order=next_order)
     doc = t.model_dump()
     await db.tickers.insert_one(doc)
     doc.pop("_id", None)
@@ -1209,6 +1213,18 @@ async def delete_ticker(symbol: str):
     engine._trailing_highs.pop(sym, None)
     await ws_manager.broadcast({"type": "TICKER_DELETED", "symbol": sym})
     return {"deleted": sym}
+
+@api.post("/tickers/reorder")
+async def reorder_tickers(body: dict):
+    """Update sort_order for all tickers. Expects: {"order": ["SPY", "NVDA", "TSLA"]}"""
+    order = body.get("order", [])
+    if not order:
+        raise HTTPException(400, "No order provided")
+    for i, sym in enumerate(order):
+        await db.tickers.update_one({"symbol": sym.upper()}, {"$set": {"sort_order": i}})
+    docs = await db.tickers.find({}, {"_id": 0}).to_list(100)
+    await ws_manager.broadcast({"type": "TICKERS_REORDERED", "tickers": docs})
+    return {"status": "ok"}
 
 @api.post("/tickers/{symbol}/strategy/{preset}")
 async def apply_strategy(symbol: str, preset: str):

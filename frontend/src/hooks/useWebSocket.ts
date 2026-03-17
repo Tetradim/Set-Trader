@@ -76,6 +76,10 @@ export function useWebSocket() {
           store.removeTicker(data.symbol);
         }
 
+        if (data.type === 'TICKERS_REORDERED') {
+          if (data.tickers) store.setTickers(data.tickers);
+        }
+
         if (data.type === 'BOT_STATUS') {
           store.setRunning(data.running ?? store.running);
           store.setPaused(data.paused ?? store.paused);
