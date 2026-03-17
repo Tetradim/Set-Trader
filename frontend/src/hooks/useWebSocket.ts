@@ -9,7 +9,9 @@ function getWsUrl(): string {
     const proto = url.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${url.host}/api/ws`;
   }
-  return `ws://${window.location.hostname}:8001/api/ws`;
+  // Desktop mode: frontend served from same host as backend
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${window.location.host}/api/ws`;
 }
 
 export function useWebSocket() {

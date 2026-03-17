@@ -1,129 +1,180 @@
-# BracketBot Windows Build & Run Guide
+# BracketBot Windows Build & Distribution Guide
 
-## Quick Start (From Source)
+## Overview
 
-### Prerequisites
-- **Python 3.10+** — [python.org](https://www.python.org/downloads/)
-- **Node.js 18+** — [nodejs.org](https://nodejs.org/)
-- **Yarn** — `npm install -g yarn`
-- **MongoDB 7+** — [mongodb.com/try/download](https://www.mongodb.com/try/download/community)
-  - OR a MongoDB Atlas URI (free tier works)
+BracketBot can be packaged into a standalone Windows executable that bundles:
+- The Python/FastAPI backend
+- The React frontend (pre-built static files)
+- All dependencies
 
-### Run
-Double-click `start-bracketbot.bat` or run in terminal:
-```cmd
-start-bracketbot.bat
-```
-This will:
-1. Install Python & Node dependencies
-2. Start the FastAPI backend on port 8001
-3. Start the React dev server on port 3000
-4. Open your browser
+Recipients only need **MongoDB** (local install or Atlas cloud URI) — no Python, Node.js, or developer tools.
 
 ---
 
-## Build Standalone Executable
+## Option 1: Automated Build via GitHub Actions (Recommended)
 
-### Prerequisites
-Same as above, plus:
-- **PowerShell 5.1+** (included in Windows 10/11)
+The easiest way to build the executable is through the GitHub Actions workflow.
 
-### Build
-Open PowerShell and run:
-```powershell
-.\build-windows.ps1
+### Trigger a Build
+
+1. Push your code to GitHub
+2. Go to **Actions** > **Build Windows Executable**
+3. Click **Run workflow**
+4. Optionally set a custom MongoDB URI (defaults to `mongodb://localhost:27017`)
+5. Wait ~10 minutes for the build to complete
+6. Download **BracketBot-Windows.zip** from the workflow artifacts
+
+### Auto-Release on Tag
+
+Push a version tag to automatically create a GitHub Release with the `.zip`:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-#### Build Options
+The release will include `BracketBot-Windows.zip` as a downloadable asset.
+
+---
+
+## Option 2: Local Build (PowerShell)
+
+### Prerequisites
+
+- Windows 10/11
+- Python 3.11+ (`python --version`)
+- Node.js 18+ (`node --version`)
+- Yarn (`yarn --version`)
+
+### Build Steps
+
 ```powershell
-# Full build (default)
+# Clone and enter the repo
+git clone <your-repo-url> BracketBot
+cd BracketBot
+
+# Run the build script
 .\build-windows.ps1
 
-# Clean build (remove previous artifacts first)
-.\build-windows.ps1 -Clean
-
-# Custom MongoDB URI (e.g., Atlas)
+# With a custom MongoDB URI:
 .\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/bracketbot"
 
-# Skip frontend rebuild (if already built)
-.\build-windows.ps1 -SkipFrontend
-
-# Skip backend/exe rebuild
-.\build-windows.ps1 -SkipBackend
+# Clean build (removes old artifacts first):
+.\build-windows.ps1 -Clean
 ```
 
-### Output
-```
-dist/
-├── Start BracketBot.bat    ← Double-click to launch
-└── BracketBot/
-    ├── BracketBot.exe      ← The standalone executable
-    ├── static/             ← Built React frontend
-    ├── .env                ← MongoDB config
-    └── (runtime files)
-```
+### Build Output
 
-### Run the Built Executable
-1. Ensure MongoDB is running locally (`mongod`) or edit `.env` with your Atlas URI
-2. Double-click `dist/Start BracketBot.bat`
-3. Browser opens to `http://localhost:8001`
+```
+backend/dist/
+  Start BracketBot.bat     <-- Double-click to launch
+  BracketBot/
+    BracketBot.exe         <-- The executable
+    static/                <-- Frontend files
+    .env                   <-- Configuration
+    ...                    <-- Bundled dependencies
+```
 
 ---
 
-## Distributing to Others
+## Distribution
 
-### What to share
-Zip the entire `dist/` folder.
+### What to Send
 
-### What recipients need
-- **MongoDB** installed locally, OR
-- Edit `dist/BracketBot/.env` and set `MONGO_URL` to a MongoDB Atlas URI
-- No Python or Node.js installation required!
+Zip the entire `backend/dist/` folder and share the `.zip` file.
+
+### What Recipients Need
+
+1. **MongoDB** — Either:
+   - Install [MongoDB Community Edition](https://www.mongodb.com/try/download/community) and run `mongod`
+   - OR use a [MongoDB Atlas](https://cloud.mongodb.com) cloud cluster (free tier available)
+
+2. **That's it.** No Python, Node.js, or any other developer tools needed.
+
+### Setup for Recipients
+
+1. Unzip `BracketBot-Windows.zip`
+2. **If using Atlas:** Edit `BracketBot\.env` and set:
+   ```
+   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/bracketbot
+   ```
+3. Double-click `Start BracketBot.bat`
+4. Browser opens to `http://localhost:8001`
 
 ---
 
-## Configuration
+## Architecture in Desktop Mode
 
-### MongoDB
-Edit `backend/.env` (source mode) or `dist/BracketBot/.env` (packaged mode):
-```env
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=bracketbot
+When running as a standalone executable:
+
+```
+  User's Browser
+       |
+       v
+  http://localhost:8001
+       |
+       v
+  +----------------------------+
+  |     BracketBot.exe         |
+  |                            |
+  |  FastAPI (port 8001)       |
+  |    ├── /api/*  REST + WS   |
+  |    ├── /       index.html  |
+  |    └── /*      SPA routes  |
+  |                            |
+  |  static/                   |
+  |    └── React frontend      |
+  +----------------------------+
+       |
+       v
+  MongoDB (local or Atlas)
 ```
 
-For MongoDB Atlas:
-```env
-MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/bracketbot
-DB_NAME=bracketbot
-```
+- The FastAPI server serves both the API and the static frontend files from the same port
+- No separate frontend server needed
+- WebSocket connects to `ws://localhost:8001/api/ws`
+- All API calls go to `http://localhost:8001/api/*`
 
-### Telegram Bot (Optional)
-Configure in the app's Settings tab — no file editing needed.
+---
+
+## Configuration (.env)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MONGO_URL` | `mongodb://localhost:27017` | MongoDB connection string |
+| `DB_NAME` | `bracketbot` | Database name |
+| `CORS_ORIGINS` | `http://localhost:8001` | Allowed CORS origins |
 
 ---
 
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| "MongoDB connection failed" | Ensure `mongod` is running or check your Atlas URI |
-| "Port 8001 already in use" | Kill any existing BracketBot process: `taskkill /f /im BracketBot.exe` |
-| PowerShell script blocked | Run: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| PyInstaller build fails | Ensure you're in the venv: `backend\venv\Scripts\Activate.ps1` |
-| Frontend build fails | Delete `frontend\node_modules` and re-run `yarn install` |
-| White screen in packaged mode | Check `dist/BracketBot/static/` has `index.html` and `assets/` |
+| Problem | Solution |
+|---------|----------|
+| App won't start | Make sure MongoDB is running (`mongod`) |
+| Port 8001 in use | Close whatever's using port 8001, or edit server.py's port |
+| "Module not found" errors | Re-build with `.\build-windows.ps1 -Clean` |
+| Frontend shows blank page | Make sure `static/` folder exists inside `BracketBot/` |
+| Can't connect to Atlas | Check your Atlas URI, whitelist your IP in Atlas |
+| Windows Defender blocks exe | Click "More info" > "Run anyway" (or add an exception) |
 
 ---
 
-## Architecture (Packaged Mode)
+## Development Mode
 
-```
-BracketBot.exe
-    ├── FastAPI server (port 8001)
-    │   ├── /api/* endpoints
-    │   ├── /ws WebSocket
-    │   └── /* serves static React frontend
-    └── Connects to MongoDB (configurable via .env)
-```
+For development without building an executable:
 
-In packaged mode, the React frontend is built into static files and served directly by the FastAPI backend — no separate Node.js process needed.
+```bash
+# Windows
+start-bracketbot.bat
+
+# Or manually:
+# Terminal 1: Backend
+cd backend
+python -m uvicorn server:app --host 0.0.0.0 --port 8001 --reload
+
+# Terminal 2: Frontend
+cd frontend
+set REACT_APP_BACKEND_URL=http://localhost:8001
+yarn dev --port 3000
+```

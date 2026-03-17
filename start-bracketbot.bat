@@ -1,78 +1,77 @@
 @echo off
-title BracketBot - Desktop Launcher
+title BracketBot Terminal (Dev Mode)
 echo.
 echo  ========================================
-echo    BracketBot Terminal v3.0
+echo    BracketBot Terminal - Dev Mode
 echo  ========================================
-echo.
-
-:: Check if running from dist or source
-if exist "%~dp0dist\BracketBot\BracketBot.exe" (
-    echo  [MODE] Running packaged executable
-    echo  Opening http://localhost:8001 in 2 seconds...
-    timeout /t 2 /nobreak > nul
-    start http://localhost:8001
-    cd /d "%~dp0dist\BracketBot"
-    BracketBot.exe
-    goto :end
-)
-
-:: Source mode - run with Python directly
-echo  [MODE] Running from source
 echo.
 
 :: Check Python
-where python >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] Python not found. Install Python 3.10+ from python.org
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo  ERROR: Python not found. Install from https://python.org
     pause
     exit /b 1
 )
 
 :: Check Node
-where node >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo  [ERROR] Node.js not found. Install Node.js 18+ from nodejs.org
+node --version >nul 2>&1
+if errorlevel 1 (
+    echo  ERROR: Node.js not found. Install from https://nodejs.org
     pause
     exit /b 1
 )
 
-:: Create .env if missing
-if not exist "%~dp0backend\.env" (
-    echo MONGO_URL=mongodb://localhost:27017> "%~dp0backend\.env"
-    echo DB_NAME=bracketbot>> "%~dp0backend\.env"
-    echo CORS_ORIGINS=http://localhost:8001,http://localhost:3000>> "%~dp0backend\.env"
-    echo  [INFO] Created backend\.env with default MongoDB settings
+:: Check Yarn
+yarn --version >nul 2>&1
+if errorlevel 1 (
+    echo  Installing Yarn...
+    npm install -g yarn
 )
 
 :: Install backend deps
-echo  [1/3] Installing Python dependencies...
+echo  [1/4] Installing Python dependencies...
 cd /d "%~dp0backend"
-pip install -r requirements.txt --quiet 2>nul
+if not exist "venv" (
+    python -m venv venv
+)
+call venv\Scripts\activate.bat
+pip install -q -r requirements.txt
 
 :: Install frontend deps
-echo  [2/3] Installing frontend dependencies...
+echo  [2/4] Installing Node dependencies...
 cd /d "%~dp0frontend"
-call yarn install --frozen-lockfile 2>nul
+if not exist "node_modules" (
+    yarn install
+)
 
-:: Start backend in background
-echo  [3/3] Starting services...
+:: Start backend
+echo  [3/4] Starting backend (port 8001)...
 cd /d "%~dp0backend"
-start /b "BracketBot-Backend" python -m uvicorn server:app --host 0.0.0.0 --port 8001
+start /b cmd /c "call venv\Scripts\activate.bat && python -m uvicorn server:app --host 0.0.0.0 --port 8001 --reload"
 
 :: Start frontend
+echo  [4/4] Starting frontend (port 3000)...
 cd /d "%~dp0frontend"
-echo.
-echo  Backend: http://localhost:8001/api/health
-echo  Frontend: http://localhost:3000
-echo.
-echo  Opening browser...
-timeout /t 3 /nobreak > nul
+set REACT_APP_BACKEND_URL=http://localhost:8001
+start /b cmd /c "yarn dev --port 3000 --host 0.0.0.0"
+
+:: Wait and open browser
+timeout /t 5 /nobreak > nul
 start http://localhost:3000
 
-call yarn start
-
-:end
 echo.
-echo  BracketBot stopped.
-pause
+echo  ========================================
+echo    BracketBot is running!
+echo  ========================================
+echo.
+echo  Frontend: http://localhost:3000
+echo  Backend:  http://localhost:8001
+echo.
+echo  Press any key to stop all services...
+pause > nul
+
+:: Cleanup
+taskkill /f /im python.exe /fi "WINDOWTITLE eq *uvicorn*" >nul 2>&1
+taskkill /f /im node.exe >nul 2>&1
+echo  Stopped.

@@ -1,59 +1,50 @@
 # BracketBot Terminal - PRD
 
 ## Original Problem Statement
-Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application. Clean up ghost code, dead JS files. Build a full bracket trading bot dashboard with per-stock toggle cards, buy/sell/trailing rules, live price feed, trade log, portfolio overview, Telegram integration, preset strategies, and CI/CD.
+Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application with bracket trading, real-time price feeds, Telegram integration, and Windows executable distribution.
 
 ## Architecture
-- **Backend**: FastAPI (Python 3.11) + Motor (async MongoDB) + WebSocket + yfinance + python-telegram-bot
-- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Radix UI + Lucide + Zustand + Framer Motion + @dnd-kit + Recharts
+- **Backend**: FastAPI + Motor (async MongoDB) + WebSocket + yfinance + python-telegram-bot
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Radix UI + Zustand + @dnd-kit + Recharts
 - **Database**: MongoDB 7
-- **Infrastructure**: Docker Compose (dev + prod), GitHub Actions CI/CD, PyInstaller (Windows exe)
+- **Distribution**: PyInstaller (Windows exe), GitHub Actions CI/CD, Docker Compose
 
 ## What's Been Implemented
 
-### Core
-- [x] Full backend rewrite with trading engine, WebSocket, REST API, MongoDB
-- [x] Ghost code cleanup, JSX -> TSX conversion
-- [x] Dark theme dashboard, 5 tabs, ticker cards, preset strategies, command palette
-- [x] Docker Compose, Makefile, GitHub Actions CI/CD, README
+### Core Trading Engine
+- [x] Bracket orders (buy/sell offsets, % or $ mode, MARKET or LIMIT)
+- [x] Stop-loss and trailing stop (% or $ mode)
+- [x] Auto Rebracket with Threshold, Spread, Cooldown, Lookback, Buffer
+- [x] Risk Controls: auto-stop on max daily loss or consecutive losses
+- [x] Compound Profits toggle, Trade cooldown (30s), Wait-1-day toggle
+- [x] Entry-price anchoring for percent-mode sells
 
 ### Account & Capital Management
-- [x] Master Account Balance (total capital, e.g. $100,000)
-- [x] Per-ticker Buy Power allocation from Account Balance
-- [x] Allocated / Available tracking in header (real-time)
-- [x] Settings tab: Account Balance input with 3 summary cards
+- [x] Master Account Balance (total capital)
+- [x] Per-ticker Buy Power allocation
+- [x] Allocated / Available tracking (real-time, auto-updates on add/delete/change)
+- [x] Over-allocation warning banner (red) when Available < 0
+- [x] Low balance warning (amber) when Available < 10% of balance
+- [x] Budget context in AddTickerDialog and ConfigModal Buy Power input
 - [x] Cash Reserve from Take Profit actions
-- [x] Compound Profits toggle per ticker
-
-### Trading Features
-- [x] Bracket orders (buy/sell offsets from moving average, % or $ mode)
-- [x] Stop-loss and trailing stop (% or $ mode, MARKET or LIMIT order types)
-- [x] Auto Rebracket with Threshold, Spread, Cooldown, Lookback Ticks, Buffer
-- [x] Risk Controls: auto-stop on max daily loss or consecutive losses
-- [x] Trade cooldown (30s per symbol)
-- [x] Wait-1-day-before-selling toggle
-- [x] Entry-price anchoring for percent-mode sells
 
 ### UI/UX
 - [x] Drag-and-drop card reordering (persisted to MongoDB)
 - [x] Double-click config modal with 4 tabs: Rules | Risk | Rebracket | Advanced
-- [x] Live price chart (Recharts) embedded in ticker cards
-- [x] Preset strategy toggle with backup/restore
-- [x] Rich trade history: 6 stat cards, filter pills, expandable trade details
-- [x] Loss log files: .txt per loss organized by date, viewable in Logs tab
+- [x] Live price chart (Recharts) in ticker cards
+- [x] Rich trade history: stat cards, filter pills, expandable details
+- [x] Loss log files: .txt per loss by date, viewable in Logs tab
 - [x] Sidebar: order type badges, loss count, entry→target info
 
-### Integrations
-- [x] Telegram bot: /new, /cancel, /cancelall, /portfolio, /history, /help
-- [x] Telegram alerts for trades, restarts, auto-stops
-
-### Packaging
-- [x] PyInstaller Windows executable
-- [x] GitHub Actions build workflow
-- [x] Desktop mode (IS_DESKTOP_MODE)
+### Integrations & Distribution
+- [x] Telegram bot commands and trade/restart alerts
+- [x] Windows executable build: PowerShell script + GitHub Actions workflow
+- [x] Desktop mode: FastAPI serves static frontend (API routes have priority)
+- [x] SPA routing fix: static catch-all runs AFTER API router
 
 ### Documentation
-- [x] README with full Account Balance explanation, architecture, API reference, config guide
+- [x] README: Account Balance system, API reference, config guide
+- [x] WINDOWS_BUILD.md: Build, distribution, and troubleshooting guide
 
 ## Prioritized Backlog
 ### P1
@@ -61,16 +52,13 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - Confirmation dialogs for high-risk actions
 
 ### P2
-- Input validation pass across all fields
+- Input validation pass
 - Prometheus + Grafana monitoring
 
 ### P3
-- Authentication system
-- Multi-broker support
-- CSV export
-- OpenTelemetry tracing
+- Authentication, multi-broker, CSV export
 
 ## Next Tasks
-1. Confirmation dialogs for high-risk actions (delete ticker with position, stop bot)
+1. Confirmation dialogs for high-risk actions
 2. Input validation pass
 3. Alpaca paper trading API integration

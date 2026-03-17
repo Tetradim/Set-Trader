@@ -1,129 +1,113 @@
-# BracketBot Windows Build Script
-# Run this in PowerShell from the project root directory
-# Prerequisites: Python 3.10+, Node.js 18+, MongoDB installed or Atlas URI
+<#
+.SYNOPSIS
+    Build BracketBot into a standalone Windows executable.
+.DESCRIPTION
+    This script:
+    1. Creates/activates a Python virtual environment
+    2. Installs Python dependencies
+    3. Builds the React frontend
+    4. Copies the built frontend into backend/static
+    5. Packages everything into a single .exe via PyInstaller
+    6. Creates a launcher batch file
+.PARAMETER Clean
+    Remove previous build artifacts before building.
+.PARAMETER MongoUri
+    Custom MongoDB URI (default: mongodb://localhost:27017).
+.PARAMETER SkipFrontend
+    Skip the frontend build step (use existing backend/static).
+.PARAMETER SkipBackend
+    Skip the backend/exe build step.
+.EXAMPLE
+    .\build-windows.ps1
+    .\build-windows.ps1 -Clean
+    .\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/bracketbot"
+#>
 
 param(
-    [switch]$SkipFrontend,
-    [switch]$SkipBackend,
     [switch]$Clean,
-    [string]$MongoUri = "mongodb://localhost:27017"
+    [string]$MongoUri = "mongodb://localhost:27017",
+    [switch]$SkipFrontend,
+    [switch]$SkipBackend
 )
 
 $ErrorActionPreference = "Stop"
-$ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BackendDir = Join-Path $ProjectRoot "backend"
-$FrontendDir = Join-Path $ProjectRoot "frontend"
-$DistDir = Join-Path $ProjectRoot "dist"
-$StaticDir = Join-Path $BackendDir "static"
+$ROOT = $PSScriptRoot
+$BACKEND = Join-Path $ROOT "backend"
+$FRONTEND = Join-Path $ROOT "frontend"
+$STATIC = Join-Path $BACKEND "static"
+$DIST = Join-Path $BACKEND "dist"
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  BracketBot Windows Build" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  ========================================" -ForegroundColor Cyan
+Write-Host "    BracketBot Windows Build" -ForegroundColor Cyan
+Write-Host "  ========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# --- Clean ---
+# --- CLEAN ---
 if ($Clean) {
-    Write-Host "[CLEAN] Removing previous build artifacts..." -ForegroundColor Yellow
-    if (Test-Path $DistDir) { Remove-Item -Recurse -Force $DistDir }
-    if (Test-Path $StaticDir) { Remove-Item -Recurse -Force $StaticDir }
-    if (Test-Path (Join-Path $BackendDir "build")) { Remove-Item -Recurse -Force (Join-Path $BackendDir "build") }
+    Write-Host "[1/6] Cleaning previous build..." -ForegroundColor Yellow
+    if (Test-Path $STATIC) { Remove-Item -Recurse -Force $STATIC }
+    if (Test-Path $DIST) { Remove-Item -Recurse -Force $DIST }
+    if (Test-Path (Join-Path $BACKEND "build")) { Remove-Item -Recurse -Force (Join-Path $BACKEND "build") }
+    Write-Host "  Cleaned." -ForegroundColor Green
+} else {
+    Write-Host "[1/6] Skipping clean (use -Clean flag to remove old builds)" -ForegroundColor DarkGray
 }
 
-# --- Step 1: Build Frontend ---
+# --- PYTHON VENV ---
+Write-Host "[2/6] Setting up Python environment..." -ForegroundColor Yellow
+$venvPath = Join-Path $BACKEND "venv"
+if (-not (Test-Path $venvPath)) {
+    Write-Host "  Creating virtual environment..." -ForegroundColor DarkGray
+    python -m venv $venvPath
+}
+& "$venvPath\Scripts\Activate.ps1"
+Write-Host "  Installing Python dependencies..." -ForegroundColor DarkGray
+pip install -q -r (Join-Path $BACKEND "requirements.txt")
+pip install -q pyinstaller
+Write-Host "  Python ready." -ForegroundColor Green
+
+# --- FRONTEND BUILD ---
 if (-not $SkipFrontend) {
-    Write-Host "[1/4] Building React frontend..." -ForegroundColor Green
-
-    Push-Location $FrontendDir
-
-    # Set the backend URL to localhost for desktop mode
-    $envFile = Join-Path $FrontendDir ".env.production"
-    "REACT_APP_BACKEND_URL=http://localhost:8001" | Out-File -Encoding UTF8 $envFile
-
-    # Install dependencies
-    Write-Host "  -> Installing dependencies..." -ForegroundColor Gray
-    & yarn install --frozen-lockfile 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [ERROR] yarn install failed" -ForegroundColor Red
-        Pop-Location
-        exit 1
+    Write-Host "[3/6] Building React frontend..." -ForegroundColor Yellow
+    Push-Location $FRONTEND
+    if (-not (Test-Path "node_modules")) {
+        Write-Host "  Installing Node dependencies..." -ForegroundColor DarkGray
+        yarn install
     }
-
-    # Build
-    Write-Host "  -> Building production bundle..." -ForegroundColor Gray
-    & yarn build 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [ERROR] yarn build failed. Run 'yarn build' manually to see errors." -ForegroundColor Red
-        Pop-Location
-        exit 1
-    }
-
+    $env:REACT_APP_BACKEND_URL = ""
+    yarn build
     Pop-Location
 
-    # Copy dist to backend/static
-    $frontendDist = Join-Path $FrontendDir "dist"
-    if (Test-Path $StaticDir) { Remove-Item -Recurse -Force $StaticDir }
-    Copy-Item -Recurse $frontendDist $StaticDir
-    Write-Host "  -> Frontend built and copied to backend/static/" -ForegroundColor Green
+    # Copy to backend/static
+    if (Test-Path $STATIC) { Remove-Item -Recurse -Force $STATIC }
+    Copy-Item -Recurse (Join-Path $FRONTEND "dist") $STATIC
+    Write-Host "  Frontend built and copied to backend/static." -ForegroundColor Green
 } else {
-    Write-Host "[1/4] Skipping frontend build" -ForegroundColor Yellow
-}
-
-# --- Step 2: Create Python Virtual Environment ---
-if (-not $SkipBackend) {
-    Write-Host "[2/4] Setting up Python environment..." -ForegroundColor Green
-
-    Push-Location $BackendDir
-
-    $VenvDir = Join-Path $BackendDir "venv"
-    if (-not (Test-Path $VenvDir)) {
-        Write-Host "  -> Creating virtual environment..." -ForegroundColor Gray
-        & python -m venv venv
+    Write-Host "[3/6] Skipping frontend build (--SkipFrontend)" -ForegroundColor DarkGray
+    if (-not (Test-Path $STATIC)) {
+        Write-Host "  WARNING: backend/static does not exist!" -ForegroundColor Red
     }
-
-    # Activate venv
-    $activateScript = Join-Path $VenvDir "Scripts" "Activate.ps1"
-    & $activateScript
-
-    # Install dependencies
-    Write-Host "  -> Installing Python dependencies..." -ForegroundColor Gray
-    & pip install -r requirements.txt --quiet 2>&1 | Out-Null
-    & pip install pyinstaller --quiet 2>&1 | Out-Null
-
-    Pop-Location
-    Write-Host "  -> Python environment ready" -ForegroundColor Green
-} else {
-    Write-Host "[2/4] Skipping Python setup" -ForegroundColor Yellow
 }
 
-# --- Step 3: Create .env for desktop mode ---
-Write-Host "[3/4] Creating desktop configuration..." -ForegroundColor Green
-
+# --- CREATE .ENV ---
+Write-Host "[4/6] Creating production .env..." -ForegroundColor Yellow
 $envContent = @"
 MONGO_URL=$MongoUri
 DB_NAME=bracketbot
 CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
 "@
+$envContent | Out-File -Encoding UTF8 (Join-Path $BACKEND ".env")
+Write-Host "  .env created with MONGO_URL=$MongoUri" -ForegroundColor Green
 
-$desktopEnv = Join-Path $BackendDir ".env"
-$envContent | Out-File -Encoding UTF8 $desktopEnv
-Write-Host "  -> .env configured (MongoDB: $MongoUri)" -ForegroundColor Green
-
-# --- Step 4: Build Executable with PyInstaller ---
+# --- PYINSTALLER BUILD ---
 if (-not $SkipBackend) {
-    Write-Host "[4/4] Building Windows executable with PyInstaller..." -ForegroundColor Green
-
-    Push-Location $BackendDir
-
-    $activateScript = Join-Path $BackendDir "venv" "Scripts" "Activate.ps1"
-    & $activateScript
-
-    # PyInstaller command
-    & pyinstaller `
+    Write-Host "[5/6] Building executable with PyInstaller..." -ForegroundColor Yellow
+    Push-Location $BACKEND
+    pyinstaller `
         --name "BracketBot" `
         --onedir `
         --noconsole `
-        --icon "NONE" `
         --add-data "static;static" `
         --add-data ".env;." `
         --hidden-import "uvicorn.logging" `
@@ -142,65 +126,57 @@ if (-not $SkipBackend) {
         --hidden-import "dns.resolver" `
         --hidden-import "yfinance" `
         --hidden-import "telegram" `
+        --hidden-import "telegram.ext" `
         --collect-all "yfinance" `
         --collect-all "certifi" `
-        server.py 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  [ERROR] PyInstaller build failed" -ForegroundColor Red
-        Pop-Location
-        exit 1
-    }
-
+        --noconfirm `
+        server.py
     Pop-Location
-
-    # Move output to dist/
-    $pyinstallerDist = Join-Path $BackendDir "dist" "BracketBot"
-    if (-not (Test-Path $DistDir)) { New-Item -ItemType Directory -Path $DistDir | Out-Null }
-    if (Test-Path (Join-Path $DistDir "BracketBot")) { Remove-Item -Recurse -Force (Join-Path $DistDir "BracketBot") }
-    Move-Item $pyinstallerDist $DistDir
-
-    Write-Host "  -> Executable built at dist/BracketBot/BracketBot.exe" -ForegroundColor Green
+    Write-Host "  Executable built." -ForegroundColor Green
 } else {
-    Write-Host "[4/4] Skipping executable build" -ForegroundColor Yellow
+    Write-Host "[5/6] Skipping backend build (--SkipBackend)" -ForegroundColor DarkGray
 }
 
-# --- Create launcher batch file ---
-$launcherContent = @"
+# --- CREATE LAUNCHER ---
+Write-Host "[6/6] Creating launcher..." -ForegroundColor Yellow
+$launcher = @"
 @echo off
-title BracketBot Terminal v3.0
+title BracketBot Terminal
 echo.
 echo  ========================================
-echo    BracketBot Terminal v3.0
-echo    Starting trading engine...
+echo    BracketBot Terminal
 echo  ========================================
 echo.
-echo  Opening browser at http://localhost:8001
-echo  Press Ctrl+C to stop the bot.
+echo  Starting BracketBot...
+echo  Browser will open at http://localhost:8001
+echo.
+echo  Prerequisites:
+echo    - MongoDB running locally (mongod)
+echo    - OR edit BracketBot\.env with your Atlas URI
+echo.
+echo  Press Ctrl+C to stop.
 echo.
 timeout /t 2 /nobreak > nul
 start http://localhost:8001
 cd /d "%~dp0BracketBot"
 BracketBot.exe
 "@
+$launcher | Out-File -Encoding ASCII (Join-Path $DIST "Start BracketBot.bat")
 
-$launcherPath = Join-Path $DistDir "Start BracketBot.bat"
-$launcherContent | Out-File -Encoding ASCII $launcherPath
+# --- ALSO COPY .ENV TO DIST ---
+Copy-Item (Join-Path $BACKEND ".env") (Join-Path $DIST "BracketBot\.env") -Force
 
 Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  BUILD COMPLETE!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  ========================================" -ForegroundColor Green
+Write-Host "    BUILD COMPLETE!" -ForegroundColor Green
+Write-Host "  ========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Output: $DistDir" -ForegroundColor White
+Write-Host "  Output: backend\dist\" -ForegroundColor Cyan
+Write-Host "    - Start BracketBot.bat  (double-click to launch)" -ForegroundColor White
+Write-Host "    - BracketBot\           (executable + static files)" -ForegroundColor White
 Write-Host ""
-Write-Host "  To run:" -ForegroundColor White
-Write-Host "    1. Ensure MongoDB is running (localhost:27017)" -ForegroundColor Gray
-Write-Host "       OR set MONGO_URL in dist/BracketBot/.env" -ForegroundColor Gray
-Write-Host "    2. Double-click 'Start BracketBot.bat'" -ForegroundColor Gray
-Write-Host "    3. Browser opens to http://localhost:8001" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  To distribute:" -ForegroundColor White
-Write-Host "    Zip the dist/ folder and share it." -ForegroundColor Gray
-Write-Host "    Recipients need MongoDB installed or an Atlas URI." -ForegroundColor Gray
+Write-Host "  To distribute:" -ForegroundColor Yellow
+Write-Host "    1. Zip the entire 'dist' folder" -ForegroundColor White
+Write-Host "    2. Share the zip file" -ForegroundColor White
+Write-Host "    3. Recipients need MongoDB installed (or set Atlas URI in .env)" -ForegroundColor White
 Write-Host ""
