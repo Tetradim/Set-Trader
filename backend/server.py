@@ -120,6 +120,22 @@ class TradeRecord(BaseModel):
     reason: str = ""
     pnl: float = 0.0
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # --- Rich metadata ---
+    order_type: str = ""          # MARKET or LIMIT
+    rule_mode: str = ""           # PERCENT or DOLLAR
+    entry_price: float = 0.0     # avg entry price (for sell-side trades)
+    target_price: float = 0.0    # the trigger/target price for this trade
+    total_value: float = 0.0     # price * quantity (cost for buys, proceeds for sells)
+    buy_power: float = 0.0       # buying power used/available at time of trade
+    avg_price: float = 0.0       # moving average price at time of trade
+    # Sell-side specifics
+    sell_target: float = 0.0     # configured sell target at time of trade
+    stop_target: float = 0.0     # configured stop-loss target at time of trade
+    # Trailing stop specifics
+    trail_high: float = 0.0      # highest price seen before trailing stop triggered
+    trail_trigger: float = 0.0   # the trailing stop trigger level
+    trail_value: float = 0.0     # the trailing % or $ value configured
+    trail_mode: str = ""         # PERCENT or DOLLAR for trailing stop
 
 class Position(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -359,7 +375,15 @@ class TradingEngine:
                     order_label = "MKT" if buy_otype == "market" else "LMT"
                     trade = TradeRecord(
                         symbol=sym, side="BUY", price=exec_price, quantity=qty,
-                        reason=f"[{order_label}] Price ${exec_price} {'(market)' if buy_otype == 'market' else f'<= buy target ${buy_target}'}"
+                        reason=f"[{order_label}] Price ${exec_price} {'(market)' if buy_otype == 'market' else f'<= buy target ${buy_target}'}",
+                        order_type=buy_otype.upper(),
+                        rule_mode="PERCENT" if is_buy_pct else "DOLLAR",
+                        target_price=buy_target,
+                        total_value=round(exec_price * qty, 2),
+                        buy_power=base_power,
+                        avg_price=avg,
+                        sell_target=sell_target,
+                        stop_target=stop_target,
                     )
                     await self._record_trade(trade)
 
@@ -397,7 +421,20 @@ class TradingEngine:
                     order_label = "MKT" if trail_otype == "market" else "LMT"
                     trade = TradeRecord(
                         symbol=sym, side="TRAILING_STOP", price=exec_price,
-                        quantity=pos["qty"], reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})", pnl=pnl
+                        quantity=pos["qty"], reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})", pnl=pnl,
+                        order_type=trail_otype.upper(),
+                        rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
+                        entry_price=entry,
+                        target_price=trail_stop,
+                        total_value=round(exec_price * pos["qty"], 2),
+                        buy_power=base_power,
+                        avg_price=avg,
+                        sell_target=sell_target,
+                        stop_target=stop_target,
+                        trail_high=high,
+                        trail_trigger=trail_stop,
+                        trail_value=trail_pct,
+                        trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
                     )
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -412,7 +449,16 @@ class TradingEngine:
                 order_label = "MKT" if sell_otype == "market" else "LMT"
                 trade = TradeRecord(
                     symbol=sym, side="SELL", price=exec_price, quantity=pos["qty"],
-                    reason=f"[{order_label}] Price ${exec_price} {'(market)' if sell_otype == 'market' else f'>= sell target ${sell_target}'}", pnl=pnl
+                    reason=f"[{order_label}] Price ${exec_price} {'(market)' if sell_otype == 'market' else f'>= sell target ${sell_target}'}", pnl=pnl,
+                    order_type=sell_otype.upper(),
+                    rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
+                    entry_price=entry,
+                    target_price=sell_target,
+                    total_value=round(exec_price * pos["qty"], 2),
+                    buy_power=base_power,
+                    avg_price=avg,
+                    sell_target=sell_target,
+                    stop_target=stop_target,
                 )
                 await self._record_trade(trade)
                 self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -427,7 +473,16 @@ class TradingEngine:
                     order_label = "MKT" if stop_otype == "market" else "LMT"
                     trade = TradeRecord(
                         symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
-                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${stop_target}'}", pnl=pnl
+                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${stop_target}'}", pnl=pnl,
+                        order_type=stop_otype.upper(),
+                        rule_mode="PERCENT" if is_stop_pct else "DOLLAR",
+                        entry_price=entry,
+                        target_price=stop_target,
+                        total_value=round(exec_price * pos["qty"], 2),
+                        buy_power=base_power,
+                        avg_price=avg,
+                        sell_target=sell_target,
+                        stop_target=stop_target,
                     )
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -492,7 +547,13 @@ class TradingEngine:
         doc = trade.model_dump()
         await db.trades.insert_one(doc)
         self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
-        logger.info(f"TRADE: {trade.side} {trade.symbol} @ ${trade.price} x{trade.quantity}")
+        pnl_str = f" P&L: ${trade.pnl:+.2f}" if trade.pnl != 0 else ""
+        entry_str = f" entry=${trade.entry_price:.2f}" if trade.entry_price > 0 else ""
+        logger.info(
+            f"TRADE: {trade.order_type} {trade.side} {trade.symbol} @ ${trade.price:.2f} x{trade.quantity:.4f}"
+            f" | {trade.rule_mode} mode | target=${trade.target_price:.2f}{entry_str}"
+            f" | value=${trade.total_value:.2f} | power=${trade.buy_power:.2f}{pnl_str}"
+        )
         clean = {k: v for k, v in doc.items() if k != "_id"}
         await ws_manager.broadcast({"type": "TRADE", "trade": clean})
         # Telegram alert
@@ -651,15 +712,34 @@ class TelegramService:
                 logger.warning(f"Telegram send to {cid} failed: {e}")
 
     async def send_trade_alert(self, trade: dict):
-        """Push a trade notification to all chats."""
+        """Push a rich trade notification to all chats."""
         side = trade.get("side", "?")
         sym = trade.get("symbol", "?")
         price = trade.get("price", 0)
         qty = trade.get("quantity", 0)
         pnl = trade.get("pnl", 0)
         reason = trade.get("reason", "")
-        pnl_str = f"  P&L: {'+'if pnl>=0 else ''}{pnl:.2f}" if pnl != 0 else ""
-        msg = f"TRADE  {side} {sym}\nPrice: ${price:.2f}  Qty: {qty:.4f}{pnl_str}\n{reason}"
+        order_type = trade.get("order_type", "")
+        rule_mode = trade.get("rule_mode", "")
+        entry_price = trade.get("entry_price", 0)
+        target_price = trade.get("target_price", 0)
+        total_value = trade.get("total_value", 0)
+        buy_power = trade.get("buy_power", 0)
+
+        pnl_str = f"\nP&L: {'+'if pnl>=0 else ''}{pnl:.2f}" if pnl != 0 else ""
+        entry_str = f"\nEntry: ${entry_price:.2f}" if entry_price > 0 else ""
+        trail_str = ""
+        if side == "TRAILING_STOP":
+            trail_str = f"\nTrail High: ${trade.get('trail_high', 0):.2f} | Trigger: ${trade.get('trail_trigger', 0):.2f} | {trade.get('trail_mode', '')} {trade.get('trail_value', 0)}"
+
+        msg = (
+            f"TRADE  {order_type} {side} {sym}\n"
+            f"Fill: ${price:.2f}  Qty: {qty:.4f}\n"
+            f"Target: ${target_price:.2f} | Mode: {rule_mode}\n"
+            f"Value: ${total_value:.2f} | Power: ${buy_power:.2f}"
+            f"{entry_str}{pnl_str}{trail_str}\n"
+            f"{reason}"
+        )
         await self._broadcast_alert(msg)
 
     # ---- command handlers ----

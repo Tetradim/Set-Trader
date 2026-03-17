@@ -42,6 +42,20 @@ export interface TradeLog {
   reason: string;
   pnl: number;
   timestamp: string;
+  // Rich metadata
+  order_type: string;       // MARKET or LIMIT
+  rule_mode: string;        // PERCENT or DOLLAR
+  entry_price: number;      // avg entry price (for sell-side trades)
+  target_price: number;     // trigger/target price
+  total_value: number;      // price * quantity
+  buy_power: number;        // buying power at time of trade
+  avg_price: number;        // moving average price
+  sell_target: number;      // configured sell target
+  stop_target: number;      // configured stop-loss target
+  trail_high: number;       // trailing stop high
+  trail_trigger: number;    // trailing stop trigger level
+  trail_value: number;      // trailing % or $ value
+  trail_mode: string;       // PERCENT or DOLLAR for trailing
 }
 
 export interface PositionData {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore, TradeLog } from '@/stores/useStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 
 interface TradeGroup {
   key: string;
@@ -64,18 +64,61 @@ function SideLabel({ side }: { side: string }) {
   );
 }
 
+function TradeDetailMini({ trade }: { trade: TradeLog }) {
+  const isSell = trade.side !== 'BUY';
+  const isLoss = trade.pnl < 0;
+
+  return (
+    <div className={`rounded px-2 py-1.5 text-[10px] font-mono space-y-1 ${isLoss ? 'bg-red-500/5' : 'bg-secondary/20'}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground/70">{new Date(trade.timestamp).toLocaleTimeString()}</span>
+        <div className="flex items-center gap-1.5">
+          {trade.order_type && (
+            <span className={`text-[8px] font-bold px-1 rounded ${trade.order_type === 'MARKET' ? 'bg-orange-500/15 text-orange-400' : 'bg-cyan-500/15 text-cyan-400'}`}>
+              {trade.order_type === 'MARKET' ? 'MKT' : 'LMT'}
+            </span>
+          )}
+          {trade.rule_mode && (
+            <span className={`text-[8px] px-1 rounded ${trade.rule_mode === 'PERCENT' ? 'bg-violet-500/15 text-violet-400' : 'bg-teal-500/15 text-teal-400'}`}>
+              {trade.rule_mode === 'PERCENT' ? '%' : '$'}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-muted-foreground">Fill ${trade.price.toFixed(2)} x{trade.quantity.toFixed(4)}</span>
+        {trade.pnl !== 0 && (
+          <span className={isLoss ? 'text-red-400 font-bold' : 'text-emerald-400'}>
+            {trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}
+          </span>
+        )}
+      </div>
+      {isSell && trade.entry_price > 0 && (
+        <div className="flex items-center justify-between text-muted-foreground/60">
+          <span>Entry ${trade.entry_price.toFixed(2)} → Target ${(trade.target_price || 0).toFixed(2)}</span>
+        </div>
+      )}
+      {isLoss && trade.entry_price > 0 && (
+        <div className="flex items-center gap-1 text-red-400/80">
+          <AlertTriangle size={8} />
+          <span>Loss {((trade.price / trade.entry_price - 1) * 100).toFixed(2)}%</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GroupRow({ group }: { group: TradeGroup }) {
   const [expanded, setExpanded] = useState(false);
   const count = group.trades.length;
   const isSingle = count === 1;
+  const isLoss = group.totalPnl < 0;
 
   return (
-    <div className={`rounded-md ${!isSingle ? sideBg[group.side] : ''}`}>
+    <div className={`rounded-md ${!isSingle ? sideBg[group.side] : ''} ${isLoss ? 'ring-1 ring-red-500/20' : ''}`}>
       <button
-        onClick={() => !isSingle && setExpanded(!expanded)}
-        className={`w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors font-mono text-xs ${
-          !isSingle ? 'cursor-pointer' : 'cursor-default'
-        }`}
+        onClick={() => setExpanded(!expanded)}
+        className={`w-full flex items-center justify-between px-3 py-2 rounded-md hover:bg-secondary/50 transition-colors font-mono text-xs cursor-pointer`}
         data-testid={`trade-group-${group.key}`}
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -86,59 +129,55 @@ function GroupRow({ group }: { group: TradeGroup }) {
               x{count}
             </span>
           )}
+          {/* Show badges for single trades */}
+          {isSingle && group.trades[0]?.order_type && (
+            <span className={`text-[8px] font-bold px-1 rounded ${group.trades[0].order_type === 'MARKET' ? 'bg-orange-500/15 text-orange-400' : 'bg-cyan-500/15 text-cyan-400'}`}>
+              {group.trades[0].order_type === 'MARKET' ? 'MKT' : 'LMT'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-muted-foreground">${group.avgPrice.toFixed(2)}</span>
           {group.totalPnl !== 0 && (
-            <span className={group.totalPnl > 0 ? 'text-emerald-400' : 'text-red-400'}>
+            <span className={`font-bold ${group.totalPnl > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
               {group.totalPnl > 0 ? '+' : ''}
               {group.totalPnl.toFixed(2)}
             </span>
           )}
-          {!isSingle && (
-            expanded ? <ChevronUp size={10} className="text-muted-foreground" /> : <ChevronDown size={10} className="text-muted-foreground" />
+          {expanded ? (
+            <ChevronUp size={10} className="text-muted-foreground" />
+          ) : (
+            <ChevronDown size={10} className="text-muted-foreground" />
           )}
         </div>
       </button>
 
       <AnimatePresence>
-        {expanded && !isSingle && (
+        {expanded && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="pl-7 pr-3 pb-2 space-y-0.5">
+            <div className="px-2 pb-2 space-y-1">
               {group.trades.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between text-[10px] font-mono text-muted-foreground py-0.5"
-                >
-                  <span>{new Date(t.timestamp).toLocaleTimeString()}</span>
+                <TradeDetailMini key={t.id} trade={t} />
+              ))}
+              {!isSingle && (
+                <div className="flex items-center justify-between text-[10px] font-mono text-foreground/70 pt-1 px-2 border-t border-border/30">
+                  <span>Total</span>
                   <div className="flex items-center gap-2">
-                    <span>${t.price.toFixed(2)}</span>
-                    <span>x{t.quantity.toFixed(4)}</span>
-                    {t.pnl !== 0 && (
-                      <span className={t.pnl > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                        {t.pnl > 0 ? '+' : ''}{t.pnl.toFixed(2)}
+                    <span>avg ${group.avgPrice.toFixed(2)}</span>
+                    <span>x{group.totalQty.toFixed(4)}</span>
+                    {group.totalPnl !== 0 && (
+                      <span className={group.totalPnl > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                        {group.totalPnl > 0 ? '+' : ''}{group.totalPnl.toFixed(2)}
                       </span>
                     )}
                   </div>
                 </div>
-              ))}
-              <div className="flex items-center justify-between text-[10px] font-mono text-foreground/70 pt-1 border-t border-border/30">
-                <span>Total</span>
-                <div className="flex items-center gap-2">
-                  <span>avg ${group.avgPrice.toFixed(2)}</span>
-                  <span>x{group.totalQty.toFixed(4)}</span>
-                  {group.totalPnl !== 0 && (
-                    <span className={group.totalPnl > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                      {group.totalPnl > 0 ? '+' : ''}{group.totalPnl.toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -150,6 +189,7 @@ function GroupRow({ group }: { group: TradeGroup }) {
 export function TradeLogSidebar() {
   const trades = useStore((s) => s.trades);
   const groups = groupTrades(trades);
+  const lossCount = trades.filter((t) => t.pnl < 0).length;
 
   return (
     <aside
@@ -160,11 +200,18 @@ export function TradeLogSidebar() {
         <h2 className="text-xs uppercase tracking-widest font-semibold text-muted-foreground">
           Live Activity
         </h2>
-        {trades.length > 0 && (
-          <span className="text-[10px] text-muted-foreground/60 font-mono">
-            {trades.length} trades / {groups.length} groups
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {lossCount > 0 && (
+            <span className="text-[10px] bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded-full font-mono" data-testid="loss-count-badge">
+              {lossCount} loss{lossCount !== 1 ? 'es' : ''}
+            </span>
+          )}
+          {trades.length > 0 && (
+            <span className="text-[10px] text-muted-foreground/60 font-mono">
+              {trades.length} trades / {groups.length} groups
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex-1 overflow-auto px-2 py-2 space-y-0.5">
         {groups.map((g) => (
