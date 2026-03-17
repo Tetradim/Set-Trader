@@ -40,6 +40,13 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const isPositive = pnl >= 0;
   const isActive = ticker.enabled;
 
+  // Budget awareness
+  const accountBalance = useStore((s) => s.accountBalance);
+  const allTickers = useStore((s) => s.tickers);
+  const localAllocated = Object.values(allTickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
+  const effectiveAvailable = accountBalance - localAllocated;
+  const isOverAllocated = accountBalance > 0 && effectiveAvailable < 0;
+
   const handleToggle = (checked: boolean) => {
     send('UPDATE_TICKER', { symbol: ticker.symbol, enabled: checked });
   };

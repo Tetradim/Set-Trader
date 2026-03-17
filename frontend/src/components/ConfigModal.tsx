@@ -168,6 +168,12 @@ interface TabProps {
 }
 
 function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
+  const accountBalance = useStore((s) => s.accountBalance);
+  const tickers = useStore((s) => s.tickers);
+  const totalAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
+  const otherAllocated = totalAllocated - (ticker.base_power ?? 0);
+  const availableForThis = accountBalance - otherAllocated;
+
   return (
     <div className="space-y-5">
       {/* Quick toggles */}
@@ -181,7 +187,19 @@ function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
         <OrderTypeToggle value={(ticker.buy_order_type ?? 'limit') as 'limit' | 'market'} onChange={(v) => onChange('buy_order_type', v)} testId={`modal-buy-ot-${ticker.symbol}`} />
         <OffsetInput label={ticker.buy_percent ? 'Buy Offset (%)' : 'Buy Price ($)'} value={ticker.buy_offset} isPercent={ticker.buy_percent} mode="buy" onChange={(v) => onChange('buy_offset', v)} incrementStep={incStep} decrementStep={decStep} />
         <ConfigToggle label="Use %" checked={ticker.buy_percent} onChange={(v) => onChange('buy_percent', v)} />
-        <SteppedInput label="Buy Power ($)" value={ticker.base_power} onChange={(v) => onChange('base_power', v)} min={1} incrementStep={incStep} decrementStep={decStep} />
+        <div>
+          <SteppedInput label="Buy Power ($)" value={ticker.base_power} onChange={(v) => onChange('base_power', v)} min={1} incrementStep={incStep} decrementStep={decStep} />
+          {accountBalance > 0 && (
+            <p className={`text-[9px] mt-0.5 font-mono ${
+              ticker.base_power > availableForThis ? 'text-amber-400' : 'text-muted-foreground/50'
+            }`}>
+              {ticker.base_power > availableForThis
+                ? `Exceeds available by $${(ticker.base_power - availableForThis).toFixed(2)}`
+                : `$${(availableForThis - ticker.base_power).toFixed(2)} remaining after this`
+              }
+            </p>
+          )}
+        </div>
         <SteppedInput label="Avg Period (days)" value={ticker.avg_days} onChange={(v) => onChange('avg_days', Math.round(v))} min={1} max={365} incrementStep={1} decrementStep={1} />
       </ConfigSection>
 

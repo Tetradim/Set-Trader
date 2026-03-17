@@ -14,6 +14,7 @@ import {
   Banknote,
   Wallet,
   PiggyBank,
+  AlertTriangle,
 } from 'lucide-react';
 
 export function Header() {
@@ -36,8 +37,11 @@ export function Header() {
   const localAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
   const effectiveAllocated = localAllocated || allocated;
   const effectiveAvailable = accountBalance - effectiveAllocated;
+  const isOverAllocated = accountBalance > 0 && effectiveAvailable < 0;
+  const isLowBalance = accountBalance > 0 && effectiveAvailable > 0 && effectiveAvailable < accountBalance * 0.1;
 
   return (
+    <>
     <header className="glass border-b border-border px-6 py-3" data-testid="header">
       <div className="flex items-center justify-between">
         {/* Left: Brand + Status */}
@@ -106,6 +110,7 @@ export function Header() {
                 label="Available"
                 value={`$${effectiveAvailable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 positive={effectiveAvailable >= 0}
+                warning={isLowBalance}
                 icon={PiggyBank}
               />
             </>
@@ -156,6 +161,32 @@ export function Header() {
         </div>
       </div>
     </header>
+
+    {/* Over-allocation warning banner */}
+    {isOverAllocated && (
+      <div className="mx-auto max-w-[1800px] px-6" data-testid="over-allocated-warning">
+        <div className="flex items-center gap-2 px-4 py-2 rounded-b-lg bg-red-500/10 border border-t-0 border-red-500/30 text-red-400 text-xs">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>
+            <strong>Over-allocated by ${Math.abs(effectiveAvailable).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+            — Your ticker allocations exceed your account balance. Reduce Buy Power on some tickers or increase your Account Balance in Settings.
+          </span>
+        </div>
+      </div>
+    )}
+
+    {/* Low balance warning */}
+    {isLowBalance && !isOverAllocated && (
+      <div className="mx-auto max-w-[1800px] px-6" data-testid="low-balance-warning">
+        <div className="flex items-center gap-2 px-4 py-2 rounded-b-lg bg-amber-500/10 border border-t-0 border-amber-500/30 text-amber-400 text-xs">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>
+            <strong>Low available balance</strong> — Only ${effectiveAvailable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} remaining ({((effectiveAvailable / accountBalance) * 100).toFixed(1)}% of account).
+          </span>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -163,38 +194,31 @@ function MetricPill({
   label,
   value,
   positive,
+  warning,
   icon: Icon,
   testId,
 }: {
   label: string;
   value: string;
   positive?: boolean;
+  warning?: boolean;
   icon: any;
   testId: string;
 }) {
+  const color = warning
+    ? 'text-amber-400'
+    : positive === undefined
+    ? 'text-primary'
+    : positive
+    ? 'text-emerald-400'
+    : 'text-red-400';
+
   return (
-    <div className="flex items-center gap-2" data-testid={testId}>
-      <Icon
-        size={14}
-        className={
-          positive === undefined
-            ? 'text-primary'
-            : positive
-            ? 'text-emerald-400'
-            : 'text-red-400'
-        }
-      />
+    <div className={`flex items-center gap-2 ${warning ? 'animate-pulse' : ''}`} data-testid={testId}>
+      <Icon size={14} className={color} />
       <div>
         <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</p>
-        <p
-          className={`font-mono text-sm font-bold tracking-tight ${
-            positive === undefined
-              ? 'text-foreground'
-              : positive
-              ? 'text-emerald-400'
-              : 'text-red-400'
-          }`}
-        >
+        <p className={`font-mono text-sm font-bold tracking-tight ${color}`}>
           {value}
         </p>
       </div>

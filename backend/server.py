@@ -1175,13 +1175,25 @@ async def get_tickers():
     docs = await db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
     return docs
 
+async def _broadcast_account_update():
+    """Recompute and broadcast account balance, allocated, available."""
+    balance_doc = await db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
+    tickers = await db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
+    allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
+    await ws_manager.broadcast({
+        "type": "ACCOUNT_UPDATE",
+        "account_balance": account_balance,
+        "allocated": allocated,
+        "available": round(account_balance - allocated, 2),
+    })
+
 @api.post("/tickers")
 async def add_ticker(body: TickerCreate):
     sym = body.symbol.upper().strip()
     existing = await db.tickers.find_one({"symbol": sym})
     if existing:
         raise HTTPException(400, f"{sym} already exists")
-    # Auto-assign sort_order: put new tickers at the end
     max_order = await db.tickers.find_one(sort=[("sort_order", -1)], projection={"sort_order": 1})
     next_order = (max_order.get("sort_order", 0) + 1) if max_order else 0
     t = TickerConfig(symbol=sym, base_power=body.base_power, sort_order=next_order)
@@ -1189,6 +1201,7 @@ async def add_ticker(body: TickerCreate):
     await db.tickers.insert_one(doc)
     doc.pop("_id", None)
     await ws_manager.broadcast({"type": "TICKER_ADDED", "ticker": doc})
+    await _broadcast_account_update()
     return doc
 
 @api.put("/tickers/{symbol}")
@@ -1202,6 +1215,8 @@ async def update_ticker(symbol: str, body: TickerUpdate):
         raise HTTPException(404, f"{sym} not found")
     doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
     await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+    if "base_power" in updates:
+        await _broadcast_account_update()
     return doc
 
 @api.delete("/tickers/{symbol}")
@@ -1213,6 +1228,7 @@ async def delete_ticker(symbol: str):
     engine._positions.pop(sym, None)
     engine._trailing_highs.pop(sym, None)
     await ws_manager.broadcast({"type": "TICKER_DELETED", "symbol": sym})
+    await _broadcast_account_update()
     return {"deleted": sym}
 
 @api.post("/tickers/reorder")
