@@ -12,6 +12,8 @@ import {
   Zap,
   Command,
   Banknote,
+  Wallet,
+  PiggyBank,
 } from 'lucide-react';
 
 export function Header() {
@@ -20,13 +22,20 @@ export function Header() {
   const running = useStore((s) => s.running);
   const marketOpen = useStore((s) => s.marketOpen);
   const profits = useStore((s) => s.profits);
-  const prices = useStore((s) => s.prices);
   const tickers = useStore((s) => s.tickers);
   const cashReserve = useStore((s) => s.cashReserve);
+  const accountBalance = useStore((s) => s.accountBalance);
+  const allocated = useStore((s) => s.allocated);
+  const available = useStore((s) => s.available);
 
   const totalPnl = Object.values(profits).reduce((a, b) => a + b, 0);
   const tickerCount = Object.keys(tickers).length;
   const activeTickers = Object.values(tickers).filter((t) => t.enabled).length;
+
+  // Compute allocated from local ticker state (real-time)
+  const localAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
+  const effectiveAllocated = localAllocated || allocated;
+  const effectiveAvailable = accountBalance - effectiveAllocated;
 
   return (
     <header className="glass border-b border-border px-6 py-3" data-testid="header">
@@ -78,18 +87,35 @@ export function Header() {
 
         {/* Center: Metrics */}
         <div className="hidden lg:flex items-center gap-6">
+          {accountBalance > 0 && (
+            <>
+              <MetricPill
+                testId="metric-balance"
+                label="Account"
+                value={`$${accountBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                icon={Wallet}
+              />
+              <MetricPill
+                testId="metric-allocated"
+                label="Allocated"
+                value={`$${effectiveAllocated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                icon={Zap}
+              />
+              <MetricPill
+                testId="metric-available"
+                label="Available"
+                value={`$${effectiveAvailable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                positive={effectiveAvailable >= 0}
+                icon={PiggyBank}
+              />
+            </>
+          )}
           <MetricPill
             testId="metric-pnl"
             label="Total P&L"
             value={`${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`}
             positive={totalPnl >= 0}
             icon={totalPnl >= 0 ? TrendingUp : TrendingDown}
-          />
-          <MetricPill
-            testId="metric-tickers"
-            label="Active"
-            value={`${activeTickers}/${tickerCount}`}
-            icon={Zap}
           />
           {cashReserve > 0 && (
             <MetricPill

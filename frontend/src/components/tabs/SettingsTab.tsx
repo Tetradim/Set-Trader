@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   ArrowUp,
   ArrowDown,
+  Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -30,6 +31,9 @@ export function SettingsTab() {
   const [decStep, setDecStep] = useState(0.5);
   const [incText, setIncText] = useState('0.5');
   const [decText, setDecText] = useState('0.5');
+  const [balanceText, setBalanceText] = useState('0');
+  const [balanceValue, setBalanceValue] = useState(0);
+  const [allocated, setAllocated] = useState(0);
 
   useEffect(() => {
     apiFetch('/api/settings')
@@ -41,9 +45,15 @@ export function SettingsTab() {
         setDecStep(data.decrement_step ?? 0.5);
         setIncText(String(data.increment_step ?? 0.5));
         setDecText(String(data.decrement_step ?? 0.5));
+        setBalanceValue(data.account_balance ?? 0);
+        setBalanceText(String(data.account_balance ?? 0));
+        setAllocated(data.allocated ?? 0);
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
         useStore.getState().setIncrementStep(data.increment_step ?? 0.5);
         useStore.getState().setDecrementStep(data.decrement_step ?? 0.5);
+        if (data.account_balance !== undefined) {
+          useStore.getState().setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
+        }
       })
       .catch(() => {});
   }, []);
@@ -58,6 +68,7 @@ export function SettingsTab() {
           simulate_24_7: useStore.getState().simulate247,
           increment_step: incStep,
           decrement_step: decStep,
+          account_balance: balanceValue,
         }),
       });
       // Update store with new step values
@@ -104,6 +115,64 @@ export function SettingsTab() {
 
   return (
     <div className="max-w-2xl space-y-8" data-testid="settings-tab">
+      {/* Account Balance */}
+      <section className="glass rounded-xl border border-border p-6 space-y-5">
+        <div className="flex items-center gap-2 mb-2">
+          <Wallet size={18} className="text-primary" />
+          <h3 className="text-sm font-bold text-foreground">Account Balance</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Set your total account capital. This is the master balance from which buy power is allocated to individual tickers.
+          Take Profit moves gains into your Cash Reserve.
+        </p>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
+            <Wallet size={10} className="text-primary" /> Total Account Balance ($)
+          </label>
+          <input
+            data-testid="account-balance-input"
+            type="text"
+            inputMode="decimal"
+            value={balanceText}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (/^\d*\.?\d*$/.test(raw)) {
+                setBalanceText(raw);
+              }
+            }}
+            onBlur={() => {
+              const num = parseFloat(balanceText);
+              if (!isNaN(num) && num >= 0) {
+                setBalanceValue(num);
+              } else {
+                setBalanceText(String(balanceValue));
+              }
+            }}
+            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
+            placeholder="e.g. 100000"
+          />
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            Your total trading capital (e.g. $100,000). Allocate portions to each ticker via Buy Power.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div className="rounded-lg bg-secondary/50 border border-border p-3">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Account</p>
+            <p className="font-mono text-lg font-bold text-foreground">${balanceValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-lg bg-secondary/50 border border-border p-3">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Allocated</p>
+            <p className="font-mono text-lg font-bold text-amber-400">${allocated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="rounded-lg bg-secondary/50 border border-border p-3">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Available</p>
+            <p className={`font-mono text-lg font-bold ${(balanceValue - allocated) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              ${(balanceValue - allocated).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* Input Increment/Decrement Steps */}
       <section className="glass rounded-xl border border-border p-6 space-y-5">
         <div className="flex items-center gap-2 mb-2">

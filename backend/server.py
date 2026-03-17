@@ -161,6 +161,7 @@ class SettingsUpdate(BaseModel):
     simulate_24_7: Optional[bool] = None
     increment_step: Optional[float] = None
     decrement_step: Optional[float] = None
+    account_balance: Optional[float] = None
 
 class PresetStrategy(BaseModel):
     name: str
@@ -1452,6 +1453,19 @@ async def update_settings(body: SettingsUpdate):
         await db.settings.update_one(
             {"key": "decrement_step"}, {"$set": {"value": body.decrement_step}}, upsert=True
         )
+    if body.account_balance is not None:
+        await db.settings.update_one(
+            {"key": "account_balance"}, {"$set": {"value": body.account_balance}}, upsert=True
+        )
+        # Broadcast the updated balance
+        tickers = await db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
+        allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
+        await ws_manager.broadcast({
+            "type": "ACCOUNT_UPDATE",
+            "account_balance": round(body.account_balance, 2),
+            "allocated": allocated,
+            "available": round(body.account_balance - allocated, 2),
+        })
     if body.telegram:
         doc = body.telegram.model_dump()
         await db.settings.update_one(
@@ -1473,13 +1487,21 @@ async def get_settings():
     inc_doc = await db.settings.find_one({"key": "increment_step"}, {"_id": 0})
     dec_doc = await db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
     cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+    balance_doc = await db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    tickers = await db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
+    allocated = sum(t.get("base_power", 0) for t in tickers)
+    account_balance = balance_doc.get("value", 0) if balance_doc else 0
+    cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
     return {
         "simulate_24_7": engine.simulate_24_7,
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": telegram_service.running,
         "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
         "decrement_step": dec_doc.get("value", 0.5) if dec_doc else 0.5,
-        "cash_reserve": round(cash_doc.get("value", 0), 2) if cash_doc else 0,
+        "cash_reserve": cash_reserve,
+        "account_balance": round(account_balance, 2),
+        "allocated": round(allocated, 2),
+        "available": round(account_balance - allocated, 2),
     }
 
 @api.post("/settings/telegram/test")
@@ -1509,6 +1531,9 @@ async def ws_endpoint(websocket: WebSocket):
 
         inc_doc = await db.settings.find_one({"key": "increment_step"}, {"_id": 0})
         dec_doc = await db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
+        balance_doc = await db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+        account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
+        allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
 
         await websocket.send_json({
             "type": "INITIAL_STATE",
@@ -1516,6 +1541,9 @@ async def ws_endpoint(websocket: WebSocket):
             "prices": prices,
             "profits": profits,
             "cash_reserve": cash_reserve,
+            "account_balance": account_balance,
+            "allocated": allocated,
+            "available": round(account_balance - allocated, 2),
             "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
             "decrement_step": dec_doc.get("value", 0.5) if dec_doc else 0.5,
             "paused": engine.paused,

@@ -37,6 +37,9 @@ export function useWebSocket() {
           if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
           if (data.increment_step !== undefined) store.setIncrementStep(data.increment_step);
           if (data.decrement_step !== undefined) store.setDecrementStep(data.decrement_step);
+          if (data.account_balance !== undefined) {
+            store.setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
+          }
           store.setPaused(data.paused ?? false);
           store.setRunning(data.running ?? false);
           store.setMarketOpen(data.market_open ?? false);
@@ -78,6 +81,10 @@ export function useWebSocket() {
 
         if (data.type === 'TICKERS_REORDERED') {
           if (data.tickers) store.setTickers(data.tickers);
+        }
+
+        if (data.type === 'ACCOUNT_UPDATE') {
+          store.setAccountBalance(data.account_balance ?? 0, data.allocated ?? 0, data.available ?? 0);
         }
 
         if (data.type === 'BOT_STATUS') {

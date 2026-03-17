@@ -136,6 +136,12 @@ interface BotState {
   cashReserve: number;
   setCashReserve: (v: number) => void;
 
+  // Account balance
+  accountBalance: number;
+  allocated: number;
+  available: number;
+  setAccountBalance: (balance: number, allocated: number, available: number) => void;
+
   // Custom step increments
   incrementStep: number;
   decrementStep: number;
@@ -215,6 +221,11 @@ export const useStore = create<BotState>((set) => ({
 
   cashReserve: 0,
   setCashReserve: (cashReserve) => set({ cashReserve }),
+
+  accountBalance: 0,
+  allocated: 0,
+  available: 0,
+  setAccountBalance: (accountBalance, allocated, available) => set({ accountBalance, allocated, available }),
 
   incrementStep: 0.5,
   decrementStep: 0.5,
