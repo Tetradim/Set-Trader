@@ -1199,6 +1199,14 @@ async def take_profit(symbol: str):
         {"symbol": sym},
         {"$set": {"total_pnl": 0, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
+    # If compound was active, subtract the taken profit from buy power
+    ticker_doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+    if ticker_doc and ticker_doc.get("compound_profits", True):
+        new_bp = max(1.0, round(ticker_doc.get("base_power", 100) - amount, 2))
+        await db.tickers.update_one({"symbol": sym}, {"$set": {"base_power": new_bp}})
+        updated_ticker = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if updated_ticker:
+            await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": updated_ticker})
     logger.info(f"TAKE PROFIT: {sym} ${amount:.2f} moved to cash reserve")
     # Broadcast updated profits
     profits_cursor = db.profits.find({}, {"_id": 0})
@@ -1417,6 +1425,14 @@ async def ws_endpoint(websocket: WebSocket):
                         {"symbol": sym},
                         {"$set": {"total_pnl": 0, "updated_at": datetime.now(timezone.utc).isoformat()}}
                     )
+                    # If compound was active, subtract taken profit from buy power
+                    ticker_doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                    if ticker_doc and ticker_doc.get("compound_profits", True):
+                        new_bp = max(1.0, round(ticker_doc.get("base_power", 100) - amount, 2))
+                        await db.tickers.update_one({"symbol": sym}, {"$set": {"base_power": new_bp}})
+                        updated_ticker = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                        if updated_ticker:
+                            await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": updated_ticker})
                     profits_cursor = db.profits.find({}, {"_id": 0})
                     profits_list = await profits_cursor.to_list(100)
                     profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
