@@ -58,8 +58,21 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   };
 
   const handleFieldChange = useCallback((field: string, value: any) => {
+    // When switching from percent to dollar mode, convert negative offsets to absolute price
+    if (field === 'buy_percent' && value === false && ticker.buy_offset < 0) {
+      send('UPDATE_TICKER', { symbol: ticker.symbol, buy_percent: false, buy_offset: Math.abs(ticker.buy_offset) });
+      return;
+    }
+    if (field === 'sell_percent' && value === false && ticker.sell_offset < 0) {
+      send('UPDATE_TICKER', { symbol: ticker.symbol, sell_percent: false, sell_offset: Math.abs(ticker.sell_offset) });
+      return;
+    }
+    if (field === 'stop_percent' && value === false && ticker.stop_offset < 0) {
+      send('UPDATE_TICKER', { symbol: ticker.symbol, stop_percent: false, stop_offset: Math.abs(ticker.stop_offset) });
+      return;
+    }
     send('UPDATE_TICKER', { symbol: ticker.symbol, [field]: value });
-  }, [send, ticker.symbol]);
+  }, [send, ticker.symbol, ticker.buy_offset, ticker.sell_offset, ticker.stop_offset]);
 
   const handleTakeProfit = () => {
     if (!confirmTP) {
@@ -647,7 +660,7 @@ function OffsetInput({
 
   if (!isPercent) {
     // DOLLAR MODE: absolute target price (always positive)
-    const dec = useDecimalInput(value, (num) => onChange(Math.abs(num)));
+    const dec = useDecimalInput(Math.abs(value), (num) => onChange(Math.abs(num)));
     return (
       <div>
         <label className="text-[10px] text-muted-foreground block mb-0.5">{label}</label>
@@ -681,7 +694,7 @@ function OffsetInput({
           </div>
         </div>
         <p className="text-[8px] text-muted-foreground/50 mt-0.5">
-          {mode === 'buy' ? 'Buy' : mode === 'sell' ? 'Sell' : 'Stop'} when price hits ${value.toFixed(2)}
+          {mode === 'buy' ? 'Buy' : mode === 'sell' ? 'Sell' : 'Stop'} when price hits ${Math.abs(value).toFixed(2)}
         </p>
       </div>
     );
