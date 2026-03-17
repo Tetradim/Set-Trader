@@ -27,6 +27,9 @@ export interface TickerConfig {
   auto_rebracket: boolean;
   rebracket_threshold: number;
   rebracket_spread: number;
+  rebracket_cooldown: number;
+  rebracket_lookback: number;
+  rebracket_buffer: number;
   enabled: boolean;
   strategy: string;
   created_at: string;

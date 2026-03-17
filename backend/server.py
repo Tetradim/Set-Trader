@@ -74,6 +74,9 @@ class TickerConfig(BaseModel):
     auto_rebracket: bool = False
     rebracket_threshold: float = 2.0
     rebracket_spread: float = 0.80
+    rebracket_cooldown: int = 0        # seconds between rebrackets, 0 = no cooldown
+    rebracket_lookback: int = 10       # number of recent ticks to evaluate
+    rebracket_buffer: float = 0.10     # $ below recent low for new buy target
     enabled: bool = True
     strategy: str = "custom"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -107,6 +110,9 @@ class TickerUpdate(BaseModel):
     auto_rebracket: Optional[bool] = None
     rebracket_threshold: Optional[float] = None
     rebracket_spread: Optional[float] = None
+    rebracket_cooldown: Optional[int] = None
+    rebracket_lookback: Optional[int] = None
+    rebracket_buffer: Optional[float] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
 
@@ -280,6 +286,7 @@ class TradingEngine:
         self._trailing_highs: Dict[str, float] = {}
         self._last_trade_ts: Dict[str, datetime] = {}  # per-symbol cooldown
         self._recent_prices: Dict[str, list] = {}  # rolling window for rebracket
+        self._last_rebracket_ts: Dict[str, datetime] = {}  # per-symbol rebracket cooldown
 
     async def save_state(self):
         """Persist running/paused/simulate_24_7 to MongoDB so they survive restarts."""
@@ -494,19 +501,29 @@ class TradingEngine:
         if rebracket_on and pos["qty"] == 0:
             threshold = ticker_doc.get("rebracket_threshold", 2.0)
             spread = ticker_doc.get("rebracket_spread", 0.80)
+            cooldown = ticker_doc.get("rebracket_cooldown", 0)
+            lookback = max(2, ticker_doc.get("rebracket_lookback", 10))
+            buffer = ticker_doc.get("rebracket_buffer", 0.10)
 
-            # Track rolling recent prices (last 10 ticks)
+            # Rebracket cooldown: skip if we rebracketed too recently
+            now = datetime.now(timezone.utc)
+            if cooldown > 0:
+                last_rb = self._last_rebracket_ts.get(sym)
+                if last_rb and (now - last_rb).total_seconds() < cooldown:
+                    return
+
+            # Track rolling recent prices (configurable lookback)
             hist = self._recent_prices.get(sym, [])
             hist.append(price)
-            if len(hist) > 10:
-                hist = hist[-10:]
+            if len(hist) > lookback:
+                hist = hist[-lookback:]
             self._recent_prices[sym] = hist
 
             drifted_up = price > sell_target + threshold
             drifted_down = price < buy_target - threshold
             if drifted_up or drifted_down:
                 recent_low = min(hist)
-                new_buy = round(recent_low - 0.10, 2)
+                new_buy = round(recent_low - buffer, 2)
                 new_sell = round(new_buy + spread, 2)
                 old_buy = buy_target
                 old_sell = sell_target
@@ -525,8 +542,9 @@ class TradingEngine:
                 if doc:
                     await ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
 
+                self._last_rebracket_ts[sym] = now
                 direction = "UP" if drifted_up else "DOWN"
-                logger.info(f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} (was ${old_buy} / ${old_sell})")
+                logger.info(f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} (was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, cooldown={cooldown}s]")
 
                 # Telegram notification
                 try:

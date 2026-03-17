@@ -358,8 +358,29 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
                       min={0.01} max={99999}
                       incrementStep={incrementStep} decrementStep={decrementStep}
                     />
+                    <SteppedInput
+                      label="Cooldown (s)"
+                      value={ticker.rebracket_cooldown ?? 0}
+                      onChange={(v) => handleFieldChange('rebracket_cooldown', v)}
+                      min={0} max={3600}
+                      incrementStep={5} decrementStep={5}
+                    />
+                    <SteppedInput
+                      label="Lookback Ticks"
+                      value={ticker.rebracket_lookback ?? 10}
+                      onChange={(v) => handleFieldChange('rebracket_lookback', v)}
+                      min={2} max={100}
+                      incrementStep={1} decrementStep={1}
+                    />
+                    <SteppedInput
+                      label="Buffer ($)"
+                      value={ticker.rebracket_buffer ?? 0.10}
+                      onChange={(v) => handleFieldChange('rebracket_buffer', v)}
+                      min={0} max={99999}
+                      incrementStep={incrementStep} decrementStep={decrementStep}
+                    />
                     <div className="col-span-2 text-[9px] text-muted-foreground/60">
-                      When price drifts beyond threshold from the current bracket, a new bracket is set using the spread. Switches to dollar mode.
+                      Threshold: drift distance to trigger. Spread: new bracket width. Cooldown: min seconds between rebrackets (0 = none). Lookback: price ticks to find recent low. Buffer: gap below recent low for new buy.
                     </div>
                   </>
                 )}
