@@ -335,10 +335,18 @@ class TradingEngine:
 
         # Percent mode: offset from average. Dollar mode: ABSOLUTE target price.
         buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
-        sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
-        stop_target = round(avg * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
 
         pos = self._positions.get(sym, {"qty": 0, "avg_entry": 0})
+        entry = pos.get("avg_entry", 0)
+
+        # Sell/Stop targets: when holding a position and in percent mode,
+        # anchor to ENTRY PRICE so targets don't drift with the rolling average.
+        if pos["qty"] > 0 and entry > 0:
+            sell_target = round(entry * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
+            stop_target = round(entry * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
+        else:
+            sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
+            stop_target = round(avg * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
 
         # BUY logic: market = buy immediately when no position, limit = buy when price <= target
         if pos["qty"] == 0:

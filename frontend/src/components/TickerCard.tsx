@@ -73,12 +73,17 @@ export const TickerCard = memo(function TickerCard({ ticker }: Props) {
   };
 
   const avgPrice = price > 0 ? price : 100;
-  // Percent mode: offset from avg. Dollar mode: the value IS the target price.
+  const entryPrice = position?.avg_entry || 0;
+
+  // Buy target: always relative to current avg
   const buyTarget = ticker.buy_percent
     ? (avgPrice * (1 + ticker.buy_offset / 100)).toFixed(2)
     : ticker.buy_offset.toFixed(2);
+
+  // Sell target: when holding a position in % mode, anchor to entry price
+  const sellAnchor = (entryPrice > 0 && ticker.sell_percent) ? entryPrice : avgPrice;
   const sellTarget = ticker.sell_percent
-    ? (avgPrice * (1 + ticker.sell_offset / 100)).toFixed(2)
+    ? (sellAnchor * (1 + ticker.sell_offset / 100)).toFixed(2)
     : ticker.sell_offset.toFixed(2);
 
   return (
