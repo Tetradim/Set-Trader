@@ -561,6 +561,80 @@ class TradingEngine:
             await telegram_service.send_trade_alert(clean)
         except Exception:
             pass
+        # Write loss log file
+        if trade.pnl < 0:
+            self._write_loss_log(trade)
+
+    def _write_loss_log(self, trade: TradeRecord):
+        """Write a detailed .txt file for every losing trade, organized by date."""
+        try:
+            ts = datetime.fromisoformat(trade.timestamp)
+            date_str = ts.strftime("%Y-%m-%d")
+            time_str = ts.strftime("%H-%M-%S")
+            log_dir = ROOT_DIR / "trade_logs" / "losses" / date_str
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            filename = f"{trade.symbol}_{trade.side}_{time_str}_{trade.id[:8]}.txt"
+            filepath = log_dir / filename
+
+            pct_change = ((trade.price / trade.entry_price - 1) * 100) if trade.entry_price > 0 else 0
+
+            lines = [
+                f"{'='*60}",
+                f"  LOSS TRADE LOG — {trade.symbol}",
+                f"{'='*60}",
+                f"",
+                f"Trade ID:       {trade.id}",
+                f"Timestamp:      {ts.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                f"Symbol:         {trade.symbol}",
+                f"Side:           {trade.side}",
+                f"",
+                f"--- ORDER INFO ---",
+                f"Order Type:     {trade.order_type}",
+                f"Rule Mode:      {trade.rule_mode}",
+                f"",
+                f"--- PRICES ---",
+                f"Fill Price:     ${trade.price:.2f}",
+                f"Entry Price:    ${trade.entry_price:.2f}" if trade.entry_price > 0 else f"Entry Price:    N/A (legacy trade)",
+                f"Target Price:   ${trade.target_price:.2f}" if trade.target_price > 0 else f"Target Price:   N/A",
+                f"Avg Price (MA): ${trade.avg_price:.2f}" if trade.avg_price > 0 else f"Avg Price (MA): N/A",
+                f"",
+                f"--- POSITION ---",
+                f"Quantity:       {trade.quantity:.4f}",
+                f"Total Value:    ${trade.total_value:.2f}",
+                f"Buy Power:      ${trade.buy_power:.2f}",
+                f"",
+                f"--- TARGETS AT TIME OF TRADE ---",
+                f"Sell Target:    ${trade.sell_target:.2f}" if trade.sell_target > 0 else f"Sell Target:    N/A",
+                f"Stop Target:    ${trade.stop_target:.2f}" if trade.stop_target > 0 else f"Stop Target:    N/A",
+                f"",
+                f"--- P&L ---",
+                f"P&L:            ${trade.pnl:+.2f}",
+                f"% Change:       {pct_change:+.2f}%" if trade.entry_price > 0 else f"% Change:       N/A",
+                f"",
+            ]
+
+            if trade.side == "TRAILING_STOP":
+                lines += [
+                    f"--- TRAILING STOP DETAILS ---",
+                    f"Trail High:     ${trade.trail_high:.2f}",
+                    f"Trail Trigger:  ${trade.trail_trigger:.2f}",
+                    f"Trail Value:    {trade.trail_value}" + ("%" if trade.trail_mode == "PERCENT" else f" (${trade.trail_value:.2f})"),
+                    f"Trail Mode:     {trade.trail_mode}",
+                    f"",
+                ]
+
+            lines += [
+                f"--- REASON ---",
+                f"{trade.reason}",
+                f"",
+                f"{'='*60}",
+            ]
+
+            filepath.write_text("\n".join(lines))
+            logger.info(f"LOSS LOG: Written to {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to write loss log for {trade.symbol}: {e}")
 
     async def _update_profit(self, symbol: str, pnl: float, compound: bool = False):
         await db.profits.update_one(
@@ -1172,6 +1246,28 @@ async def get_strategies():
 async def get_trades(limit: int = Query(50, le=200)):
     docs = await db.trades.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
     return docs
+
+@api.get("/loss-logs")
+async def list_loss_logs():
+    """List all loss log dates and file counts."""
+    log_dir = ROOT_DIR / "trade_logs" / "losses"
+    if not log_dir.exists():
+        return {"dates": []}
+    dates = []
+    for d in sorted(log_dir.iterdir(), reverse=True):
+        if d.is_dir():
+            files = [f.name for f in d.iterdir() if f.suffix == ".txt"]
+            dates.append({"date": d.name, "count": len(files), "files": sorted(files, reverse=True)})
+    return {"dates": dates}
+
+@api.get("/loss-logs/{date}/{filename}")
+async def get_loss_log(date: str, filename: str):
+    """Return the contents of a specific loss log file."""
+    from fastapi.responses import PlainTextResponse
+    filepath = ROOT_DIR / "trade_logs" / "losses" / date / filename
+    if not filepath.exists() or not filepath.suffix == ".txt":
+        raise HTTPException(404, "Log file not found")
+    return PlainTextResponse(filepath.read_text())
 
 @api.get("/portfolio")
 async def get_portfolio():
