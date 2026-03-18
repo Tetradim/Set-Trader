@@ -42,6 +42,7 @@ export function useWebSocket() {
           if (data.account_balance !== undefined) {
             store.setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
           }
+          if (data.simulate_24_7 !== undefined) store.setSimulate247(data.simulate_24_7);
           store.setPaused(data.paused ?? false);
           store.setRunning(data.running ?? false);
           store.setMarketOpen(data.market_open ?? false);
@@ -55,6 +56,7 @@ export function useWebSocket() {
           if (data.positions) store.setPositions(data.positions);
           if (data.profits) store.setProfits(data.profits);
           if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
+          if (data.simulate_24_7 !== undefined) store.setSimulate247(data.simulate_24_7);
           store.setPaused(data.paused ?? store.paused);
           store.setRunning(data.running ?? store.running);
           store.setMarketOpen(data.market_open ?? store.marketOpen);
@@ -92,6 +94,14 @@ export function useWebSocket() {
         if (data.type === 'BOT_STATUS') {
           store.setRunning(data.running ?? store.running);
           store.setPaused(data.paused ?? store.paused);
+        }
+
+        if (data.type === 'BROKER_FAILED') {
+          store.setBrokerFailed(data.broker_id, data.reason || 'Connection failed', data.symbol || '');
+          // Auto-clear after 30 seconds
+          setTimeout(() => {
+            store.clearBrokerFailed(data.broker_id);
+          }, 30000);
         }
       } catch (err) {
         console.error('WS parse error:', err);

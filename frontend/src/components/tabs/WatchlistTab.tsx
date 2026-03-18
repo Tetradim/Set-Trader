@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { TickerCard } from '../TickerCard';
 import { ConfigModal } from '../ConfigModal';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Shield, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from '@/lib/api';
 import {
@@ -90,14 +90,17 @@ export function WatchlistTab() {
       <div className="flex items-center justify-between p-3 rounded-lg glass border border-border">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <Checkbox
-              data-testid="simulate-247-checkbox"
-              checked={simulate247}
-              onCheckedChange={(checked: boolean) => {
-                useStore.getState().setSimulate247(checked as boolean);
-              }}
-            />
-            <label className="text-xs text-muted-foreground cursor-pointer">Simulate 24/7</label>
+            <span
+              data-testid="watchlist-mode-indicator"
+              className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${
+                simulate247
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              }`}
+            >
+              {simulate247 ? <Shield size={12} /> : <Zap size={12} />}
+              {simulate247 ? 'Paper Trading' : 'Live Trading'}
+            </span>
           </div>
         </div>
 

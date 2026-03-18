@@ -65,6 +65,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   }, [send, ticker.symbol, ticker.broker_ids]);
 
   const selectedBrokers = brokers.filter(b => (ticker.broker_ids || []).includes(b.id));
+  const failedBrokers = useStore((s) => s.failedBrokers);
 
   const isPositive = pnl >= 0;
   const isActive = ticker.enabled;
@@ -242,6 +243,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
           <Plug size={10} className="text-muted-foreground shrink-0" />
           {brokers.map(b => {
             const active = (ticker.broker_ids || []).includes(b.id);
+            const isFailed = !!failedBrokers[b.id];
             return (
               <button
                 key={b.id}
@@ -249,13 +251,22 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
                 onClick={() => handleBrokerToggle(b.id)}
                 data-testid={`broker-chip-${ticker.symbol}-${b.id}`}
                 className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-all border ${
-                  active
+                  isFailed && active
+                    ? 'animate-pulse ring-2 ring-red-500/60'
+                    : active
                     ? 'opacity-100'
                     : 'opacity-30 hover:opacity-60 border-border'
                 }`}
-                style={active ? { backgroundColor: b.color + '22', color: b.color, borderColor: b.color + '44' } : undefined}
-                title={b.name}
+                style={
+                  isFailed && active
+                    ? { backgroundColor: '#ef444433', color: '#ef4444', borderColor: '#ef444466' }
+                    : active
+                    ? { backgroundColor: b.color + '22', color: b.color, borderColor: b.color + '44' }
+                    : undefined
+                }
+                title={isFailed ? `FAILED: ${failedBrokers[b.id]?.reason}` : b.name}
               >
+                {isFailed && active && <ShieldAlert size={8} className="inline mr-0.5" />}
                 {b.name.split('(')[0].split(' ')[0]}
               </button>
             );

@@ -16,6 +16,7 @@ import {
   Wallet,
   PiggyBank,
   AlertTriangle,
+  Shield,
 } from 'lucide-react';
 
 export function Header() {
@@ -23,6 +24,7 @@ export function Header() {
   const connected = useStore((s) => s.connected);
   const running = useStore((s) => s.running);
   const marketOpen = useStore((s) => s.marketOpen);
+  const simulate247 = useStore((s) => s.simulate247);
   const profits = useStore((s) => s.profits);
   const tickers = useStore((s) => s.tickers);
   const cashReserve = useStore((s) => s.cashReserve);
@@ -86,6 +88,16 @@ export function Header() {
               }`}
             >
               {marketOpen ? 'Market Open' : 'Market Closed'}
+            </span>
+            <span
+              data-testid="trading-mode-status"
+              className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                simulate247
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              }`}
+            >
+              {simulate247 ? 'PAPER' : 'LIVE'}
             </span>
           </div>
         </div>

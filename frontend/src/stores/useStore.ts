@@ -63,6 +63,8 @@ export interface TradeLog {
   trail_trigger: number;    // trailing stop trigger level
   trail_value: number;      // trailing % or $ value
   trail_mode: string;       // PERCENT or DOLLAR for trailing
+  trading_mode: string;     // "paper" or "live"
+  broker_results: any[];    // per-broker execution results
 }
 
 export interface PositionData {
@@ -150,6 +152,15 @@ interface BotState {
   decrementStep: number;
   setIncrementStep: (v: number) => void;
   setDecrementStep: (v: number) => void;
+
+  // Trading mode
+  tradingMode: string;
+  setTradingMode: (mode: string) => void;
+
+  // Failed brokers (for flashing chip animation)
+  failedBrokers: Record<string, { reason: string; symbol: string; timestamp: number }>;
+  setBrokerFailed: (brokerId: string, reason: string, symbol: string) => void;
+  clearBrokerFailed: (brokerId: string) => void;
 }
 
 export const useStore = create<BotState>((set) => ({
@@ -234,4 +245,20 @@ export const useStore = create<BotState>((set) => ({
   decrementStep: 0.5,
   setIncrementStep: (incrementStep) => set({ incrementStep }),
   setDecrementStep: (decrementStep) => set({ decrementStep }),
+
+  tradingMode: 'paper',
+  setTradingMode: (tradingMode) => set({ tradingMode }),
+
+  failedBrokers: {},
+  setBrokerFailed: (brokerId, reason, symbol) => set((state) => ({
+    failedBrokers: {
+      ...state.failedBrokers,
+      [brokerId]: { reason, symbol, timestamp: Date.now() },
+    },
+  })),
+  clearBrokerFailed: (brokerId) => set((state) => {
+    const copy = { ...state.failedBrokers };
+    delete copy[brokerId];
+    return { failedBrokers: copy };
+  }),
 }));

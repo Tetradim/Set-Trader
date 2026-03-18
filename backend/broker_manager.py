@@ -10,7 +10,6 @@ from brokers import BrokerAdapter, BrokerOrder, get_broker_adapter, get_broker_i
 logger = logging.getLogger("SentinelPulse")
 
 # Simple XOR-based obfuscation for credentials at rest.
-# For production, replace with a proper encryption library (cryptography.fernet).
 _KEY = (os.environ.get("CREDENTIAL_KEY") or "sentinel-pulse-default-key-2026").encode()
 
 def _xor_bytes(data: bytes, key: bytes) -> bytes:
@@ -32,12 +31,21 @@ class BrokerConnectionManager:
 
     def __init__(self, db):
         self.db = db
-        self._adapters: dict[str, BrokerAdapter] = {}  # broker_id -> live adapter
-        self._failed: dict[str, str] = {}  # broker_id -> failure reason
-        self._telegram = None  # set externally
+        self._adapters: dict[str, BrokerAdapter] = {}
+        self._failed: dict[str, str] = {}
+        self._telegram = None
+        self._ws_manager = None
 
     def set_telegram(self, telegram_service):
         self._telegram = telegram_service
+
+    def set_ws_manager(self, ws_manager):
+        self._ws_manager = ws_manager
+
+    async def _broadcast_ws(self, msg: dict):
+        """Broadcast a message via WebSocket manager if available."""
+        if self._ws_manager:
+            await self._ws_manager.broadcast(msg)
 
     async def save_credentials(self, broker_id: str, credentials: dict):
         """Encrypt and store broker credentials in MongoDB."""
@@ -128,46 +136,59 @@ class BrokerConnectionManager:
             }
         return result
 
-    async def place_orders_parallel(self, broker_ids: list[str], allocations: dict, order_template: dict) -> list[dict]:
-        """Place orders across multiple brokers in parallel. Returns results per broker.
-        Handles failover: skips failed brokers, sends Telegram alerts."""
+    async def place_orders_for_ticker(
+        self,
+        broker_ids: list[str],
+        allocations: dict,
+        order_template: dict,
+    ) -> list[dict]:
+        """Place orders across multiple brokers in parallel.
+        Returns results per broker. Handles failover: skips failed brokers, sends alerts."""
         tasks = []
         valid_brokers = []
 
         for bid in broker_ids:
             adapter = self.get_adapter(bid)
             alloc = allocations.get(bid, 0)
+
             if not adapter:
+                # Broker not connected — mark failure, alert, skip
                 self._failed[bid] = "Not connected"
-                # Alert via Telegram
                 info = get_broker_info(bid)
                 name = info.name if info else bid
+
+                # Telegram alert (fire and forget)
                 if self._telegram:
                     asyncio.create_task(self._telegram._broadcast_alert(
                         f"BROKER DISCONNECTED: {name}\n"
+                        f"Ticker: {order_template.get('symbol', '?')}\n"
                         f"Skipping order for this broker.\n"
-                        f"Use /reconnect {bid} to retry."
+                        f"Use /reconnect_brokers to retry."
                     ))
-                # Broadcast failure to WebSocket
-                from server import ws_manager
-                asyncio.create_task(ws_manager.broadcast({
+
+                # WebSocket failure broadcast
+                asyncio.create_task(self._broadcast_ws({
                     "type": "BROKER_FAILED",
                     "broker_id": bid,
-                    "reason": self._failed.get(bid, "Not connected"),
+                    "symbol": order_template.get("symbol", ""),
+                    "reason": "Not connected",
                 }))
                 continue
+
             if alloc <= 0:
                 continue
+
             valid_brokers.append(bid)
+            price = max(order_template.get("price", 1), 0.01)
             order = BrokerOrder(
                 symbol=order_template["symbol"],
                 side=order_template["side"],
                 order_type=order_template["order_type"],
-                quantity=order_template.get("quantity", 0) or round(alloc / max(order_template.get("price", 1), 0.01), 4),
+                quantity=order_template.get("quantity", 0) or round(alloc / price, 4),
                 limit_price=order_template.get("limit_price"),
                 stop_price=order_template.get("stop_price"),
             )
-            tasks.append(self._place_single(adapter, bid, order))
+            tasks.append(self._place_single(adapter, bid, order, order_template.get("symbol", "")))
 
         if not tasks:
             return []
@@ -178,11 +199,27 @@ class BrokerConnectionManager:
             if isinstance(result, Exception):
                 self._failed[bid] = str(result)
                 output.append({"broker_id": bid, "status": "error", "error": str(result)})
+                # Alert on mid-trade failure
+                info = get_broker_info(bid)
+                name = info.name if info else bid
+                if self._telegram:
+                    asyncio.create_task(self._telegram._broadcast_alert(
+                        f"BROKER ORDER FAILED: {name}\n"
+                        f"Ticker: {order_template.get('symbol', '?')}\n"
+                        f"Error: {result}\n"
+                        f"Other brokers unaffected."
+                    ))
+                asyncio.create_task(self._broadcast_ws({
+                    "type": "BROKER_FAILED",
+                    "broker_id": bid,
+                    "symbol": order_template.get("symbol", ""),
+                    "reason": str(result),
+                }))
             else:
                 output.append({"broker_id": bid, **result})
         return output
 
-    async def _place_single(self, adapter: BrokerAdapter, broker_id: str, order: BrokerOrder) -> dict:
+    async def _place_single(self, adapter: BrokerAdapter, broker_id: str, order: BrokerOrder, symbol: str = "") -> dict:
         """Place a single order through a broker adapter."""
         try:
             result = await adapter.place_order(order)
@@ -193,7 +230,6 @@ class BrokerConnectionManager:
                 "error": result.error,
             }
         except Exception as e:
-            # Connection failed mid-trade — mark broker as failed
             self._failed[broker_id] = str(e)
             self._adapters.pop(broker_id, None)
             raise
@@ -203,10 +239,19 @@ class BrokerConnectionManager:
         await self.disconnect_broker(broker_id)
         return await self.connect_broker(broker_id)
 
-    async def reconnect_all_failed(self) -> dict:
-        """Reconnect all failed brokers. Returns results."""
+    async def reconnect_all(self) -> dict:
+        """Reconnect all brokers (failed + disconnected). Returns results."""
         results = {}
-        for bid in list(self._failed.keys()):
+        # Try all brokers that have stored credentials
+        cursor = self.db.broker_credentials.find({}, {"_id": 0, "broker_id": 1})
+        docs = await cursor.to_list(50)
+        for doc in docs:
+            bid = doc.get("broker_id", "")
+            if not bid:
+                continue
+            if bid in self._adapters:
+                results[bid] = "already connected"
+                continue
             ok = await self.reconnect_broker(bid)
-            results[bid] = "connected" if ok else self._failed.get(bid, "failed")
+            results[bid] = "connected" if ok else (self._failed.get(bid, "failed"))
         return results

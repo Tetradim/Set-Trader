@@ -36,6 +36,10 @@ mongo_url = os.environ['MONGO_URL']
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[os.environ['DB_NAME']]
 
+# Broker connection manager
+from broker_manager import BrokerConnectionManager
+broker_mgr = BrokerConnectionManager(db)
+
 # yfinance (optional, for real price data)
 try:
     import yfinance as yf
@@ -146,6 +150,9 @@ class TradeRecord(BaseModel):
     trail_trigger: float = 0.0   # the trailing stop trigger level
     trail_value: float = 0.0     # the trailing % or $ value configured
     trail_mode: str = ""         # PERCENT or DOLLAR for trailing stop
+    # Live trading metadata
+    trading_mode: str = "paper"   # "paper" or "live"
+    broker_results: list = []     # per-broker execution results for live trades
 
 class Position(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -411,6 +418,31 @@ class TradingEngine:
                 exec_price = price  # market orders execute at current price
                 qty = round(base_power / exec_price, 4)
                 if qty > 0:
+                    # Determine trading mode
+                    is_paper = self.simulate_24_7
+                    broker_ids = ticker_doc.get("broker_ids", [])
+                    broker_allocs = ticker_doc.get("broker_allocations", {})
+                    broker_results = []
+
+                    if not is_paper and broker_ids:
+                        # LIVE MODE: route orders through broker adapters
+                        broker_results = await broker_mgr.place_orders_for_ticker(
+                            broker_ids=broker_ids,
+                            allocations=broker_allocs,
+                            order_template={
+                                "symbol": sym,
+                                "side": "BUY",
+                                "order_type": buy_otype.upper(),
+                                "price": exec_price,
+                                "limit_price": buy_target if buy_otype == "limit" else None,
+                            },
+                        )
+                        # Check if at least one broker succeeded
+                        any_success = any(r.get("status") not in ("error",) for r in broker_results)
+                        if not any_success and broker_results:
+                            logger.warning(f"All broker orders failed for {sym} BUY — skipping position tracking")
+                            return
+
                     self._positions[sym] = {"qty": qty, "avg_entry": exec_price}
                     order_label = "MKT" if buy_otype == "market" else "LMT"
                     trade = TradeRecord(
@@ -424,6 +456,8 @@ class TradingEngine:
                         avg_price=avg,
                         sell_target=sell_target,
                         stop_target=stop_target,
+                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        broker_results=broker_results,
                     )
                     await self._record_trade(trade)
 
@@ -459,6 +493,21 @@ class TradingEngine:
                     exec_price = price
                     pnl = round((exec_price - entry) * pos["qty"], 2)
                     order_label = "MKT" if trail_otype == "market" else "LMT"
+                    # Live order routing
+                    is_paper = self.simulate_24_7
+                    broker_ids = ticker_doc.get("broker_ids", [])
+                    broker_allocs = ticker_doc.get("broker_allocations", {})
+                    broker_results = []
+                    if not is_paper and broker_ids:
+                        broker_results = await broker_mgr.place_orders_for_ticker(
+                            broker_ids=broker_ids,
+                            allocations=broker_allocs,
+                            order_template={
+                                "symbol": sym, "side": "SELL", "order_type": "STOP",
+                                "price": exec_price, "quantity": pos["qty"],
+                                "stop_price": trail_stop,
+                            },
+                        )
                     trade = TradeRecord(
                         symbol=sym, side="TRAILING_STOP", price=exec_price,
                         quantity=pos["qty"], reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})", pnl=pnl,
@@ -475,6 +524,8 @@ class TradingEngine:
                         trail_trigger=trail_stop,
                         trail_value=trail_pct,
                         trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
+                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        broker_results=broker_results,
                     )
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -487,6 +538,21 @@ class TradingEngine:
                 exec_price = price
                 pnl = round((exec_price - entry) * pos["qty"], 2)
                 order_label = "MKT" if sell_otype == "market" else "LMT"
+                # Live order routing
+                is_paper = self.simulate_24_7
+                broker_ids = ticker_doc.get("broker_ids", [])
+                broker_allocs = ticker_doc.get("broker_allocations", {})
+                broker_results = []
+                if not is_paper and broker_ids:
+                    broker_results = await broker_mgr.place_orders_for_ticker(
+                        broker_ids=broker_ids,
+                        allocations=broker_allocs,
+                        order_template={
+                            "symbol": sym, "side": "SELL", "order_type": sell_otype.upper(),
+                            "price": exec_price, "quantity": pos["qty"],
+                            "limit_price": sell_target if sell_otype == "limit" else None,
+                        },
+                    )
                 trade = TradeRecord(
                     symbol=sym, side="SELL", price=exec_price, quantity=pos["qty"],
                     reason=f"[{order_label}] Price ${exec_price} {'(market)' if sell_otype == 'market' else f'>= sell target ${sell_target}'}", pnl=pnl,
@@ -499,6 +565,8 @@ class TradingEngine:
                     avg_price=avg,
                     sell_target=sell_target,
                     stop_target=stop_target,
+                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    broker_results=broker_results,
                 )
                 await self._record_trade(trade)
                 self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -511,6 +579,21 @@ class TradingEngine:
                     exec_price = price
                     pnl = round((exec_price - entry) * pos["qty"], 2)
                     order_label = "MKT" if stop_otype == "market" else "LMT"
+                    # Live order routing
+                    is_paper = self.simulate_24_7
+                    broker_ids = ticker_doc.get("broker_ids", [])
+                    broker_allocs = ticker_doc.get("broker_allocations", {})
+                    broker_results = []
+                    if not is_paper and broker_ids:
+                        broker_results = await broker_mgr.place_orders_for_ticker(
+                            broker_ids=broker_ids,
+                            allocations=broker_allocs,
+                            order_template={
+                                "symbol": sym, "side": "SELL", "order_type": "STOP",
+                                "price": exec_price, "quantity": pos["qty"],
+                                "stop_price": stop_target,
+                            },
+                        )
                     trade = TradeRecord(
                         symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
                         reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${stop_target}'}", pnl=pnl,
@@ -523,6 +606,8 @@ class TradingEngine:
                         avg_price=avg,
                         sell_target=sell_target,
                         stop_target=stop_target,
+                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        broker_results=broker_results,
                     )
                     await self._record_trade(trade)
                     self._positions[sym] = {"qty": 0, "avg_entry": 0}
@@ -657,51 +742,51 @@ class TradingEngine:
                 f"{'='*60}",
                 f"  LOSS TRADE LOG — {trade.symbol}",
                 f"{'='*60}",
-                f"",
+                "",
                 f"Trade ID:       {trade.id}",
                 f"Timestamp:      {ts.strftime('%Y-%m-%d %H:%M:%S UTC')}",
                 f"Symbol:         {trade.symbol}",
                 f"Side:           {trade.side}",
-                f"",
-                f"--- ORDER INFO ---",
+                "",
+                "--- ORDER INFO ---",
                 f"Order Type:     {trade.order_type}",
                 f"Rule Mode:      {trade.rule_mode}",
-                f"",
-                f"--- PRICES ---",
+                "",
+                "--- PRICES ---",
                 f"Fill Price:     ${trade.price:.2f}",
-                f"Entry Price:    ${trade.entry_price:.2f}" if trade.entry_price > 0 else f"Entry Price:    N/A (legacy trade)",
-                f"Target Price:   ${trade.target_price:.2f}" if trade.target_price > 0 else f"Target Price:   N/A",
-                f"Avg Price (MA): ${trade.avg_price:.2f}" if trade.avg_price > 0 else f"Avg Price (MA): N/A",
-                f"",
-                f"--- POSITION ---",
+                f"Entry Price:    ${trade.entry_price:.2f}" if trade.entry_price > 0 else "Entry Price:    N/A (legacy trade)",
+                f"Target Price:   ${trade.target_price:.2f}" if trade.target_price > 0 else "Target Price:   N/A",
+                f"Avg Price (MA): ${trade.avg_price:.2f}" if trade.avg_price > 0 else "Avg Price (MA): N/A",
+                "",
+                "--- POSITION ---",
                 f"Quantity:       {trade.quantity:.4f}",
                 f"Total Value:    ${trade.total_value:.2f}",
                 f"Buy Power:      ${trade.buy_power:.2f}",
-                f"",
-                f"--- TARGETS AT TIME OF TRADE ---",
-                f"Sell Target:    ${trade.sell_target:.2f}" if trade.sell_target > 0 else f"Sell Target:    N/A",
-                f"Stop Target:    ${trade.stop_target:.2f}" if trade.stop_target > 0 else f"Stop Target:    N/A",
-                f"",
-                f"--- P&L ---",
+                "",
+                "--- TARGETS AT TIME OF TRADE ---",
+                f"Sell Target:    ${trade.sell_target:.2f}" if trade.sell_target > 0 else "Sell Target:    N/A",
+                f"Stop Target:    ${trade.stop_target:.2f}" if trade.stop_target > 0 else "Stop Target:    N/A",
+                "",
+                "--- P&L ---",
                 f"P&L:            ${trade.pnl:+.2f}",
-                f"% Change:       {pct_change:+.2f}%" if trade.entry_price > 0 else f"% Change:       N/A",
-                f"",
+                f"% Change:       {pct_change:+.2f}%" if trade.entry_price > 0 else "% Change:       N/A",
+                "",
             ]
 
             if trade.side == "TRAILING_STOP":
                 lines += [
-                    f"--- TRAILING STOP DETAILS ---",
+                    "--- TRAILING STOP DETAILS ---",
                     f"Trail High:     ${trade.trail_high:.2f}",
                     f"Trail Trigger:  ${trade.trail_trigger:.2f}",
                     f"Trail Value:    {trade.trail_value}" + ("%" if trade.trail_mode == "PERCENT" else f" (${trade.trail_value:.2f})"),
                     f"Trail Mode:     {trade.trail_mode}",
-                    f"",
+                    "",
                 ]
 
             lines += [
-                f"--- REASON ---",
+                "--- REASON ---",
                 f"{trade.reason}",
-                f"",
+                "",
                 f"{'='*60}",
             ]
 
@@ -903,6 +988,7 @@ class TelegramService:
         app.add_handler(CommandHandler("cancel", self._cmd_cancel))
         app.add_handler(CommandHandler("cancelall", self._cmd_cancelall))
         app.add_handler(CommandHandler("history", self._cmd_history))
+        app.add_handler(CommandHandler("reconnect_brokers", self._cmd_reconnect_brokers))
         app.add_handler(CommandHandler("help", self._cmd_help))
 
     def _authorised(self, update: Update) -> bool:
@@ -1034,7 +1120,22 @@ class TelegramService:
         lines = ["Recent Trades:"]
         for t in trades:
             pnl_str = f" P&L:{t.get('pnl',0):+.2f}" if t.get("pnl", 0) != 0 else ""
-            lines.append(f"{t['side']} {t['symbol']} @${t['price']:.2f} x{t['quantity']:.4f}{pnl_str}")
+            mode = f" [{t.get('trading_mode', 'paper').upper()}]" if t.get('trading_mode') else ""
+            lines.append(f"{t['side']} {t['symbol']} @${t['price']:.2f} x{t['quantity']:.4f}{pnl_str}{mode}")
+        await update.message.reply_text("\n".join(lines))
+
+    async def _cmd_reconnect_brokers(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Reconnect all configured brokers."""
+        if not self._authorised(update):
+            return await update.message.reply_text("Unauthorised.")
+        await update.message.reply_text("Reconnecting all brokers...")
+        results = await broker_mgr.reconnect_all()
+        if not results:
+            return await update.message.reply_text("No broker credentials stored. Configure brokers in the web UI first.")
+        lines = ["Broker Reconnection Results:"]
+        for bid, status in results.items():
+            icon = "OK" if status == "connected" or status == "already connected" else "FAIL"
+            lines.append(f"  {icon} {bid}: {status}")
         await update.message.reply_text("\n".join(lines))
 
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1050,6 +1151,7 @@ class TelegramService:
             "/cancel SYMBOL - Disable ticker\n"
             "/cancelall - Disable all tickers\n"
             "/history - Recent 10 trades\n"
+            "/reconnect_brokers - Reconnect all brokers\n"
             "/help    - This message"
         )
         await update.message.reply_text(text)
@@ -1122,6 +1224,7 @@ async def price_broadcast_loop():
                     "paused": engine.paused,
                     "running": engine.running,
                     "market_open": engine.is_market_open(),
+                    "simulate_24_7": engine.simulate_24_7,
                 })
         except Exception as e:
             logger.error(f"Price broadcast error: {e}")
@@ -1162,6 +1265,13 @@ async def lifespan(app: FastAPI):
             )
     # Restore engine state from DB (survives restarts)
     await engine.load_state()
+    # Initialize broker manager with dependencies
+    broker_mgr.set_telegram(telegram_service)
+    broker_mgr.set_ws_manager(ws_manager)
+    try:
+        await broker_mgr.auto_connect_all()
+    except Exception as e:
+        logger.warning(f"Broker auto-connect failed: {e}")
     asyncio.create_task(price_broadcast_loop())
     asyncio.create_task(trading_loop())
     # Start Telegram if token exists in DB
@@ -1200,14 +1310,17 @@ app.add_middleware(
 # --- REST ENDPOINTS ---
 @api.get("/health")
 async def health():
+    connected_brokers = sum(1 for b in broker_mgr._adapters)
     return {
         "status": "online",
         "running": engine.running,
         "paused": engine.paused,
         "market_open": engine.is_market_open(),
+        "trading_mode": "paper" if engine.simulate_24_7 else "live",
         "yfinance": YF_AVAILABLE,
         "telegram": telegram_service.running,
         "ws_clients": len(ws_manager.active),
+        "brokers_connected": connected_brokers,
     }
 
 @api.get("/traces")
@@ -1421,6 +1534,17 @@ async def list_brokers():
         result.append(entry)
     return result
 
+@api.get("/brokers/status")
+async def broker_connection_status():
+    """Get live connection status for all brokers."""
+    return broker_mgr.get_status()
+
+@api.post("/brokers/reconnect")
+async def reconnect_brokers():
+    """Reconnect all configured brokers."""
+    results = await broker_mgr.reconnect_all()
+    return {"results": results}
+
 @api.get("/brokers/{broker_id}")
 async def get_broker(broker_id: str):
     """Get details for a specific broker."""
@@ -1584,6 +1708,18 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
         })
 
     return results
+
+
+@api.post("/brokers/{broker_id}/connect")
+async def connect_broker(broker_id: str, body: BrokerTestRequest):
+    """Connect a broker and store credentials for live trading."""
+    info = get_broker_info(broker_id)
+    if not info:
+        raise HTTPException(404, f"Broker '{broker_id}' not found.")
+    ok = await broker_mgr.connect_broker(broker_id, body.credentials)
+    if ok:
+        return {"status": "connected", "broker_id": broker_id}
+    return {"status": "failed", "broker_id": broker_id, "error": broker_mgr._failed.get(broker_id, "Unknown")}
 
 
 @api.get("/tickers")
@@ -1928,6 +2064,7 @@ async def get_settings():
     cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
     return {
         "simulate_24_7": engine.simulate_24_7,
+        "trading_mode": "paper" if engine.simulate_24_7 else "live",
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": telegram_service.running,
         "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
@@ -1983,6 +2120,7 @@ async def ws_endpoint(websocket: WebSocket):
             "paused": engine.paused,
             "running": engine.running,
             "market_open": engine.is_market_open(),
+            "simulate_24_7": engine.simulate_24_7,
         })
 
         while True:
