@@ -2,12 +2,16 @@
 import smtplib
 import logging
 import os
+import time
+from collections import deque
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger("SentinelPulse")
 
 APP_VERSION = "1.0.0-beta"
+MAX_EMAILS_PER_HOUR = 2
+_send_timestamps: deque[float] = deque()
 
 def _get_smtp_config() -> dict:
     return {
@@ -24,8 +28,22 @@ def _smtp_configured() -> bool:
     return bool(cfg["host"] and cfg["user"] and cfg["password"] and cfg["recipient"])
 
 
+def _check_rate_limit() -> bool:
+    """Returns True if sending is allowed, False if rate-limited."""
+    now = time.time()
+    cutoff = now - 3600
+    while _send_timestamps and _send_timestamps[0] < cutoff:
+        _send_timestamps.popleft()
+    return len(_send_timestamps) < MAX_EMAILS_PER_HOUR
+
+
 def send_email(subject: str, body_html: str, from_email: str = "") -> bool:
-    """Send an email via SMTP. Returns True on success, False on failure."""
+    """Send an email via SMTP. Returns True on success, False on failure.
+    Rate-limited to MAX_EMAILS_PER_HOUR."""
+    if not _check_rate_limit():
+        logger.warning("Email rate limit reached (%d/hr) — email not sent: %s", MAX_EMAILS_PER_HOUR, subject)
+        return False
+
     cfg = _get_smtp_config()
     if not _smtp_configured():
         logger.warning("SMTP not configured — email not sent: %s", subject)
@@ -47,6 +65,7 @@ def send_email(subject: str, body_html: str, from_email: str = "") -> bool:
             server.sendmail(msg["From"], [cfg["recipient"]], msg.as_string())
 
         logger.info("Email sent: %s", subject)
+        _send_timestamps.append(time.time())
         return True
     except Exception as e:
         logger.error("Failed to send email '%s': %s", subject, e)

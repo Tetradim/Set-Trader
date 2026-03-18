@@ -1217,7 +1217,7 @@ async def submit_feedback(body: FeedbackReport):
     reg = await db.beta_registrations.find_one({}, {"_id": 0})
     user = reg or {"first_name": "Unregistered", "last_name": "", "email": "unknown"}
 
-    from email_service import send_feedback_email, APP_VERSION
+    from email_service import send_feedback_email, APP_VERSION, _check_rate_limit
     doc = {
         "type": body.type,
         "subject": body.subject,
@@ -1240,7 +1240,8 @@ async def submit_feedback(body: FeedbackReport):
     except Exception as e:
         logger.warning(f"Feedback email failed (non-blocking): {e}")
 
-    return {"status": "submitted", "email_sent": email_sent, "feedback": doc}
+    rate_limited = not _check_rate_limit()
+    return {"status": "submitted", "email_sent": email_sent, "rate_limited": rate_limited, "feedback": doc}
 
 
 from starlette.responses import PlainTextResponse

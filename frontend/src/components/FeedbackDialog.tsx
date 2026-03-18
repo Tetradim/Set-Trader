@@ -40,6 +40,8 @@ export function FeedbackDialog() {
       toast.success('Feedback submitted — thank you!');
       if (res.email_sent) {
         toast.info('A copy was emailed to the development team.');
+      } else if (res.rate_limited) {
+        toast.warning('Email rate limit reached (2/hr). Your feedback was saved but not emailed.');
       }
       reset();
       setOpen(false);
