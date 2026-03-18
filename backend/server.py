@@ -29,7 +29,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-logger = logging.getLogger("BracketBot")
+logger = logging.getLogger("SentinelPulse")
 
 # MongoDB
 mongo_url = os.environ['MONGO_URL']
@@ -162,6 +162,23 @@ class SettingsUpdate(BaseModel):
     increment_step: Optional[float] = None
     decrement_step: Optional[float] = None
     account_balance: Optional[float] = None
+
+class BetaRegistration(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    phone: str = ""
+    ssn_last4: str
+    address_street: str
+    address_city: str
+    address_state: str
+    address_zip: str
+    address_country: str
+    agreement_accepted: bool
+    agreement_version: str = "1.0"
+    jurisdiction: str = ""
+    registered_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 
 class PresetStrategy(BaseModel):
     name: str
@@ -762,7 +779,7 @@ class TelegramService:
             await self._app.updater.start_polling(drop_pending_updates=True)
             self.running = True
             logger.info("Telegram bot started (polling)")
-            await self._broadcast_alert("BracketBot is now ONLINE and connected to Telegram.")
+            await self._broadcast_alert("Sentinel Pulse is now ONLINE and connected to Telegram.")
         except Exception as e:
             logger.error(f"Telegram start error: {e}")
             self.running = False
@@ -771,7 +788,7 @@ class TelegramService:
         """Gracefully shut down the bot and notify chat IDs."""
         if self._app and self.running:
             try:
-                await self._broadcast_alert("BracketBot is going OFFLINE. You will be notified when it restarts.")
+                await self._broadcast_alert("Sentinel Pulse is going OFFLINE. You will be notified when it restarts.")
             except Exception:
                 pass
             try:
@@ -801,7 +818,7 @@ class TelegramService:
         bot = self._app.bot
         for cid in self.chat_ids:
             try:
-                await bot.send_message(chat_id=int(cid), text=f"[BracketBot] {text}")
+                await bot.send_message(chat_id=int(cid), text=f"[Sentinel Pulse] {text}")
             except Exception as e:
                 logger.warning(f"Telegram send to {cid} failed: {e}")
 
@@ -985,7 +1002,7 @@ class TelegramService:
 
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = (
-            "BracketBot Commands:\n"
+            "Sentinel Pulse Commands:\n"
             "/pause   - Pause all trading\n"
             "/resume  - Resume trading\n"
             "/start   - Start trading engine\n"
@@ -1115,7 +1132,7 @@ async def lifespan(app: FastAPI):
         await telegram_service.reload_from_db()
     except Exception as e:
         logger.warning(f"Telegram auto-start failed: {e}")
-    logger.info("BracketBot Engine started")
+    logger.info("Sentinel Pulse Engine started")
     yield
     # Shutdown: send offline alert then close
     try:
@@ -1126,7 +1143,7 @@ async def lifespan(app: FastAPI):
 
 
 # --- FASTAPI APP ---
-app = FastAPI(title="BracketBot", lifespan=lifespan)
+app = FastAPI(title="Sentinel Pulse", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
 app.add_middleware(
@@ -1150,6 +1167,187 @@ async def health():
         "telegram": telegram_service.running,
         "ws_clients": len(ws_manager.active),
     }
+
+@api.get("/beta/status")
+async def beta_status():
+    """Check if a beta tester is registered."""
+    reg = await db.beta_registrations.find_one({}, {"_id": 0})
+    return {"registered": reg is not None, "registration": reg}
+
+@api.post("/beta/register")
+async def beta_register(body: BetaRegistration):
+    """Register as a beta tester. Must accept agreement."""
+    if not body.agreement_accepted:
+        raise HTTPException(400, "You must accept the Beta Tester Agreement to proceed.")
+    if not body.first_name or not body.last_name or not body.email:
+        raise HTTPException(400, "Name and email are required.")
+    if len(body.ssn_last4) != 4 or not body.ssn_last4.isdigit():
+        raise HTTPException(400, "Last 4 of SSN must be exactly 4 digits.")
+    doc = body.model_dump()
+    doc["ip_address"] = ""  # Placeholder — would capture in production
+    await db.beta_registrations.delete_many({})  # Only one registration per instance
+    await db.beta_registrations.insert_one(doc)
+    doc.pop("_id", None)
+    logger.info(f"BETA REGISTRATION: {body.first_name} {body.last_name} ({body.email})")
+    return {"status": "registered", "registration": doc}
+
+
+from starlette.responses import PlainTextResponse
+
+@api.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics():
+    """Expose key application metrics in Prometheus text format."""
+    lines = []
+    lines.append("# HELP sentinel_pulse_up Whether the bot engine is running (1) or stopped (0).")
+    lines.append("# TYPE sentinel_pulse_up gauge")
+    lines.append(f"sentinel_pulse_up {1 if engine.running else 0}")
+
+    lines.append("# HELP sentinel_pulse_paused Whether the bot engine is paused (1) or active (0).")
+    lines.append("# TYPE sentinel_pulse_paused gauge")
+    lines.append(f"sentinel_pulse_paused {1 if engine.paused else 0}")
+
+    lines.append("# HELP sentinel_pulse_market_open Whether the market is currently open (1) or closed (0).")
+    lines.append("# TYPE sentinel_pulse_market_open gauge")
+    lines.append(f"sentinel_pulse_market_open {1 if engine.is_market_open() else 0}")
+
+    lines.append("# HELP sentinel_pulse_ws_clients Number of active WebSocket connections.")
+    lines.append("# TYPE sentinel_pulse_ws_clients gauge")
+    lines.append(f"sentinel_pulse_ws_clients {len(ws_manager.active)}")
+
+    # Account balance metrics
+    balance_doc = await db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
+    tickers = await db.tickers.find({}, {"_id": 0}).to_list(100)
+    allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
+    available = round(account_balance - allocated, 2)
+
+    lines.append("# HELP sentinel_pulse_account_balance_usd Total account balance in USD.")
+    lines.append("# TYPE sentinel_pulse_account_balance_usd gauge")
+    lines.append(f"sentinel_pulse_account_balance_usd {account_balance}")
+
+    lines.append("# HELP sentinel_pulse_allocated_usd Total allocated capital in USD.")
+    lines.append("# TYPE sentinel_pulse_allocated_usd gauge")
+    lines.append(f"sentinel_pulse_allocated_usd {allocated}")
+
+    lines.append("# HELP sentinel_pulse_available_usd Available (unallocated) capital in USD.")
+    lines.append("# TYPE sentinel_pulse_available_usd gauge")
+    lines.append(f"sentinel_pulse_available_usd {available}")
+
+    # Ticker count
+    lines.append("# HELP sentinel_pulse_tickers_total Number of configured tickers.")
+    lines.append("# TYPE sentinel_pulse_tickers_total gauge")
+    lines.append(f"sentinel_pulse_tickers_total {len(tickers)}")
+
+    tickers_enabled = sum(1 for t in tickers if t.get("enabled", True))
+    lines.append("# HELP sentinel_pulse_tickers_enabled Number of enabled tickers.")
+    lines.append("# TYPE sentinel_pulse_tickers_enabled gauge")
+    lines.append(f"sentinel_pulse_tickers_enabled {tickers_enabled}")
+
+    # Per-ticker buy power
+    for t in tickers:
+        sym = t.get("symbol", "unknown")
+        bp = t.get("base_power", 0)
+        lines.append(f'sentinel_pulse_ticker_buy_power_usd{{symbol="{sym}"}} {bp}')
+
+    # Trade counts and P&L
+    total_trades = await db.trades.count_documents({})
+    lines.append("# HELP sentinel_pulse_trades_total Total number of trades executed.")
+    lines.append("# TYPE sentinel_pulse_trades_total counter")
+    lines.append(f"sentinel_pulse_trades_total {total_trades}")
+
+    buy_trades = await db.trades.count_documents({"side": "BUY"})
+    sell_trades = await db.trades.count_documents({"side": {"$in": ["SELL", "STOP", "TRAILING_STOP"]}})
+    lines.append("# HELP sentinel_pulse_trades_by_side_total Trade count by side.")
+    lines.append("# TYPE sentinel_pulse_trades_by_side_total counter")
+    lines.append(f'sentinel_pulse_trades_by_side_total{{side="BUY"}} {buy_trades}')
+    lines.append(f'sentinel_pulse_trades_by_side_total{{side="SELL"}} {sell_trades}')
+
+    # Per-ticker P&L
+    profits_cursor = db.profits.find({}, {"_id": 0})
+    profits_list = await profits_cursor.to_list(100)
+    total_pnl = 0.0
+    lines.append("# HELP sentinel_pulse_ticker_pnl_usd Realized P&L per ticker in USD.")
+    lines.append("# TYPE sentinel_pulse_ticker_pnl_usd gauge")
+    for p in profits_list:
+        sym = p.get("symbol", "unknown")
+        pnl = p.get("total_pnl", 0)
+        total_pnl += pnl
+        lines.append(f'sentinel_pulse_ticker_pnl_usd{{symbol="{sym}"}} {round(pnl, 2)}')
+
+    lines.append("# HELP sentinel_pulse_total_pnl_usd Total realized P&L across all tickers in USD.")
+    lines.append("# TYPE sentinel_pulse_total_pnl_usd gauge")
+    lines.append(f"sentinel_pulse_total_pnl_usd {round(total_pnl, 2)}")
+
+    # Cash reserve
+    cash_doc = await db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+    cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
+    lines.append("# HELP sentinel_pulse_cash_reserve_usd Cash reserve from take profit actions.")
+    lines.append("# TYPE sentinel_pulse_cash_reserve_usd gauge")
+    lines.append(f"sentinel_pulse_cash_reserve_usd {cash_reserve}")
+
+    # Positions
+    positions = await db.positions.find({}, {"_id": 0}).to_list(100)
+    lines.append("# HELP sentinel_pulse_open_positions Number of open positions.")
+    lines.append("# TYPE sentinel_pulse_open_positions gauge")
+    lines.append(f"sentinel_pulse_open_positions {len(positions)}")
+
+    for pos in positions:
+        sym = pos.get("symbol", "unknown")
+        qty = pos.get("quantity", 0)
+        upnl = pos.get("unrealized_pnl", 0)
+        lines.append(f'sentinel_pulse_position_quantity{{symbol="{sym}"}} {qty}')
+        lines.append(f'sentinel_pulse_position_unrealized_pnl_usd{{symbol="{sym}"}} {round(upnl, 2)}')
+
+    return "\n".join(lines) + "\n"
+
+
+# --- BROKER ENDPOINTS ---
+from brokers import BROKER_REGISTRY, get_broker_info
+
+@api.get("/brokers")
+async def list_brokers():
+    """List all supported brokers with their metadata and risk warnings."""
+    result = []
+    for broker_id, info in BROKER_REGISTRY.items():
+        entry = {
+            "id": info.id,
+            "name": info.name,
+            "description": info.description,
+            "supported": info.supported,
+            "auth_fields": info.auth_fields,
+            "docs_url": info.docs_url,
+            "risk_warning": None,
+        }
+        if info.risk_warning:
+            entry["risk_warning"] = {
+                "level": info.risk_warning.level.value,
+                "message": info.risk_warning.message,
+            }
+        result.append(entry)
+    return result
+
+@api.get("/brokers/{broker_id}")
+async def get_broker(broker_id: str):
+    """Get details for a specific broker."""
+    info = get_broker_info(broker_id)
+    if not info:
+        raise HTTPException(404, f"Broker '{broker_id}' not found.")
+    entry = {
+        "id": info.id,
+        "name": info.name,
+        "description": info.description,
+        "supported": info.supported,
+        "auth_fields": info.auth_fields,
+        "docs_url": info.docs_url,
+        "risk_warning": None,
+    }
+    if info.risk_warning:
+        entry["risk_warning"] = {
+            "level": info.risk_warning.level.value,
+            "message": info.risk_warning.message,
+        }
+    return entry
+
 
 @api.get("/tickers")
 async def get_tickers():
@@ -1506,7 +1704,7 @@ async def test_telegram():
     """Send a test alert to all registered chat IDs."""
     if not telegram_service.running:
         raise HTTPException(400, "Telegram bot is not connected. Save a valid token first.")
-    await telegram_service._broadcast_alert("Test alert from BracketBot! Connection verified.")
+    await telegram_service._broadcast_alert("Test alert from Sentinel Pulse! Connection verified.")
     return {"ok": True, "sent_to": telegram_service.chat_ids}
 
 # --- WEBSOCKET ---

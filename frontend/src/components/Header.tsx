@@ -55,10 +55,10 @@ export function Header() {
             </div>
             <div>
               <h1 className="text-lg font-bold tracking-tight text-foreground" data-testid="app-title">
-                BracketBot
+                Sentinel Pulse
               </h1>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
-                Terminal v3.0
+                Signal Forge Laboratory
               </p>
             </div>
           </div>

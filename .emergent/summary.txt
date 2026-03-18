@@ -1,92 +1,113 @@
 <analysis>**original_problem_statement:**
-The user wants to refactor and productionize a trading bot. The original codebase, a mix of Streamlit and JavaScript, has been partially converted to a WebSocket and Zustand-based architecture with a FastAPI backend.
+The user wants to productionize and expand a trading bot, now named **Sentinel Pulse**. The initial goal was to refactor a mixed codebase into a stable FastAPI/React application.
 
-**PRODUCT REQUIREMENTS:**
-- **Code Cleanup:** Remove all ghost code, dead files, and old JavaScript artifacts from the repository.
-- **Core Trading Logic:**
-    - Fetch average price over a customizable period.
-    - Implement bracket orders with customizable percentages or dollar amounts.
-    - Use profits from sales to compound buying power.
-- **Telegram Integration:**
-    - Commands: , , , , , , .
-    - Alerts for bot restarts and offline status.
-- **UI & UX:**
-    - A Radix/Lucide-powered dashboard with a dark theme.
-    - Per-stock cards with individual controls.
-    - Expandable cards to configure buy/sell rules.
-    - Live price feed and real-time log of trades.
-    - A tabbed UI for Watchlist, Positions, Trade History, and Logs.
-    - Portfolio Overview metrics.
-- **Advanced Features & Automation:**
-    - Live graph chart embedded in ticker cards.
-    - Preset trading strategies.
-    - Risk management controls (e.g., auto-stop on losses).
-    - Logic for dynamically adjusting trade brackets (auto-rebracket).
-    - A CI/CD workflow to produce a standalone Windows executable.
+**PRODUCT REQUIREMENTS (current, after recent user requests):**
+- **Beta Tester Onboarding:**
+    - Implement a mandatory pop-up on first launch.
+    - The pop-up must display a beta tester agreement with a strong focus on preventing reverse engineering and copyright infringement.
+    - Collect beta tester information: name, last 4 of social, home address, email address, and jurisdiction.
+    - Store this information securely.
+- **Live Broker Integration:**
+    - Prepare the application to support live trading with multiple brokers (Robinhood, Charles Schwab, Webull, IBKR, Wealthsimple, Fidelity).
+    - Implement a robust architecture to handle different broker APIs.
+    - Include warnings for brokers that have a higher risk of banning automated trading accounts.
+- **Monitoring & Metrics:**
+    - Expose a robust  endpoint in a Prometheus-compatible format.
+    - This is to prepare for a future, separate, downloadable monitoring package using Prometheus and Grafana.
+- **Core Trading & UI (largely complete):**
+    - UI: A dark-themed dashboard with draggable, re-orderable ticker cards. Configuration is handled in a double-click modal with tabbed inputs.
+    - Capital Management: A master account balance system to track total capital, allocated funds, and available funds, with UI warnings for over-allocation.
+    - Trading Logic: Bracket orders, compounding profits, risk controls (auto-stop), dynamic re-bracketing, and detailed trade logging.
+- **Packaging:**
+    - Create a standalone Windows executable installer for easy distribution to beta testers.
 
 **User's preferred language**: English
 
 **what currently exists?**
-A fully-featured trading bot application with a FastAPI backend and a React/TypeScript frontend. It uses MongoDB for persistence and WebSockets for real-time data.
+The application is a sophisticated trading bot named **Sentinel Pulse** with a FastAPI backend and React/TypeScript frontend.
 
-Key features implemented:
-- **UI:** A dark-themed dashboard with individual, configurable ticker cards. Cards can be expanded to show a live price chart ().
-- **Trading Logic:** Supports buy/sell rules in both dollar and percentage modes, stop-loss, and trailing stops (also with a dollar/percent toggle). Logic has been added to anchor sell targets to the entry price in percent mode to ensure profitable trades.
-- **Automation:**
-    - **Compounding:** A toggle allows profits from sells to be automatically added to a ticker's buying power.
-    - **Risk Controls:** Per-ticker auto-stop feature disables trading based on configurable daily loss limits or consecutive losses, with Telegram notifications.
-    - **Auto-Rebracket:** Automatically sets a new trading bracket if the price drifts too far from the current one.
-- **State Management:** Preset strategies can be applied, and custom settings are backed up and can be restored by toggling the preset off.
-- **Packaging:** A complete workflow for building a standalone Windows executable using PyInstaller has been created, including a GitHub Actions workflow to automate the build process.
-- **UX Improvements:** Redundant Pause buttons have been removed in favor of a single Start/Stop control. The live activity log now groups identical consecutive trades for better readability.
+- **UI/UX:** A dark-themed dashboard featuring draggable ticker cards (). Configuration is no longer inline; a double-click on a card opens a comprehensive modal with tabbed sections for Rules, Risk, Rebracket, and Advanced settings.
+- **Capital Management:** A global Account Balance system is fully implemented. The header displays the total account balance, total allocated capital (sum of all tickers' buy power), and available capital. The UI provides visual warnings if allocation exceeds the available balance.
+- **Trade Logging:** A rich logging system is in place. Every trade records detailed metadata (rule mode, order type, targets, etc.) to MongoDB. Additionally, every losing trade generates a detailed  log file stored on the server, accessible via the UI.
+- **Packaging:** A complete, functional workflow exists to build a standalone Windows executable using PyInstaller. A critical bug in the desktop mode's API routing has been fixed, ensuring the executable is viable.
+- **Backend:** The backend code has been partially prepared for beta registration by adding database models (, ) and API endpoints (, ).
 
 **Last working item**:
-- **Last item agent was working:** Fixing a UI bug where a negative sign () from a percentage-based rule would persist in the input field after switching to dollar-mode, which should only contain positive values.
-- **Reasoning:** The input component was receiving the raw negative value from the state when the mode was toggled. The fix involves applying  to the value passed to the input component when in dollar mode, and also ensuring the backend updates the stored value to be positive when the mode is switched.
-- **Status:** USER VERIFICATION PENDING
-- **Agent Testing Done:** Y
-- **Which testing method agent to use?** Manual testing by user. The agent verified the fix visually with a screenshot, which showed the negative sign was correctly removed.
+- **Last item agent was working:** Implementing the Beta Tester Registration & Agreement feature.
+- **Reasoning:** The user requested a mandatory registration flow for beta testers, including collecting personal information and getting agreement to legal terms, before the app can be used.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** Frontend testing agent (to verify modal pop-up, form submission, and app blocking) and Backend testing agent (to verify API endpoints for registration and status checking).
 - **User Testing Done:** N
 
 **All Pending/In progress Issue list**:
-- None. The last reported bug has been addressed and is pending user review.
+- **Issue 1: Beta Registration Modal is not integrated into the application. (P0)**
+  - The backend logic and frontend component file exist, but the modal is never triggered in the UI.
+
+  - **Issues Detail:**
+    - **Issue 1: Finish and Integrate Beta Tester Registration Flow**
+      - **Attempted fixes:** The agent has created the backend models and API endpoints, and a skeleton for the frontend modal (). No integration attempt has been made yet.
+      - **Next debug checklist:**
+        1.  Flesh out the UI of  with form inputs for all required fields (name, address, etc.) and a scrollable area for the legal agreement text.
+        2.  In , create a state to track beta registration status (e.g., ).
+        3.  On application load, call the  endpoint.
+        4.  If the user is not registered, render the  as a blocking overlay.
+        5.  Implement the form submission logic within the modal to call the  endpoint.
+        6.  Upon successful registration, hide the modal and allow access to the main application.
+      - **Why fix this issue and what will be achieved with the fix?** This is a critical prerequisite for the user's plan to distribute the application to beta testers. It provides a legal gateway and collects necessary user data.
+      - **Status:** IN PROGRESS
+      - **Is recurring issue?** N
+      - **Should Test frontend/backend/both after fix?** both
+      - **Blocked on other issue:** None
 
 **In progress Task List**:
-- None.
+- **Task 1: Implement Beta Tester Registration Flow (P0)**
+  - **Where to resume:** The agent has created the file . The next step is to build out the form and legal text display within this component, then integrate it into  to be displayed conditionally on application startup.
+  - **What will be achieved with this?** A mandatory legal agreement and user registration screen will appear when the application is first launched, fulfilling a key user requirement for beta distribution.
+  - **Status:** IN PROGRESS
+  - **Should Test frontend/backend/both after fix?** both
+  - **Blocked on something:** None
 
 **Upcoming and Future Tasks**
 - **Upcoming Tasks:**
-    - **Input Validation (P2):** Perform a full pass on all user inputs to add robust validation and user-friendly error messages (e.g., preventing non-numeric characters, ensuring valid ranges).
-    - **High-Risk Confirmations (P2):** Add pop-up confirmation dialogs for high-risk actions like deleting a ticker with an open position.
+    - **(P0) Add Prometheus Metrics Endpoint:** Implement the  endpoint on the backend. It should expose key application metrics (e.g., P&L, trade counts, account balance, allocated power) in a Prometheus-scrapeable text format.
+    - **(P1) Design Broker Integration Architecture:** Plan a scalable, adapter-based architecture in the backend to support multiple live trading broker APIs (e.g., Robinhood, IBKR). This involves creating a common interface for , , , etc., and then creating specific implementations for each broker.
+    - **(P2) Implement Broker Connection Warnings:** In the UI where a user would connect a broker, display clear warnings for brokers known to be sensitive to automated trading to manage user expectations.
+    - **(P2) Full Input Validation Pass:** Add robust validation and user-friendly error messages to all user-configurable inputs (e.g., in the ticker configuration modal).
 - **Future Tasks:**
-    - **Monitoring:** Integrate Prometheus and Grafana services to export and visualize metrics like win rate, drawdown, and Sharpe ratio.
-    - **Tracing:** Add OpenTelemetry tracing to track the lifecycle of every trade decision.
-    - **Restart Frontend Button:** Add a button in the UI to allow the user to force a frontend refresh, with a confirmation pop-up.
+    - Create the separate Sentinel Pulse Monitor downloadable package.
+    - Implement the live trading integrations based on the designed architecture.
+    - Add confirmation dialogs for high-risk actions (e.g., deleting a ticker with an open position).
+    - Integrate OpenTelemetry for distributed tracing of trades.
 
 **Completed work in this session**
-- **Bug Fix:** Fixed issue where a negative sign persisted in inputs when switching from percent to dollar mode.
-- **Bug Fix:** Corrected sell logic in percent mode by anchoring sell/stop targets to the actual entry price instead of the moving average.
-- **Bug Fix:** Resolved an issue where the Take Profit feature did not correctly reset the buy power after profits had been compounded.
-- **Bug Fix:** Prevented the bot from rapid-firing trades by adding a 30-second cooldown period per symbol after a trade is executed.
-- **Feature:** Implemented an Auto Rebracket system to dynamically create new trading brackets when the price drifts.
-- **Feature:** Added a Risk Controls section for each ticker to automatically disable trading based on max daily loss or consecutive losses.
-- **Feature:** Implemented a Compound Profits toggle to automatically reinvest profits into a ticker's buying power.
-- **Feature:** Added a Wait 1 day before selling toggle.
-- **Feature:** Added / order type toggles for buy, sell, stop-loss, and trailing stop rules.
-- **Feature:** Implemented an interactive, live-updating price chart within each ticker card, which expands the card to a double-wide view.
-- **Feature:** Implemented a toggle mechanism for preset strategies, allowing users to apply a preset and then revert to their previous custom settings.
-- **Feature:** Added a toggle to switch the trailing stop between percentage and dollar values.
-- **CI/CD:** Created a GitHub Actions workflow () to automate the build of a standalone Windows executable.
-- **Packaging:** Created all necessary scripts (, , ) and backend modifications to bundle the app into a single executable.
-- **UX:** Removed redundant Pause buttons and Telegram commands, consolidating control into the main Start/Stop button.
-- **UX:** Condensed the Live Activity and History views to group repeated trades, improving readability.
+- **Renaming:** Renamed the application from BracketBot to Sentinel Pulse across the codebase and UI.
+- **UI Overhaul:**
+    - Replaced inline configuration with a tabbed modal (), triggered by double-clicking a ticker card.
+    - Implemented drag-and-drop reordering for ticker cards in the Watchlist using .
+- **Capital Management:**
+    - Implemented a master Account Balance system.
+    - The header now displays total, allocated, and available capital.
+    - Added UI warnings (pills changing color, a banner) for over-allocation.
+    - All ticker creation/editing actions now update the global allocation in real-time.
+- **Rich Trade Logging:**
+    - Enhanced the  database collection to store detailed metadata for every trade (rule mode, order type, targets, entry price, etc.).
+    - Overhauled the History tab () to display this rich data, including filters and an expandable detail view.
+- **File-based Loss Logging:**
+    - Implemented a backend feature to save a detailed  log file for every losing trade.
+    - Files are organized by date in .
+    - Added API endpoints and a UI section in the Logs tab to browse and view these loss files.
+- **Feature Enhancement:** Added more granular controls for the Auto Rebracket feature (cooldown, lookback ticks, buffer).
+- **Packaging & Build:**
+    - Created and refined all necessary scripts (, ) and documentation () for building a standalone Windows executable.
+    - **Critical Bug Fix:** Fixed a fatal flaw where the backend's SPA static file server was intercepting all API calls in desktop mode, making the executable non-functional.
+- **Documentation:** Significantly updated  and  to reflect all new features and architectural changes.
 
 **Earlier issues found/mentioned but not fixed**
 - **Issue 1: Brittle CI/CD Docker setup.**
-    - The CI workflow () initially failed because the  job, which used Docker Compose, could not find  and .
-    - **Fix Attempt:** The agent pivoted to creating a new workflow () that does not use Docker at all. The original  was then modified to remove the failing Docker-based job.
-    - **Remaining Issue:** The underlying problem with the Docker setup (, ) was never fixed. If Docker-based deployment is attempted, it will likely fail again.
-    - **Should Test frontend/backend/both after fix:** N/A (DevOps issue)
+    - **Debug checklist:** The  and  likely have incorrect paths or context issues preventing  from being found during the build. This was bypassed by creating a non-Docker build workflow () but the root cause in the Docker files was never fixed.
+    - **Why to solve this issue and what will be achieved with this?** Fixing this would enable container-based testing and deployment, which is a standard and robust CI/CD practice.
+    - **Should Test frontend/backend/both after fix:** N/A (DevOps)
     - **Is recurring issue?** Y
 
 **Known issue recurrence from previous fork**
@@ -96,89 +117,93 @@ Key features implemented:
 
 
 **Key Technical Concepts**
-- **Backend:** FastAPI, , , WebSockets, MongoDB ().
-- **Frontend:** React, TypeScript, Vite, Zustand, Tailwind CSS, shadcn/ui, Recharts.
-- **Architecture:** A unified server architecture where the FastAPI backend can serve the static React frontend files directly when run in desktop mode (). Communication is via REST API and a WebSocket for real-time updates.
-- **Packaging:**  is used to package the Python backend and the built static frontend into a single  file for Windows.
+- **Backend:** FastAPI, WebSockets, MongoDB (), .
+- **Frontend:** React, TypeScript, Vite, Zustand, Tailwind CSS, shadcn/ui, Recharts, ** (for drag-and-drop)**.
+- **Architecture:** Unified server for desktop mode () where FastAPI serves the built React app. Real-time updates via WebSockets.
+- **Packaging:**  for creating a standalone Windows .
 
 **key DB schema**
-- ****: 
-- ****: 
-- ****: 
-- ****: 
+- ****: Now includes 
+- ****: Heavily expanded with 
+- ****: Now includes 
+- ** (New)**: 
+- ** (New)**: 
 
 **changes in tech stack**
-- No changes. Still FastAPI + React + MongoDB.
+- **Frontend:** Added , ,  for drag-and-drop functionality.
 
 **All files of reference**
-- : The core backend logic. Contains all trading rules, API endpoints, WebSocket handlers, and desktop mode static file serving.
-- : The Zustand store, updated with state for all new features (charting, risk controls, etc.).
-- : The main UI component, heavily modified to include the live chart, risk controls, rebracket settings, and numerous toggles.
-- : The input component that was fixed to handle decimal inputs and the percent-to-dollar mode switching bug.
-- : The GitHub Actions workflow for creating the Windows executable.
--  & : Core scripts for the PyInstaller packaging process.
+- : Core logic for all new features (account balance, loss logging, reordering API, beta registration endpoints).
+- : Updated with state for account balance, reordering, and beta registration.
+- : Needs to be modified to include the beta registration modal logic.
+- : Reworked to display the full account balance metrics and warnings.
+- : Reworked to implement drag-and-drop functionality.
+- : New component that holds the tabbed configuration UI.
+- : Reworked to display rich trade data.
+- : New, in-progress component for beta tester onboarding.
+- : Updated workflow for Windows executable build.
+- : Updated with comprehensive documentation.
 
 **Areas that need refactoring**:
-- The Docker setup (, , ) is broken and was bypassed rather than fixed. If container-based deployment becomes a priority, this will need to be addressed.
--  has grown very large (over 1500 lines). It could be broken down into multiple files for better maintainability (e.g., , , ).
+-  is now extremely large (over 1700 lines) and urgently needs to be broken down into separate files for routes, trading logic, WebSocket handling, and database models.
+- The Docker-based CI/CD workflow (, ) is still broken and was bypassed. It needs to be fixed for proper containerized testing.
 
 **key api endpoints**
-- **WebSocket:** 
-- **REST API:**
-    -  (POST, PUT, DELETE)
-    - , 
-    - 
-    -  (GET, POST)
-    - 
-    - 
-    - **REMOVED:** , 
+- **New:**
+    - : Updates the  for all tickers.
+    - : Lists dates with loss logs.
+    - : Lists loss log files for a specific date.
+    - : Retrieves the content of a specific loss log file.
+    - : Checks if the current user/machine is registered.
+    - : Submits beta tester registration details.
 
 **Critical Info for New Agent**
-- **Desktop Build Mode:** The application can now be run in a single-server mode for desktop packaging. This is controlled by the  environment variable. When true, the FastAPI backend serves the static frontend from the  directory.
-- **Entry-Price Anchoring:** For trades in percent mode, the sell, stop-loss, and trailing-stop targets are now calculated based on the position's , not the moving average price. This is a critical logic change to ensure profitable trades can be executed.
-- **State Backup for Presets:** When a preset strategy is applied, the ticker's existing custom configuration is now saved to . Clicking the preset again restores this backup, effectively making presets a toggle.
-- **Take Profit Logic:** The  endpoint now correctly subtracts the realized P&L from the ticker's  if  is enabled, ensuring the buy power accurately resets to its original configured value.
+- **Bot Renamed:** The application is now called **Sentinel Pulse**.
+- **Beta Registration is Priority #1:** The immediate task is to finish the beta tester registration modal. The application is blocked for distribution until this is complete.
+- **New UI Paradigm:** Ticker configuration is no longer inline. Users must double-click a card to open a detailed configuration modal. Cards can be reordered via drag-and-drop.
+- **Capital Management:** All buy power is now derived from a single master Account Balance set in the settings. The UI tracks and warns about allocation.
+- **Future Architecture:** The user has approved a plan for major architectural additions: a separate monitoring package (Prometheus/Grafana) and a multi-broker live trading integration. The next step for monitoring is to create the  endpoint.
 
 **documents and test reports created in this job**
--  (Continuously updated)
-- 
-- Test reports up to 
-- 
-- 
-- 
-- 
-- 
+-  (Updated)
+-  (Updated)
+-  (New)
+-  (New)
+-  (New)
+-  (From testing agent run)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User:** Reports a bug where the negative sign persists when switching an input from percent to dollar mode. (Status: In Progress)
-2.  **User:** Reports a critical logic bug where sell targets in percent mode move with the price, preventing profitable sells. (Status: Resolved)
-3.  **User:** Requests the removal of the two global Pause buttons in favor of the single Stop Bot button. (Status: Resolved)
-4.  **User:** Reports a bug where Take Profit doesn't correctly reset the buying power when compounding is on. (Status: Resolved)
-5.  **User:** Asks to Disable Docker for Executable installer after a CI failure. (Status: Resolved)
-6.  **User:** Requests the Auto Rebracket feature to reset trading brackets when the price drifts. (Status: Resolved)
-7.  **User:** Requests the Auto Stop feature for risk management (daily and consecutive losses). (Status: Resolved)
-8.  **User:** Requests the Compound Profits feature. (Status: Resolved)
-9.  **User:** Asks for a GitHub workflow to automate the  build process. (Status: Resolved)
-10. **User:** Asks to build a workflow to create a Windows executable. (Status: Resolved)
+10. **User:** Asks for the bot to be packaged as a Windows executable installer for distribution. (Status: Resolved)
+9.  **User:** Asks to proceed with enhancements for the account balance feature (over-allocation warnings). (Status: Resolved)
+8.  **User:** Asks for a robust explanation of the new account balance feature in the README. (Status: Resolved)
+7.  **User:** Clarifies the request for account balance: wants a master capital pool to allocate from, with profits returning to it. (Status: In Progress, now Resolved)
+6.  **User:** Asks for the current buy power of the account. (Status: Resolved, but led to a new feature request)
+5.  **User:** Requests drag-and-drop card organization and a double-click pop-up modal for configuration. (Status: Resolved)
+4.  **User:** Asks for suggestions on how to improve the cluttered ticker card configuration area. (Status: Resolved)
+3.  **User:** Requests a custom input for the Auto Rebracket trigger for volatile tickers. (Status: Resolved)
+2.  **User:** Requests that losing trades be saved to a  log file in a dedicated folder. (Status: Resolved)
+1.  **User:** Expresses dissatisfaction with the lack of detailed logging for losing trades. (Status: In Progress, now Resolved)
+- **Pending User Message (Implicit):** The user has given a large set of instructions to get the bot beta test ready which includes the Beta Agreement, Prometheus/Grafana prep, and multi-broker support. The agent has started on the first part of this.
 
 **Project Health Check:**
-- **Functional:** The application is stable and rich with advanced features.
-- **Broken:** The optional Docker deployment workflow is broken ( and  issues). The primary executable build workflow is functional.
-- **Mocked:** Market data is from , not a live broker feed.
+- **Functional:** The application is highly functional with many advanced features.
+- **Broken:** The Docker-based CI workflow remains non-functional. The core application logic is sound.
+- **Mocked:** All market data is still sourced from . No live trading is implemented.
 
 **3rd Party Integrations**
 - **yfinance:** Fetches stock price data.
-- **python-telegram-bot:** Connects to the Telegram Bot API for commands and alerts. The user provides their keys via the UI.
+- **python-telegram-bot:** For Telegram commands and alerts.
+- **@dnd-kit (React):** For frontend drag-and-drop functionality.
 
 **Testing status**
-- **Testing agent used after significant changes:** YES. Used frequently and successfully after major features.
+- **Testing agent used after significant changes:** YES. Used successfully to validate the re-bracket and account balance features.
 - **Troubleshoot agent used after agent stuck in loop:** NO.
-- **Test files created:** None.
+- **Test files created:** .
 - **Known regressions:** None.
 
 **Credentials to test flow:**
-- None required for core application functionality.
-- A Telegram Bot Token and Chat ID can be entered in the UI's Settings tab to test Telegram features.
+- None required. Telegram features can be tested by entering a token/chat ID in the UI.
 
 **What agent forgot to execute**
-- The agent did not run the  for the final UI bug fix (negative sign persistence). However, the fix was simple and verified visually with a screenshot, which is an acceptable approach for a minor, non-critical UI adjustment.</analysis>
+- The agent correctly identified the next steps for the Beta Registration feature but has not yet integrated the newly created  into the main . The modal exists but will not be displayed to the user in the current state.
+- The agent acknowledged the user's request to prepare for Prometheus/Grafana by creating a  endpoint but did not start implementing it.</analysis>

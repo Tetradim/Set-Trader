@@ -6,9 +6,10 @@ import { PositionsTab } from './tabs/PositionsTab';
 import { HistoryTab } from './tabs/HistoryTab';
 import { LogsTab } from './tabs/LogsTab';
 import { SettingsTab } from './tabs/SettingsTab';
+import { BrokersTab } from './tabs/BrokersTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
 import { CommandPalette } from './CommandPalette';
-import { LayoutDashboard, Crosshair, History, ScrollText, Settings } from 'lucide-react';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const TABS = [
@@ -16,6 +17,7 @@ const TABS = [
   { id: 'positions', label: 'Positions', icon: Crosshair },
   { id: 'history', label: 'History', icon: History },
   { id: 'logs', label: 'Logs', icon: ScrollText },
+  { id: 'brokers', label: 'Brokers', icon: Plug },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -63,6 +65,7 @@ export function Dashboard() {
               {activeTab === 'positions' && <PositionsTab />}
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'logs' && <LogsTab />}
+              {activeTab === 'brokers' && <BrokersTab />}
               {activeTab === 'settings' && <SettingsTab />}
             </ErrorBoundary>
           </div>
