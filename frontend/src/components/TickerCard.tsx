@@ -54,11 +54,13 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const handleDelete = () => {
     if (!confirmDelete) {
       setConfirmDelete(true);
-      setTimeout(() => setConfirmDelete(false), 3000);
+      setTimeout(() => setConfirmDelete(false), 4000);
       return;
     }
     send('DELETE_TICKER', { symbol: ticker.symbol });
   };
+
+  const hasPosition = position && position.quantity > 0;
 
   const handleTakeProfit = () => {
     if (!confirmTP) {
@@ -244,7 +246,10 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
               }`}
             >
               <Trash2 size={12} />
-              {confirmDelete ? 'Confirm?' : 'Remove'}
+              {confirmDelete
+                ? (hasPosition ? `Delete with position? (${position!.quantity} shares)` : 'Confirm delete?')
+                : 'Remove'
+              }
             </button>
           </div>
         </div>

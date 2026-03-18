@@ -1861,6 +1861,8 @@ async def update_settings(body: SettingsUpdate):
             {"key": "decrement_step"}, {"$set": {"value": body.decrement_step}}, upsert=True
         )
     if body.account_balance is not None:
+        if body.account_balance < 0 or body.account_balance > 100_000_000:
+            raise HTTPException(400, "Account balance must be between $0 and $100,000,000.")
         await db.settings.update_one(
             {"key": "account_balance"}, {"$set": {"value": body.account_balance}}, upsert=True
         )
@@ -1984,7 +1986,32 @@ async def ws_endpoint(websocket: WebSocket):
             elif action == "UPDATE_TICKER":
                 sym = msg.get("symbol", "").upper()
                 updates = {k: v for k, v in msg.items() if k not in ("action", "symbol")}
-                if updates:
+                # Validate numeric fields
+                NUMERIC_BOUNDS = {
+                    "base_power": (1, 10_000_000),
+                    "buy_offset": (-99999, 99999),
+                    "sell_offset": (-99999, 99999),
+                    "stop_offset": (-99999, 99999),
+                    "trailing_percent": (0.01, 50),
+                    "avg_days": (1, 365),
+                    "max_daily_loss": (0, 999999),
+                    "max_consecutive_losses": (0, 100),
+                    "rebracket_threshold": (0.01, 99999),
+                    "rebracket_spread": (0.01, 99999),
+                    "rebracket_cooldown": (0, 3600),
+                    "rebracket_lookback": (2, 100),
+                    "rebracket_buffer": (0, 99999),
+                }
+                valid = True
+                for field, (lo, hi) in NUMERIC_BOUNDS.items():
+                    if field in updates:
+                        try:
+                            val = float(updates[field])
+                            updates[field] = max(lo, min(hi, val))
+                        except (ValueError, TypeError):
+                            valid = False
+                            break
+                if updates and valid:
                     await db.tickers.update_one({"symbol": sym}, {"$set": updates})
                     doc = await db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:
