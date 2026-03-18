@@ -1,10 +1,54 @@
-"""Trade history, portfolio, positions, loss logs, and general logs."""
+"""Trade history, portfolio, positions, manual sell, loss logs, and general logs."""
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
+from typing import Optional
 
 import deps
 
 router = APIRouter()
+
+
+class ManualSellRequest(BaseModel):
+    order_type: str = "market"  # "market" or "limit"
+    limit_price: Optional[float] = None
+
+
+@router.post("/positions/{symbol}/sell")
+async def manual_sell_position(symbol: str, body: ManualSellRequest):
+    """Sell all shares of a position. Market=immediate, Limit=pending until price hit."""
+    sym = symbol.upper()
+    if body.order_type not in ("market", "limit"):
+        raise HTTPException(400, "order_type must be 'market' or 'limit'")
+    if body.order_type == "limit" and (not body.limit_price or body.limit_price <= 0):
+        raise HTTPException(400, "limit_price required and must be > 0 for limit orders")
+
+    result = await deps.engine.manual_sell(
+        sym,
+        order_type=body.order_type,
+        limit_price=body.limit_price or 0,
+    )
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.delete("/positions/{symbol}/pending-sell")
+async def cancel_pending_sell(symbol: str):
+    """Cancel a pending limit sell order."""
+    result = await deps.engine.cancel_pending_sell(symbol.upper())
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/positions/pending-sells")
+async def get_pending_sells():
+    """Get all pending limit sell orders."""
+    return {
+        sym: {"limit_price": o["limit_price"], "quantity": o["qty"], "entry": o["entry"]}
+        for sym, o in deps.engine._pending_sells.items()
+    }
 
 
 @router.get("/trades")

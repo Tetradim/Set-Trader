@@ -90,6 +90,9 @@ async def trading_loop():
                         await deps.engine.evaluate_ticker(t)
                     except Exception as te:
                         deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
+            # Always check pending limit sells (even when paused — user explicitly requested)
+            if deps.engine._pending_sells:
+                await deps.engine.check_pending_sells()
         except Exception as e:
             deps.logger.error(f"Trading loop error: {e}")
         await asyncio.sleep(5)
