@@ -7,30 +7,26 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 
 ```
 /app/backend/
-├── server.py              # 198 lines — Slim orchestrator (lifespan, middleware, router mounting)
-├── deps.py                # 48 lines — Shared state container (db, engine, ws_manager, etc.)
+├── server.py              # 198 lines — Slim orchestrator
+├── deps.py                # 48 lines — Shared state container
 ├── schemas.py             # 174 lines — All Pydantic models
 ├── ws_manager.py          # 25 lines — WebSocket ConnectionManager
-├── price_service.py       # 78 lines — yfinance caching + drift simulation
-├── trading_engine.py      # 478 lines — Core trading logic, evaluate_ticker, auto-rebracket
-├── telegram_service.py    # 283 lines — Telegram bot lifecycle, commands, alerts
-├── broker_manager.py      # 213 lines — Credential storage, connection pooling, parallel orders
+├── price_service.py       # 78 lines — yfinance + drift simulation
+├── trading_engine.py      # ~580 lines — Core trading logic + manual sell
+├── telegram_service.py    # 283 lines — Telegram bot lifecycle
+├── broker_manager.py      # 213 lines — Credential storage, parallel orders
 ├── strategies.py          # 23 lines — Preset trading strategies
-├── email_service.py       # Existing — SMTP service with rate limiting
+├── email_service.py       # Existing — SMTP service
 ├── telemetry.py           # Existing — OpenTelemetry setup
 ├── routes/
-│   ├── health.py          # 187 lines — health, traces, metrics, beta, feedback
-│   ├── brokers.py         # 152 lines — broker CRUD, test, connect, status
-│   ├── tickers.py         # 168 lines — ticker CRUD, strategies, take-profit, cash-reserve
-│   ├── trades.py          # 89 lines — trades, portfolio, positions, loss-logs
-│   ├── bot.py             # 92 lines — bot control, settings, telegram test
-│   └── ws.py              # 187 lines — WebSocket endpoint + real-time handlers
+│   ├── health.py          # health, traces, metrics, beta, feedback
+│   ├── brokers.py         # broker CRUD, test, connect, status
+│   ├── tickers.py         # ticker CRUD, strategies, take-profit
+│   ├── trades.py          # trades, portfolio, positions, manual sell, loss-logs
+│   ├── bot.py             # bot control, settings, telegram test
+│   └── ws.py              # WebSocket endpoint
 └── brokers/               # 10 broker adapter files
-    ├── base.py, registry.py
-    └── [adapter_name].py
 ```
-
-**Key design pattern**: `deps.py` holds all shared singletons (db, engine, ws_manager, etc.). Modules import `deps` — never each other. This eliminates circular imports.
 
 ## What's Been Implemented
 
@@ -39,38 +35,43 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Risk controls, compound profits, trade cooldown
 - [x] Master Account Balance with allocation tracking
 
-### Live & Paper Trading (March 2026)
-- [x] Unified simulation toggle (simulate_24_7):
-  - ON = Paper mode (market always open, no live orders)
-  - OFF = Live mode (real market hours, orders routed to brokers)
-- [x] BrokerConnectionManager: encrypted credentials, parallel order placement
-- [x] Broker failure handling: skip + Telegram alert + BROKER_FAILED WebSocket event
+### Live & Paper Trading
+- [x] Unified simulation toggle (simulate_24_7)
+- [x] BrokerConnectionManager: encrypted credentials, parallel orders
+- [x] Broker failure handling: skip + Telegram alert + BROKER_FAILED WebSocket
 - [x] Flashing red broker chips on failure
 - [x] Telegram `/reconnect_brokers` command
-- [x] Trade records include `trading_mode` (paper/live) and `broker_results`
 
-### Multi-Broker Support
-- [x] 10 broker adapters (9 live-ready + Fidelity placeholder)
-- [x] Multi-broker per ticker with per-broker buy power allocations
-- [x] Full credential validation pipeline
-
-### Monitoring & Tracing
-- [x] Prometheus /api/metrics (15+ metric types)
-- [x] OpenTelemetry auto-instrumentation + custom spans
-- [x] Frontend Traces tab
+### Manual Position Sell (March 2026)
+- [x] **Sell button** on each position row in the Positions tab
+- [x] **Sell modal** with position details (qty, entry, current price, market value)
+- [x] **Market sell**: Execute immediately at current market price
+- [x] **Limit sell**: Place pending order, engine executes when price >= target
+- [x] **Estimated P&L** updates dynamically based on order type and price
+- [x] **Pending sells section** with cancel button
+- [x] **PAPER/LIVE badge** in modal showing current trading mode
+- [x] Backend: `POST /api/positions/{symbol}/sell`, `GET /api/positions/pending-sells`, `DELETE /api/positions/{symbol}/pending-sell`
 
 ### Refactoring (March 2026)
-- [x] Decomposed monolithic server.py (2308 lines) into 12+ focused modules
-- [x] 100% regression tested — all 17 API endpoints verified, all frontend features working
+- [x] Decomposed 2308-line server.py into 12+ modules
+- [x] deps.py shared state pattern eliminates circular imports
+
+### Multi-Broker Support
+- [x] 10 broker adapters (9 live-ready)
+- [x] Multi-broker per ticker with per-broker allocations
+
+### Monitoring & Tracing
+- [x] Prometheus /api/metrics
+- [x] OpenTelemetry auto-instrumentation
 
 ## Prioritized Backlog
 
 ### P1
-- Configure real SMTP credentials for email delivery
+- Configure real SMTP credentials
 - Prometheus + Grafana monitoring package
 
 ### P2
-- Auto-bracket optimizer (backtest + volatility-adaptive)
+- Auto-bracket optimizer
 - CSV trade history export
 
 ### P3
