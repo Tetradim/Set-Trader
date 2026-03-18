@@ -34,6 +34,7 @@ export interface TickerConfig {
   strategy: string;
   broker_id: string;
   broker_ids: string[];
+  broker_allocations: Record<string, number>;
   sort_order: number;
   created_at: string;
   custom_backup?: Record<string, any>;

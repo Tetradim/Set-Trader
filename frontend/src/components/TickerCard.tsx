@@ -226,6 +226,14 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
           </span>
           <span className="flex items-center gap-1">
             <Zap size={10} className="text-primary" /> ${ticker.base_power.toFixed(0)}
+            {Object.keys(ticker.broker_allocations || {}).length > 1 && (
+              <span className="text-muted-foreground/50">
+                ({Object.entries(ticker.broker_allocations || {}).map(([bid, amt]) => {
+                  const b = selectedBrokers.find(br => br.id === bid);
+                  return b ? `${b.name.split('(')[0].split(' ')[0]}:$${(amt as number).toFixed(0)}` : null;
+                }).filter(Boolean).join(' + ')})
+              </span>
+            )}
           </span>
         </div>
 

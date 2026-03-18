@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/stores/useStore';
 import { apiFetch } from '@/lib/api';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import {
   Save,
   Plus,
@@ -17,6 +18,7 @@ import {
   ArrowUp,
   ArrowDown,
   Wallet,
+  Plug,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -172,6 +174,9 @@ export function SettingsTab() {
           </div>
         </div>
       </section>
+
+      {/* Broker Allocations per Ticker */}
+      <BrokerAllocationsSection />
 
       {/* Input Increment/Decrement Steps */}
       <section className="glass rounded-xl border border-border p-6 space-y-5">
@@ -422,5 +427,142 @@ export function SettingsTab() {
         )}
       </div>
     </div>
+  );
+}
+
+
+interface BrokerMeta { id: string; name: string; color: string }
+
+function BrokerAllocationsSection() {
+  const tickersMap = useStore((s) => s.tickers);
+  const tickers = Object.values(tickersMap);
+  const { send } = useWebSocket();
+  const [brokers, setBrokers] = useState<BrokerMeta[]>([]);
+  const [editValues, setEditValues] = useState<Record<string, Record<string, string>>>({});
+
+  useEffect(() => {
+    apiFetch('/api/brokers')
+      .then((data: any[]) => setBrokers(data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color }))))
+      .catch(() => {});
+  }, []);
+
+  // Init edit values from tickers
+  useEffect(() => {
+    const vals: Record<string, Record<string, string>> = {};
+    tickers.forEach(t => {
+      vals[t.symbol] = {};
+      (t.broker_ids || []).forEach(bid => {
+        vals[t.symbol][bid] = String((t.broker_allocations || {})[bid] ?? 0);
+      });
+    });
+    setEditValues(vals);
+  }, [tickers]);
+
+  const tickersWithBrokers = tickers.filter(t => (t.broker_ids || []).length > 0);
+
+  const handleChange = (symbol: string, brokerId: string, raw: string) => {
+    if (/^\d*\.?\d*$/.test(raw)) {
+      setEditValues(prev => ({ ...prev, [symbol]: { ...prev[symbol], [brokerId]: raw } }));
+    }
+  };
+
+  const handleBlur = (symbol: string, brokerId: string) => {
+    const raw = editValues[symbol]?.[brokerId] ?? '0';
+    const num = parseFloat(raw);
+    if (isNaN(num) || num < 0) return;
+    const ticker = tickers.find(t => t.symbol === symbol);
+    if (!ticker) return;
+    const newAlloc = { ...(ticker.broker_allocations || {}), [brokerId]: num };
+    const newTotal = Object.values(newAlloc).reduce((s, v) => s + v, 0);
+    send('UPDATE_TICKER', { symbol, broker_allocations: newAlloc, base_power: newTotal });
+    toast.success(`${symbol}: ${brokerId} = $${num.toFixed(2)} (total: $${newTotal.toFixed(2)})`);
+  };
+
+  if (tickersWithBrokers.length === 0) {
+    return (
+      <section className="glass rounded-xl border border-border p-6 space-y-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Plug size={18} className="text-primary" />
+          <h3 className="text-sm font-bold text-foreground">Broker Allocations</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Assign brokers to ticker cards first, then set custom buy power per broker here.
+          Select brokers on each card in the Watchlist tab.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="glass rounded-xl border border-border p-6 space-y-5" data-testid="broker-allocations-section">
+      <div className="flex items-center gap-2 mb-2">
+        <Plug size={18} className="text-primary" />
+        <h3 className="text-sm font-bold text-foreground">Broker Allocations</h3>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Set custom buy power per broker for each ticker. Total buy power = sum of all broker allocations.
+        On Take Profit, gains return proportionally to each broker's allocation.
+      </p>
+
+      <div className="space-y-4">
+        {tickersWithBrokers.map(ticker => {
+          const alloc = ticker.broker_allocations || {};
+          const total = Object.values(alloc).reduce((s, v) => s + v, 0);
+          const assignedBrokers = (ticker.broker_ids || []).map(bid => brokers.find(b => b.id === bid)).filter(Boolean) as BrokerMeta[];
+
+          return (
+            <div key={ticker.symbol} className="border border-border rounded-lg overflow-hidden" data-testid={`alloc-ticker-${ticker.symbol}`}>
+              <div className="flex items-center justify-between bg-secondary/30 px-4 py-2 border-b border-border">
+                <span className="text-sm font-bold text-foreground font-mono">{ticker.symbol}</span>
+                <span className="text-xs font-mono text-primary font-bold">Total: ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+              <div className="divide-y divide-border">
+                {assignedBrokers.map(broker => {
+                  const val = editValues[ticker.symbol]?.[broker.id] ?? String(alloc[broker.id] ?? 0);
+                  const numVal = parseFloat(val) || 0;
+                  const pct = total > 0 ? ((numVal / total) * 100).toFixed(0) : '0';
+                  return (
+                    <div key={broker.id} className="flex items-center gap-3 px-4 py-2.5" data-testid={`alloc-row-${ticker.symbol}-${broker.id}`}>
+                      <div className="w-1.5 h-6 rounded-full shrink-0" style={{ backgroundColor: broker.color }} />
+                      <span className="text-xs font-medium text-foreground min-w-[120px]">{broker.name}</span>
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <span className="text-muted-foreground text-xs">$</span>
+                        <input
+                          data-testid={`alloc-input-${ticker.symbol}-${broker.id}`}
+                          type="text"
+                          inputMode="decimal"
+                          value={val}
+                          onChange={(e) => handleChange(ticker.symbol, broker.id, e.target.value)}
+                          onBlur={() => handleBlur(ticker.symbol, broker.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleBlur(ticker.symbol, broker.id); }}
+                          className="w-24 bg-secondary border border-border rounded-md px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                        />
+                      </div>
+                      {/* Percentage bar */}
+                      <div className="flex items-center gap-2 min-w-[80px]">
+                        <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: broker.color }} />
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground w-8 text-right">{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="rounded-lg bg-secondary/50 border border-border p-3 text-xs text-muted-foreground space-y-1">
+        <p className="font-medium text-foreground">How Take Profit works with multi-broker:</p>
+        <ul className="list-disc ml-4 space-y-0.5">
+          <li>Each broker's position is sold independently through its own API</li>
+          <li>Realized gains return proportionally to each broker's allocation</li>
+          <li>With compounding ON: each broker's allocation grows by its share of the profit</li>
+          <li>Total buy power on the card = sum of all broker allocations</li>
+        </ul>
+      </div>
+    </section>
   );
 }

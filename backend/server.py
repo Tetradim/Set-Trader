@@ -81,6 +81,7 @@ class TickerConfig(BaseModel):
     strategy: str = "custom"
     broker_id: str = ""  # legacy single broker
     broker_ids: List[str] = []  # multi-broker: trade same ticker across accounts
+    broker_allocations: Dict[str, float] = {}  # per-broker buy power: {"alpaca": 50, "ibkr": 70}
     sort_order: int = 0
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
