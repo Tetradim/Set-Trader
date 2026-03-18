@@ -56,6 +56,9 @@ const FIELD_LABELS: Record<string, string> = {
   port: 'Port',
   client_id: 'Client ID',
   otp: 'One-Time Password',
+  api_key: 'API Key',
+  api_secret: 'API Secret',
+  paper: 'Paper Trading (true/false)',
 };
 
 export function BrokersTab() {
@@ -190,7 +193,7 @@ function TestConnectionModal({ broker, onClose }: { broker: BrokerData; onClose:
     }
   };
 
-  const isPassword = (f: string) => ['password', 'mfa_code', 'trading_pin', 'app_secret', 'otp'].includes(f);
+  const isPassword = (f: string) => ['password', 'mfa_code', 'trading_pin', 'app_secret', 'api_secret', 'otp'].includes(f);
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 backdrop-blur-sm" data-testid="broker-test-modal-overlay">

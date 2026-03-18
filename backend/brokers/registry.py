@@ -101,6 +101,22 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
         ),
         docs_url="https://www.fidelity.com/",
     ),
+    "alpaca": BrokerInfo(
+        id="alpaca",
+        name="Alpaca",
+        description="Commission-free API-first broker built for algorithmic trading. Offers paper and live trading.",
+        supported=False,
+        auth_fields=["api_key", "api_secret", "paper"],
+        risk_warning=BrokerRiskWarning(
+            level=BrokerRiskLevel.LOW,
+            message=(
+                "Alpaca is designed specifically for algorithmic trading with a robust REST and "
+                "WebSocket API. Paper trading available for risk-free testing. Very low risk of "
+                "account restrictions for automated activity."
+            ),
+        ),
+        docs_url="https://docs.alpaca.markets/",
+    ),
 }
 
 
