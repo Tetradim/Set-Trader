@@ -29,8 +29,16 @@ interface Props {
 }
 
 interface BrokerOption { id: string; name: string; color: string; supported: boolean }
-let _brokerCache: BrokerOption[] | null = null;
-let _brokerFetching = false;
+let _brokerPromise: Promise<BrokerOption[]> | null = null;
+
+function fetchBrokers(): Promise<BrokerOption[]> {
+  if (!_brokerPromise) {
+    _brokerPromise = apiFetch('/api/brokers')
+      .then((data: any[]) => data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color, supported: b.supported })))
+      .catch(() => [] as BrokerOption[]);
+  }
+  return _brokerPromise;
+}
 
 export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Props) {
   const { send } = useWebSocket();
@@ -42,17 +50,10 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const priceHistory = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP, setConfirmTP] = useState(false);
-  const [brokers, setBrokers] = useState<BrokerOption[]>(_brokerCache || []);
+  const [brokers, setBrokers] = useState<BrokerOption[]>([]);
 
   useEffect(() => {
-    if (_brokerCache) { setBrokers(_brokerCache); return; }
-    if (_brokerFetching) return;
-    _brokerFetching = true;
-    apiFetch('/api/brokers').then((data: any[]) => {
-      const opts = data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color, supported: b.supported }));
-      _brokerCache = opts;
-      setBrokers(opts);
-    }).catch(() => {}).finally(() => { _brokerFetching = false; });
+    fetchBrokers().then(setBrokers);
   }, []);
 
   const handleBrokerChange = useCallback((brokerId: string) => {
