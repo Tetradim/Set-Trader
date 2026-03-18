@@ -1,6 +1,7 @@
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { AddTickerDialog } from './AddTickerDialog';
+import { FeedbackDialog } from './FeedbackDialog';
 import {
   Activity,
   Wifi,
@@ -140,6 +141,8 @@ export function Header() {
           </div>
 
           <AddTickerDialog />
+
+          <FeedbackDialog />
 
           {!running ? (
             <button

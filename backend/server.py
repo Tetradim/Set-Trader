@@ -179,6 +179,12 @@ class BetaRegistration(BaseModel):
     jurisdiction: str = ""
     registered_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+class FeedbackReport(BaseModel):
+    type: str = "bug"  # bug, error, suggestion, complaint
+    subject: str
+    description: str
+    error_log: str = ""
+
 
 class PresetStrategy(BaseModel):
     name: str
@@ -1189,7 +1195,52 @@ async def beta_register(body: BetaRegistration):
     await db.beta_registrations.insert_one(doc)
     doc.pop("_id", None)
     logger.info(f"BETA REGISTRATION: {body.first_name} {body.last_name} ({body.email})")
+    # Send registration details via email (async in background)
+    from email_service import send_registration_email
+    try:
+        send_registration_email(doc)
+    except Exception as e:
+        logger.warning(f"Registration email failed (non-blocking): {e}")
     return {"status": "registered", "registration": doc}
+
+
+# --- FEEDBACK / BUG REPORT ---
+@api.post("/feedback")
+async def submit_feedback(body: FeedbackReport):
+    """Submit a bug report, suggestion, complaint or error log."""
+    if not body.subject.strip() or not body.description.strip():
+        raise HTTPException(400, "Subject and description are required.")
+    if body.type not in ("bug", "error", "suggestion", "complaint"):
+        raise HTTPException(400, "Type must be one of: bug, error, suggestion, complaint.")
+
+    # Look up registered user
+    reg = await db.beta_registrations.find_one({}, {"_id": 0})
+    user = reg or {"first_name": "Unregistered", "last_name": "", "email": "unknown"}
+
+    from email_service import send_feedback_email, APP_VERSION
+    doc = {
+        "type": body.type,
+        "subject": body.subject,
+        "description": body.description,
+        "error_log": body.error_log,
+        "user_name": f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+        "user_email": user.get("email", "unknown"),
+        "app_version": APP_VERSION,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.feedback.insert_one(doc)
+    doc.pop("_id", None)
+
+    email_sent = False
+    try:
+        email_sent = send_feedback_email(
+            {"type": body.type, "subject": body.subject, "description": body.description, "error_log": body.error_log},
+            user,
+        )
+    except Exception as e:
+        logger.warning(f"Feedback email failed (non-blocking): {e}")
+
+    return {"status": "submitted", "email_sent": email_sent, "feedback": doc}
 
 
 from starlette.responses import PlainTextResponse
@@ -1302,7 +1353,7 @@ async def prometheus_metrics():
 
 
 # --- BROKER ENDPOINTS ---
-from brokers import BROKER_REGISTRY, get_broker_info
+from brokers import BROKER_REGISTRY, get_broker_info, get_broker_adapter
 
 @api.get("/brokers")
 async def list_brokers():
@@ -1347,6 +1398,127 @@ async def get_broker(broker_id: str):
             "message": info.risk_warning.message,
         }
     return entry
+
+
+class BrokerTestRequest(BaseModel):
+    credentials: Dict[str, str]
+
+@api.post("/brokers/{broker_id}/test")
+async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
+    """Full credential validation dry-run for a broker connection."""
+    info = get_broker_info(broker_id)
+    if not info:
+        raise HTTPException(404, f"Broker '{broker_id}' not found.")
+
+    results = {
+        "broker_id": broker_id,
+        "broker_name": info.name,
+        "checks": [],
+        "overall": "fail",
+    }
+
+    # Check 1: Required fields present
+    missing = [f for f in info.auth_fields if not body.credentials.get(f, "").strip()]
+    if missing:
+        results["checks"].append({
+            "name": "required_fields",
+            "status": "fail",
+            "message": f"Missing required credentials: {', '.join(missing)}",
+        })
+        return results
+    results["checks"].append({
+        "name": "required_fields",
+        "status": "pass",
+        "message": "All required credential fields provided.",
+    })
+
+    # Check 2: Field format validation
+    format_issues = []
+    creds = body.credentials
+    if broker_id == "ibkr":
+        port = creds.get("port", "")
+        if port and not port.isdigit():
+            format_issues.append("'port' must be a number (e.g., 7497 for paper, 7496 for live)")
+        client_id = creds.get("client_id", "")
+        if client_id and not client_id.isdigit():
+            format_issues.append("'client_id' must be a number")
+    if broker_id == "robinhood":
+        mfa = creds.get("mfa_code", "")
+        if mfa and (len(mfa) != 6 or not mfa.isdigit()):
+            format_issues.append("'mfa_code' should be a 6-digit code")
+    if broker_id == "webull":
+        pin = creds.get("trading_pin", "")
+        if pin and (len(pin) < 4 or not pin.isdigit()):
+            format_issues.append("'trading_pin' should be a numeric PIN (4+ digits)")
+    if broker_id == "schwab":
+        for field in ["app_key", "app_secret"]:
+            val = creds.get(field, "")
+            if val and len(val) < 8:
+                format_issues.append(f"'{field}' appears too short — verify from Schwab Developer Portal")
+
+    if format_issues:
+        results["checks"].append({
+            "name": "format_validation",
+            "status": "fail",
+            "message": "; ".join(format_issues),
+        })
+        return results
+    results["checks"].append({
+        "name": "format_validation",
+        "status": "pass",
+        "message": "Credential formats look valid.",
+    })
+
+    # Check 3: Adapter availability
+    adapter = get_broker_adapter(broker_id, body.credentials)
+    if not adapter:
+        results["checks"].append({
+            "name": "adapter_available",
+            "status": "warn",
+            "message": f"Live adapter for {info.name} is not yet implemented. Credential format validated but connection could not be tested end-to-end.",
+        })
+        results["overall"] = "partial"
+        return results
+
+    # Check 4: Live connection test (when adapter is available)
+    try:
+        connected = await adapter.connect(body.credentials)
+        if connected:
+            results["checks"].append({
+                "name": "live_connection",
+                "status": "pass",
+                "message": f"Successfully authenticated with {info.name}.",
+            })
+            # Check 5: Account access
+            try:
+                account = await adapter.get_account()
+                results["checks"].append({
+                    "name": "account_access",
+                    "status": "pass",
+                    "message": f"Account accessible. Balance: ${account.balance:.2f}, Buying Power: ${account.buying_power:.2f}",
+                })
+            except Exception as e:
+                results["checks"].append({
+                    "name": "account_access",
+                    "status": "fail",
+                    "message": f"Authenticated but could not access account data: {e}",
+                })
+            await adapter.disconnect()
+            results["overall"] = "pass"
+        else:
+            results["checks"].append({
+                "name": "live_connection",
+                "status": "fail",
+                "message": "Authentication failed — check your credentials.",
+            })
+    except Exception as e:
+        results["checks"].append({
+            "name": "live_connection",
+            "status": "fail",
+            "message": f"Connection error: {e}",
+        })
+
+    return results
 
 
 @api.get("/tickers")
