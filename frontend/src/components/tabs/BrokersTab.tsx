@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
-import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, FlaskConical, X, Loader2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, FlaskConical, X, Loader2, DollarSign } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BrokerRiskWarning {
@@ -74,6 +74,7 @@ export function BrokersTab() {
   const [brokers, setBrokers] = useState<BrokerData[]>([]);
   const [loading, setLoading] = useState(true);
   const [testBroker, setTestBroker] = useState<BrokerData | null>(null);
+  const [connectedInfo, setConnectedInfo] = useState<Record<string, { buyingPower: number; balance: number }>>({});
 
   useEffect(() => {
     apiFetch('/api/brokers')
@@ -81,6 +82,10 @@ export function BrokersTab() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  const handleTestResult = (brokerId: string, buyingPower: number, balance: number) => {
+    setConnectedInfo((prev) => ({ ...prev, [brokerId]: { buyingPower, balance } }));
+  };
 
   if (loading) {
     return <div className="text-muted-foreground text-sm animate-pulse p-4" data-testid="brokers-loading">Loading brokers...</div>;
@@ -98,18 +103,18 @@ export function BrokersTab() {
 
       <div className="grid gap-3">
         {brokers.map((broker) => (
-          <BrokerCard key={broker.id} broker={broker} onTestClick={() => setTestBroker(broker)} />
+          <BrokerCard key={broker.id} broker={broker} onTestClick={() => setTestBroker(broker)} accountInfo={connectedInfo[broker.id]} />
         ))}
       </div>
 
       {testBroker && (
-        <TestConnectionModal broker={testBroker} onClose={() => setTestBroker(null)} />
+        <TestConnectionModal broker={testBroker} onClose={() => setTestBroker(null)} onConnected={handleTestResult} />
       )}
     </div>
   );
 }
 
-function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: () => void }) {
+function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; onTestClick: () => void; accountInfo?: { buyingPower: number; balance: number } }) {
   const risk = broker.risk_warning;
   const colors = risk ? RISK_COLORS[risk.level] || RISK_COLORS.medium : RISK_COLORS.low;
 
@@ -120,7 +125,7 @@ function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: 
         <div className="flex-1 p-4">
           <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="text-sm font-semibold text-foreground">{broker.name}</h3>
             {broker.supported ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400" data-testid={`broker-status-${broker.id}`}>
@@ -134,6 +139,11 @@ function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: 
             {risk && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${colors.badge}`} data-testid={`broker-risk-badge-${broker.id}`}>
                 Risk: {risk.level.toUpperCase()}
+              </span>
+            )}
+            {accountInfo && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-full bg-cyan-500/15 text-cyan-400 font-mono" data-testid={`broker-buying-power-${broker.id}`}>
+                <DollarSign size={10} /> BP: ${accountInfo.buyingPower.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             )}
           </div>
@@ -176,7 +186,7 @@ function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: 
   );
 }
 
-function TestConnectionModal({ broker, onClose }: { broker: BrokerData; onClose: () => void }) {
+function TestConnectionModal({ broker, onClose, onConnected }: { broker: BrokerData; onClose: () => void; onConnected: (brokerId: string, buyingPower: number, balance: number) => void }) {
   const [creds, setCreds] = useState<Record<string, string>>(() =>
     Object.fromEntries(broker.auth_fields.map((f) => [f, '']))
   );
@@ -197,8 +207,18 @@ function TestConnectionModal({ broker, onClose }: { broker: BrokerData; onClose:
         body: JSON.stringify({ credentials: creds }),
       });
       setResult(res);
-      if (res.overall === 'pass') toast.success('Connection test passed!');
-      else if (res.overall === 'partial') toast.info('Partial pass — see details below.');
+      if (res.overall === 'pass') {
+        toast.success('Connection test passed!');
+        // Extract buying power from account_access check
+        const acctCheck = (res.checks || []).find((c: TestCheck) => c.name === 'account_access' && c.status === 'pass');
+        if (acctCheck) {
+          const bpMatch = acctCheck.message.match(/Buying Power: \$([\d,.]+)/);
+          const balMatch = acctCheck.message.match(/Balance: \$([\d,.]+)/);
+          const bp = bpMatch ? parseFloat(bpMatch[1].replace(/,/g, '')) : 0;
+          const bal = balMatch ? parseFloat(balMatch[1].replace(/,/g, '')) : 0;
+          onConnected(broker.id, bp, bal);
+        }
+      } else if (res.overall === 'partial') toast.info('Partial pass — see details below.');
       else toast.error('Connection test failed.');
     } catch (err: any) {
       toast.error(err.message || 'Test failed.');
