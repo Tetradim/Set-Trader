@@ -56,11 +56,15 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
     fetchBrokers().then(setBrokers);
   }, []);
 
-  const handleBrokerChange = useCallback((brokerId: string) => {
-    send('UPDATE_TICKER', { symbol: ticker.symbol, broker_id: brokerId });
-  }, [send, ticker.symbol]);
+  const handleBrokerToggle = useCallback((brokerId: string) => {
+    const current = ticker.broker_ids || [];
+    const updated = current.includes(brokerId)
+      ? current.filter(id => id !== brokerId)
+      : [...current, brokerId];
+    send('UPDATE_TICKER', { symbol: ticker.symbol, broker_ids: updated });
+  }, [send, ticker.symbol, ticker.broker_ids]);
 
-  const selectedBroker = brokers.find(b => b.id === ticker.broker_id);
+  const selectedBrokers = brokers.filter(b => (ticker.broker_ids || []).includes(b.id));
 
   const isPositive = pnl >= 0;
   const isActive = ticker.enabled;
@@ -225,25 +229,31 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
           </span>
         </div>
 
-        {/* Broker selector */}
-        <div className="flex items-center gap-2 mt-1.5">
+        {/* Broker selector — multi-select */}
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap" data-testid={`broker-select-${ticker.symbol}`}>
           <Plug size={10} className="text-muted-foreground shrink-0" />
-          <select
-            data-testid={`broker-select-${ticker.symbol}`}
-            value={ticker.broker_id || ''}
-            onChange={(e) => handleBrokerChange(e.target.value)}
-            className="text-[10px] bg-secondary/60 border border-border rounded-md px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer appearance-none min-w-[120px]"
-            style={selectedBroker ? { borderLeftColor: selectedBroker.color, borderLeftWidth: 3 } : undefined}
-          >
-            <option value="">No Broker</option>
-            {brokers.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-          {selectedBroker && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full font-mono" style={{ backgroundColor: selectedBroker.color + '22', color: selectedBroker.color, border: `1px solid ${selectedBroker.color}44` }}>
-              {selectedBroker.name.split(' ')[0]}
-            </span>
+          {brokers.map(b => {
+            const active = (ticker.broker_ids || []).includes(b.id);
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => handleBrokerToggle(b.id)}
+                data-testid={`broker-chip-${ticker.symbol}-${b.id}`}
+                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-all border ${
+                  active
+                    ? 'opacity-100'
+                    : 'opacity-30 hover:opacity-60 border-border'
+                }`}
+                style={active ? { backgroundColor: b.color + '22', color: b.color, borderColor: b.color + '44' } : undefined}
+                title={b.name}
+              >
+                {b.name.split('(')[0].split(' ')[0]}
+              </button>
+            );
+          })}
+          {selectedBrokers.length === 0 && (
+            <span className="text-[9px] text-muted-foreground/40 italic">none</span>
           )}
         </div>
 

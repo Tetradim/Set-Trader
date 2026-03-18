@@ -79,7 +79,8 @@ class TickerConfig(BaseModel):
     rebracket_buffer: float = 0.10     # $ below recent low for new buy target
     enabled: bool = True
     strategy: str = "custom"
-    broker_id: str = ""  # empty = no broker assigned
+    broker_id: str = ""  # legacy single broker
+    broker_ids: List[str] = []  # multi-broker: trade same ticker across accounts
     sort_order: int = 0
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
