@@ -1,7 +1,7 @@
 # Sentinel Pulse — PRD
 
 ## Original Problem Statement
-Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application with bracket trading, real-time price feeds, Telegram integration, and Windows executable distribution. Expand to support beta tester onboarding, Prometheus monitoring, and multi-broker live trading.
+Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application with bracket trading, real-time price feeds, Telegram integration, and Windows executable distribution. Expand to support beta tester onboarding, Prometheus monitoring, multi-broker live trading, feedback system, and email notifications.
 
 ## Architecture
 - **Backend**: FastAPI + Motor (async MongoDB) + WebSocket + yfinance + python-telegram-bot
@@ -9,6 +9,7 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - **Database**: MongoDB 7
 - **Distribution**: PyInstaller (Windows exe), GitHub Actions CI/CD, Docker Compose
 - **Broker Layer**: Abstract adapter pattern (`/app/backend/brokers/`) supporting 6 brokers
+- **Email**: SMTP service (`/app/backend/email_service.py`) for registration + feedback notifications
 
 ## What's Been Implemented
 
@@ -23,75 +24,79 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 ### Account & Capital Management
 - [x] Master Account Balance (total capital)
 - [x] Per-ticker Buy Power allocation
-- [x] Allocated / Available tracking (real-time, auto-updates on add/delete/change)
-- [x] Over-allocation warning banner (red) when Available < 0
-- [x] Low balance warning (amber) when Available < 10% of balance
-- [x] Budget context in AddTickerDialog and ConfigModal Buy Power input
+- [x] Allocated / Available tracking (real-time)
+- [x] Over-allocation and low balance warnings
 - [x] Cash Reserve from Take Profit actions
 
 ### UI/UX
 - [x] Drag-and-drop card reordering (persisted to MongoDB)
 - [x] Double-click config modal with 4 tabs: Rules | Risk | Rebracket | Advanced
 - [x] Live price chart (Recharts) in ticker cards
-- [x] Rich trade history: stat cards, filter pills, expandable details
-- [x] Loss log files: .txt per loss by date, viewable in Logs tab
-- [x] Sidebar: order type badges, loss count, entry->target info
+- [x] Rich trade history with filters and expandable details
+- [x] Loss log files viewable in Logs tab
 
-### Beta Tester Onboarding (NEW - March 2026)
-- [x] Mandatory registration modal on first launch (blocks app access)
+### Beta Tester Onboarding (March 2026)
+- [x] Mandatory registration modal (currently DISABLED until further notice)
 - [x] Full legal agreement (Signal Forge Laboratory Beta Tester License Agreement v1.0)
 - [x] Collects: name, email, phone, last 4 SSN, full address, jurisdiction
-- [x] Form validation (required fields, SSN format, agreement acceptance)
-- [x] Backend: /api/beta/status, /api/beta/register endpoints
-- [x] Stored in MongoDB `beta_registrations` collection
+- [x] Registration details emailed via SMTP (when configured)
 
-### Prometheus Monitoring (NEW - March 2026)
+### Feedback & Bug Report System (March 2026)
+- [x] Feedback dialog accessible from header bar
+- [x] 4 report types: Bug Report, Error Log, Suggestion, Complaint
+- [x] Includes user identification, app version, description, optional error log
+- [x] Stored in MongoDB `feedback` collection
+- [x] Emailed to admin via SMTP using registered user's email as sender/reply-to
+- [x] POST /api/feedback endpoint
+
+### Email Service (March 2026)
+- [x] SMTP-based email service (/app/backend/email_service.py)
+- [x] Sends registration details on beta sign-up
+- [x] Sends feedback/bug reports with user ID and app version
+- [x] Configured via env vars: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_RECIPIENT
+- [x] Currently using placeholder credentials (emails NOT sent until configured)
+
+### Prometheus Monitoring (March 2026)
 - [x] GET /api/metrics endpoint in Prometheus text format
-- [x] Metrics: engine status, market state, WebSocket clients
-- [x] Metrics: account balance, allocated/available capital
-- [x] Metrics: ticker count, per-ticker buy power
-- [x] Metrics: trade counts (total, by side), per-ticker P&L, total P&L
-- [x] Metrics: cash reserve, open positions, unrealized P&L
+- [x] 15+ metric types: engine status, account balance, per-ticker P&L, trade counts, positions
 
-### Broker Integration Architecture (NEW - March 2026)
-- [x] Abstract BrokerAdapter base class (connect, place_order, get_positions, etc.)
-- [x] Broker registry with 6 brokers: Robinhood, Schwab, Webull, IBKR, Wealthsimple, Fidelity
-- [x] Risk warnings per broker (LOW/MEDIUM/HIGH) with detailed messages
+### Broker Integration Architecture (March 2026)
+- [x] Abstract BrokerAdapter base class
+- [x] Registry of 6 brokers: Robinhood, Schwab, Webull, IBKR, Wealthsimple, Fidelity
+- [x] Risk warnings per broker (LOW/MEDIUM/HIGH)
 - [x] GET /api/brokers, GET /api/brokers/{id} endpoints
-- [x] Frontend Brokers tab with color-coded risk badges, docs links, connect buttons
+- [x] Frontend Brokers tab with color-coded risk badges
+
+### Broker Test Connection (March 2026)
+- [x] POST /api/brokers/{id}/test - full credential validation dry-run
+- [x] Validates: required fields present, credential format per broker, adapter availability
+- [x] Per-broker format rules (IBKR port numeric, Robinhood MFA 6-digit, Schwab keys 8+ chars, etc.)
+- [x] Live connection + account access tests (when adapters are implemented)
+- [x] Frontend Test Connection modal with credential inputs and color-coded results
 
 ### Integrations & Distribution
 - [x] Telegram bot commands and trade/restart alerts
 - [x] Windows executable build: PowerShell script + GitHub Actions workflow
-- [x] Desktop mode: FastAPI serves static frontend (API routes have priority)
-- [x] SPA routing fix: static catch-all runs AFTER API router
-
-### Documentation
-- [x] README: Account Balance system, API reference, config guide
-- [x] WINDOWS_BUILD.md: Build, distribution, and troubleshooting guide
+- [x] Desktop mode: FastAPI serves static frontend
 
 ## Prioritized Backlog
 
-### P0
-- None (current sprint complete)
-
 ### P1
-- Implement live broker adapters (start with IBKR as lowest risk)
+- Implement live broker adapters (start with IBKR)
+- Configure SMTP credentials for email delivery
 - Separate "Sentinel Pulse Monitor" downloadable package (Prometheus+Grafana)
-- Full input validation pass on all configurable inputs
 
 ### P2
-- Confirmation dialogs for high-risk actions (delete ticker with position, etc.)
-- Broker authentication UI with credential storage
+- Full input validation pass
+- Confirmation dialogs for high-risk actions
 - CSV export for trade history
 
 ### P3
 - OpenTelemetry distributed tracing
 - Multi-user authentication
-- Fix Docker-based CI/CD workflow (docker-compose.yml broken paths)
+- Fix Docker CI/CD workflow
 
 ## Next Tasks
-1. Implement IBKR adapter (first live broker)
-2. Build Prometheus+Grafana monitoring package
-3. Input validation pass
-4. Confirmation dialogs for high-risk actions
+1. Configure SMTP credentials (user to provide)
+2. Implement IBKR adapter (first live broker)
+3. Build Prometheus+Grafana monitoring package
