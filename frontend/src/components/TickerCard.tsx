@@ -159,7 +159,10 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
               {isActive ? 'LIVE' : 'OFF'}
             </span>
             {ticker.trailing_enabled && (
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">TRAIL</span>
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30" data-testid={`trail-badge-${ticker.symbol}`}>TRAIL</span>
+            )}
+            {ticker.auto_rebracket && (
+              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 border border-orange-500/30" data-testid={`rebracket-badge-${ticker.symbol}`}>REBRACKET</span>
             )}
           </div>
           <Switch
