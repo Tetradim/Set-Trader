@@ -1407,6 +1407,7 @@ async def list_brokers():
             "supported": info.supported,
             "auth_fields": info.auth_fields,
             "docs_url": info.docs_url,
+            "color": info.color,
             "risk_warning": None,
         }
         if info.risk_warning:
@@ -1430,6 +1431,7 @@ async def get_broker(broker_id: str):
         "supported": info.supported,
         "auth_fields": info.auth_fields,
         "docs_url": info.docs_url,
+        "color": info.color,
         "risk_warning": None,
     }
     if info.risk_warning:
@@ -1476,25 +1478,17 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
     format_issues = []
     creds = body.credentials
     if broker_id == "ibkr":
-        port = creds.get("port", "")
-        if port and not port.isdigit():
-            format_issues.append("'port' must be a number (e.g., 7497 for paper, 7496 for live)")
-        client_id = creds.get("client_id", "")
-        if client_id and not client_id.isdigit():
-            format_issues.append("'client_id' must be a number")
+        gw = creds.get("gateway_url", "")
+        if gw and not (gw.startswith("http://") or gw.startswith("https://")):
+            format_issues.append("'gateway_url' must start with http:// or https://")
     if broker_id == "robinhood":
         mfa = creds.get("mfa_code", "")
         if mfa and (len(mfa) != 6 or not mfa.isdigit()):
             format_issues.append("'mfa_code' should be a 6-digit code")
     if broker_id == "webull":
-        pin = creds.get("trading_pin", "")
+        pin = creds.get("trade_token", "")
         if pin and (len(pin) < 4 or not pin.isdigit()):
-            format_issues.append("'trading_pin' should be a numeric PIN (4+ digits)")
-    if broker_id == "schwab":
-        for field in ["app_key", "app_secret"]:
-            val = creds.get(field, "")
-            if val and len(val) < 8:
-                format_issues.append(f"'{field}' appears too short — verify from Schwab Developer Portal")
+            format_issues.append("'trade_token' should be a numeric PIN (4+ digits)")
     if broker_id == "alpaca":
         for field in ["api_key", "api_secret"]:
             val = creds.get(field, "")
@@ -1503,6 +1497,25 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
         paper = creds.get("paper", "")
         if paper and paper.lower() not in ("true", "false", "1", "0", "yes", "no"):
             format_issues.append("'paper' must be true/false (true for paper trading, false for live)")
+    if broker_id == "td_ameritrade":
+        for field in ["client_id", "refresh_token"]:
+            val = creds.get(field, "")
+            if val and len(val) < 8:
+                format_issues.append(f"'{field}' appears too short — get from Schwab Developer Portal")
+    if broker_id == "tradier":
+        token = creds.get("access_token", "")
+        if token and len(token) < 10:
+            format_issues.append("'access_token' appears too short — get from Tradier dashboard")
+    if broker_id == "tradestation":
+        for field in ["ts_client_id", "ts_client_secret", "ts_refresh_token"]:
+            val = creds.get(field, "")
+            if val and len(val) < 8:
+                format_issues.append(f"'{field}' appears too short — get from TradeStation API portal")
+    if broker_id == "thinkorswim":
+        for field in ["tos_consumer_key", "tos_refresh_token"]:
+            val = creds.get(field, "")
+            if val and len(val) < 8:
+                format_issues.append(f"'{field}' appears too short — get from Schwab Developer Portal")
 
 
     if format_issues:
@@ -1529,9 +1542,9 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
         results["overall"] = "partial"
         return results
 
-    # Check 4: Live connection test (when adapter is available)
+    # Check 4: Live connection test
     try:
-        connected = await adapter.connect(body.credentials)
+        connected = await adapter.check_connection()
         if connected:
             results["checks"].append({
                 "name": "live_connection",
@@ -1552,7 +1565,7 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
                     "status": "fail",
                     "message": f"Authenticated but could not access account data: {e}",
                 })
-            await adapter.disconnect()
+            await adapter.close()
             results["overall"] = "pass"
         else:
             results["checks"].append({

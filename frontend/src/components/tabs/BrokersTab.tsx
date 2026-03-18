@@ -15,6 +15,7 @@ interface BrokerData {
   supported: boolean;
   auth_fields: string[];
   docs_url: string;
+  color: string;
   risk_warning: BrokerRiskWarning | null;
 }
 
@@ -46,19 +47,27 @@ const CHECK_STATUS_STYLES: Record<string, string> = {
 const FIELD_LABELS: Record<string, string> = {
   username: 'Username',
   password: 'Password',
-  mfa_code: 'MFA Code',
+  mfa_code: 'MFA Code (6-digit)',
   email: 'Email',
-  trading_pin: 'Trading PIN',
-  app_key: 'App Key',
-  app_secret: 'App Secret',
-  refresh_token: 'Refresh Token',
-  host: 'TWS/Gateway Host',
-  port: 'Port',
-  client_id: 'Client ID',
-  otp: 'One-Time Password',
   api_key: 'API Key',
   api_secret: 'API Secret',
   paper: 'Paper Trading (true/false)',
+  gateway_url: 'TWS/Gateway URL',
+  account_id: 'Account ID',
+  client_id: 'Client ID (Schwab App Key)',
+  refresh_token: 'Refresh Token',
+  access_token: 'Access Token',
+  device_id: 'Device ID',
+  trade_token: 'Trade Token / PIN',
+  ts_client_id: 'TradeStation Client ID',
+  ts_client_secret: 'TradeStation Client Secret',
+  ts_refresh_token: 'TradeStation Refresh Token',
+  tos_consumer_key: 'Consumer Key (Schwab)',
+  tos_refresh_token: 'Refresh Token (Schwab)',
+  tos_account_id: 'Account ID',
+  ws_email: 'Wealthsimple Email',
+  ws_password: 'Wealthsimple Password',
+  ws_otp_code: 'One-Time Password',
 };
 
 export function BrokersTab() {
@@ -105,8 +114,11 @@ function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: 
   const colors = risk ? RISK_COLORS[risk.level] || RISK_COLORS.medium : RISK_COLORS.low;
 
   return (
-    <div className={`border rounded-xl p-4 transition-all ${colors.border} ${colors.bg}`} data-testid={`broker-card-${broker.id}`}>
-      <div className="flex items-start justify-between gap-4">
+    <div className={`border rounded-xl overflow-hidden transition-all ${colors.border} ${colors.bg}`} data-testid={`broker-card-${broker.id}`}>
+      <div className="flex">
+        <div className="w-1 shrink-0" style={{ backgroundColor: broker.color }} />
+        <div className="flex-1 p-4">
+          <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-sm font-semibold text-foreground">{broker.name}</h3>
@@ -158,6 +170,8 @@ function BrokerCard({ broker, onTestClick }: { broker: BrokerData; onTestClick: 
           </button>
         </div>
       </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -193,7 +207,7 @@ function TestConnectionModal({ broker, onClose }: { broker: BrokerData; onClose:
     }
   };
 
-  const isPassword = (f: string) => ['password', 'mfa_code', 'trading_pin', 'app_secret', 'api_secret', 'otp'].includes(f);
+  const isPassword = (f: string) => ['password', 'mfa_code', 'api_secret', 'trade_token', 'ts_client_secret', 'ts_refresh_token', 'tos_refresh_token', 'ws_password', 'ws_otp_code', 'refresh_token', 'access_token'].includes(f);
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 backdrop-blur-sm" data-testid="broker-test-modal-overlay">

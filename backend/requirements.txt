@@ -101,6 +101,7 @@ pyflakes==3.4.0
 Pygments==2.19.2
 PyJWT==2.11.0
 pymongo==4.5.0
+pyotp==2.9.0
 pyparsing==3.3.2
 pytest==9.0.2
 python-dateutil==2.9.0.post0
@@ -116,6 +117,7 @@ regex==2026.2.28
 requests==2.32.5
 requests-oauthlib==2.0.0
 rich==14.3.3
+robin-stocks==3.4.0
 rpds-py==0.30.0
 rsa==4.9.1
 s3transfer==0.16.0

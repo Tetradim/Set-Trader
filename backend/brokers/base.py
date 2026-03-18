@@ -1,8 +1,16 @@
-"""Base broker adapter interface — all broker implementations inherit from this."""
+"""Base broker adapter — all broker implementations inherit from this.
+Adapted from user's existing BaseBrokerClient with aiohttp session pooling."""
+import aiohttp
+import logging
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger("SentinelPulse")
+
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=5)
 
 
 class OrderSide(str, Enum):
@@ -64,28 +72,65 @@ class BrokerRiskWarning:
 
 @dataclass
 class BrokerInfo:
-    """Static metadata about a supported broker."""
     id: str
     name: str
     description: str
-    supported: bool = False          # True if adapter is fully implemented
-    auth_fields: list = field(default_factory=list)  # e.g. ["api_key", "api_secret"]
+    supported: bool = False
+    auth_fields: list = field(default_factory=list)
     risk_warning: Optional[BrokerRiskWarning] = None
     docs_url: str = ""
+    color: str = "#666666"
+
+
+class OrderValidationError(Exception):
+    pass
+
+
+TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}$')
 
 
 class BrokerAdapter(ABC):
-    """Abstract base class for all broker adapters."""
+    """Abstract base class for all broker adapters with aiohttp session pooling."""
 
     broker_id: str = ""
 
-    @abstractmethod
-    async def connect(self, credentials: dict) -> bool:
-        """Authenticate with the broker. Returns True on success."""
+    def __init__(self, config: dict):
+        self.config = config
+        self.connected = False
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, keepalive_timeout=30)
+            self._session = aiohttp.ClientSession(connector=connector, timeout=DEFAULT_TIMEOUT, raise_for_status=False)
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    def validate_stock_order(self, symbol: str, side: str, quantity: float, price: float) -> tuple[bool, str]:
+        errors = []
+        if not symbol or not TICKER_PATTERN.match(symbol.upper()):
+            errors.append(f"Invalid symbol: '{symbol}'")
+        if side.upper() not in ('BUY', 'SELL'):
+            errors.append(f"Invalid side: '{side}'")
+        if quantity <= 0 or quantity > 100000:
+            errors.append(f"Invalid quantity: {quantity}")
+        if price < 0 or price > 1000000:
+            errors.append(f"Invalid price: {price}")
+        return (True, "") if not errors else (False, "; ".join(errors))
 
     @abstractmethod
-    async def disconnect(self) -> None:
-        """Clean up broker connection."""
+    async def check_connection(self) -> bool:
+        """Authenticate/verify connection. Returns True on success."""
 
     @abstractmethod
     async def get_account(self) -> BrokerAccountInfo:
@@ -101,11 +146,7 @@ class BrokerAdapter(ABC):
 
     @abstractmethod
     async def cancel_order(self, broker_order_id: str) -> bool:
-        """Cancel a pending order. Returns True on success."""
-
-    @abstractmethod
-    async def get_order_status(self, broker_order_id: str) -> BrokerOrder:
-        """Check the status of an existing order."""
+        """Cancel a pending order."""
 
     @abstractmethod
     async def get_quote(self, symbol: str) -> float:
