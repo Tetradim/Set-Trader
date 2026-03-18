@@ -1,7 +1,8 @@
-"""Broker registry — all supported brokers with metadata and adapter factory."""
+"""Broker registry — all supported brokers ordered LOW risk → HIGH risk."""
 from .base import BrokerAdapter, BrokerInfo, BrokerRiskWarning, BrokerRiskLevel
 
 BROKER_REGISTRY: dict[str, BrokerInfo] = {
+    # --- LOW RISK ---
     "alpaca": BrokerInfo(
         id="alpaca", name="Alpaca",
         description="Commission-free API-first broker built for algorithmic trading. Paper and live trading.",
@@ -20,15 +21,6 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
             "IBKR is designed for algorithmic trading and provides robust TWS/Gateway APIs. Low risk of restrictions."),
         docs_url="https://interactivebrokers.github.io/", color="#e11d48",
     ),
-    "td_ameritrade": BrokerInfo(
-        id="td_ameritrade", name="TD Ameritrade (Schwab)",
-        description="Now part of Charles Schwab. OAuth-based REST API for trading.",
-        supported=True,
-        auth_fields=["client_id", "refresh_token"],
-        risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
-            "Schwab permits algorithmic trading through their official API but requires app registration. High-frequency patterns may trigger review."),
-        docs_url="https://developer.schwab.com/", color="#3b82f6",
-    ),
     "tradier": BrokerInfo(
         id="tradier", name="Tradier",
         description="Developer-friendly broker with a clean REST API and competitive pricing.",
@@ -37,15 +29,6 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
         risk_warning=BrokerRiskWarning(BrokerRiskLevel.LOW,
             "Tradier is developer-friendly with an official API designed for automated trading. Low risk of restrictions."),
         docs_url="https://documentation.tradier.com/", color="#8b5cf6",
-    ),
-    "robinhood": BrokerInfo(
-        id="robinhood", name="Robinhood",
-        description="Commission-free trading app. Uses browser-like session authentication.",
-        supported=True,
-        auth_fields=["username", "password", "mfa_code"],
-        risk_warning=BrokerRiskWarning(BrokerRiskLevel.HIGH,
-            "Robinhood actively monitors for automated trading patterns and may restrict or permanently ban accounts. Use at your own risk."),
-        docs_url="https://robinhood.com/", color="#00c805",
     ),
     "tradestation": BrokerInfo(
         id="tradestation", name="TradeStation",
@@ -56,6 +39,16 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
             "TradeStation provides an official API for algorithmic trading. Low risk of restrictions for API users."),
         docs_url="https://api.tradestation.com/docs/", color="#0066cc",
     ),
+    # --- MEDIUM RISK ---
+    "td_ameritrade": BrokerInfo(
+        id="td_ameritrade", name="TD Ameritrade (Schwab)",
+        description="Now part of Charles Schwab. OAuth-based REST API for trading.",
+        supported=True,
+        auth_fields=["client_id", "refresh_token"],
+        risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
+            "Schwab permits algorithmic trading through their official API but requires app registration. High-frequency patterns may trigger review."),
+        docs_url="https://developer.schwab.com/", color="#3b82f6",
+    ),
     "thinkorswim": BrokerInfo(
         id="thinkorswim", name="Thinkorswim (Schwab)",
         description="Professional trading platform by Charles Schwab. Same API as TD Ameritrade.",
@@ -64,6 +57,25 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
         risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
             "Thinkorswim uses the Schwab API. App registration required. Moderate risk for high-frequency patterns."),
         docs_url="https://developer.schwab.com/", color="#ff6600",
+    ),
+    "fidelity": BrokerInfo(
+        id="fidelity", name="Fidelity",
+        description="Major US brokerage. No public trading API — experimental support only.",
+        supported=False,
+        auth_fields=["username", "password"],
+        risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
+            "Fidelity does not offer a public trading API. Automated access requires third-party tools and may violate terms of service."),
+        docs_url="https://www.fidelity.com/", color="#4ade80",
+    ),
+    # --- HIGH RISK ---
+    "robinhood": BrokerInfo(
+        id="robinhood", name="Robinhood",
+        description="Commission-free trading app. Uses browser-like session authentication.",
+        supported=True,
+        auth_fields=["username", "password", "mfa_code"],
+        risk_warning=BrokerRiskWarning(BrokerRiskLevel.HIGH,
+            "Robinhood actively monitors for automated trading patterns and may restrict or permanently ban accounts. Use at your own risk."),
+        docs_url="https://robinhood.com/", color="#00c805",
     ),
     "webull": BrokerInfo(
         id="webull", name="Webull",
@@ -82,15 +94,6 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
         risk_warning=BrokerRiskWarning(BrokerRiskLevel.HIGH,
             "Wealthsimple does not offer an official trading API. Relies on undocumented endpoints. Restrictions are highly likely."),
         docs_url="https://www.wealthsimple.com/", color="#f97316",
-    ),
-    "fidelity": BrokerInfo(
-        id="fidelity", name="Fidelity",
-        description="Major US brokerage. No public trading API — experimental support only.",
-        supported=False,
-        auth_fields=["username", "password"],
-        risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
-            "Fidelity does not offer a public trading API. Automated access requires third-party tools and may violate terms of service."),
-        docs_url="https://www.fidelity.com/", color="#4ade80",
     ),
 }
 
