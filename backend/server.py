@@ -361,9 +361,14 @@ class TradingEngine:
         if last and (now - last).total_seconds() < self.TRADE_COOLDOWN_SECS:
             return
 
-        price = await price_service.get_price(sym)
-        self._prices[sym] = price
-        avg = await price_service.get_avg_price(sym, ticker_doc.get("avg_days", 30))
+        with _tracer.start_as_current_span("ticker.evaluate", attributes={
+            "ticker.symbol": sym,
+            "ticker.buy_power": ticker_doc.get("base_power", 0),
+            "ticker.enabled": ticker_doc.get("enabled", True),
+        }):
+            price = await price_service.get_price(sym)
+            self._prices[sym] = price
+            avg = await price_service.get_avg_price(sym, ticker_doc.get("avg_days", 30))
 
         buy_off = ticker_doc.get("buy_offset", -3.0)
         is_buy_pct = ticker_doc.get("buy_percent", True)
@@ -571,6 +576,15 @@ class TradingEngine:
                 direction = "UP" if drifted_up else "DOWN"
                 logger.info(f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} (was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, cooldown={cooldown}s]")
 
+                # Record rebracket as a trace span
+                with _tracer.start_as_current_span("ticker.rebracket", attributes={
+                    "rebracket.symbol": sym, "rebracket.direction": direction,
+                    "rebracket.old_buy": old_buy, "rebracket.old_sell": old_sell,
+                    "rebracket.new_buy": new_buy, "rebracket.new_sell": new_sell,
+                    "rebracket.price": price,
+                }):
+                    pass
+
                 # Telegram notification
                 try:
                     await telegram_service._broadcast_alert(
@@ -587,26 +601,40 @@ class TradingEngine:
                 self._recent_prices[sym] = []
 
     async def _record_trade(self, trade: TradeRecord):
-        doc = trade.model_dump()
-        await db.trades.insert_one(doc)
-        self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
-        pnl_str = f" P&L: ${trade.pnl:+.2f}" if trade.pnl != 0 else ""
-        entry_str = f" entry=${trade.entry_price:.2f}" if trade.entry_price > 0 else ""
-        logger.info(
-            f"TRADE: {trade.order_type} {trade.side} {trade.symbol} @ ${trade.price:.2f} x{trade.quantity:.4f}"
-            f" | {trade.rule_mode} mode | target=${trade.target_price:.2f}{entry_str}"
-            f" | value=${trade.total_value:.2f} | power=${trade.buy_power:.2f}{pnl_str}"
-        )
-        clean = {k: v for k, v in doc.items() if k != "_id"}
-        await ws_manager.broadcast({"type": "TRADE", "trade": clean})
-        # Telegram alert
-        try:
-            await telegram_service.send_trade_alert(clean)
-        except Exception:
-            pass
-        # Write loss log file
-        if trade.pnl < 0:
-            self._write_loss_log(trade)
+        with _tracer.start_as_current_span("trade.execute", attributes={
+            "trade.id": trade.id,
+            "trade.symbol": trade.symbol,
+            "trade.side": trade.side,
+            "trade.order_type": trade.order_type,
+            "trade.price": trade.price,
+            "trade.quantity": trade.quantity,
+            "trade.total_value": trade.total_value,
+            "trade.pnl": trade.pnl,
+            "trade.rule_mode": trade.rule_mode,
+        }) as span:
+            doc = trade.model_dump()
+            await db.trades.insert_one(doc)
+            self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
+            pnl_str = f" P&L: ${trade.pnl:+.2f}" if trade.pnl != 0 else ""
+            entry_str = f" entry=${trade.entry_price:.2f}" if trade.entry_price > 0 else ""
+            logger.info(
+                f"TRADE: {trade.order_type} {trade.side} {trade.symbol} @ ${trade.price:.2f} x{trade.quantity:.4f}"
+                f" | {trade.rule_mode} mode | target=${trade.target_price:.2f}{entry_str}"
+                f" | value=${trade.total_value:.2f} | power=${trade.buy_power:.2f}{pnl_str}"
+            )
+            clean = {k: v for k, v in doc.items() if k != "_id"}
+            await ws_manager.broadcast({"type": "TRADE", "trade": clean})
+            if trade.pnl < 0:
+                span.set_attribute("trade.loss", True)
+                span.add_event("loss_trade", {"pnl": trade.pnl, "symbol": trade.symbol})
+            # Telegram alert
+            try:
+                await telegram_service.send_trade_alert(clean)
+            except Exception:
+                pass
+            # Write loss log file
+            if trade.pnl < 0:
+                self._write_loss_log(trade)
 
     def _write_loss_log(self, trade: TradeRecord):
         """Write a detailed .txt file for every losing trade, organized by date."""
@@ -1152,6 +1180,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sentinel Pulse", lifespan=lifespan)
 api = APIRouter(prefix="/api")
 
+# OpenTelemetry
+from telemetry import setup_telemetry, get_tracer, get_stored_spans
+setup_telemetry(app)
+_tracer = get_tracer()
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1173,6 +1206,12 @@ async def health():
         "telegram": telegram_service.running,
         "ws_clients": len(ws_manager.active),
     }
+
+@api.get("/traces")
+async def get_traces(limit: int = Query(100, ge=1, le=500), name: str = Query("", description="Filter by span name")):
+    """Retrieve recent OpenTelemetry trace spans stored in memory."""
+    spans = get_stored_spans(limit=limit, name_filter=name)
+    return {"count": len(spans), "spans": spans}
 
 @api.get("/beta/status")
 async def beta_status():
