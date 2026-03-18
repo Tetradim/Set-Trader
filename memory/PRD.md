@@ -3,14 +3,34 @@
 ## Original Problem Statement
 Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application with bracket trading, real-time price feeds, Telegram integration, and Windows executable distribution. Expand to support beta tester onboarding, Prometheus monitoring, multi-broker live trading, feedback system, email notifications, and distributed tracing.
 
-## Architecture
-- **Backend**: FastAPI + Motor (async MongoDB) + WebSocket + yfinance + python-telegram-bot + OpenTelemetry
-- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Radix UI + Zustand + @dnd-kit + Recharts
-- **Database**: MongoDB 7
-- **Broker Layer**: 10-broker adapter architecture (`/app/backend/brokers/`) with aiohttp session pooling
-- **Broker Manager**: `/app/backend/broker_manager.py` — manages credentials, connections, parallel order placement, failover
-- **Email**: SMTP service (`/app/backend/email_service.py`) with rate limiting (2/hr)
-- **Tracing**: OpenTelemetry (`/app/backend/telemetry.py`) with in-memory span store + optional OTLP export
+## Architecture (Post-Refactoring — March 2026)
+
+```
+/app/backend/
+├── server.py              # 198 lines — Slim orchestrator (lifespan, middleware, router mounting)
+├── deps.py                # 48 lines — Shared state container (db, engine, ws_manager, etc.)
+├── schemas.py             # 174 lines — All Pydantic models
+├── ws_manager.py          # 25 lines — WebSocket ConnectionManager
+├── price_service.py       # 78 lines — yfinance caching + drift simulation
+├── trading_engine.py      # 478 lines — Core trading logic, evaluate_ticker, auto-rebracket
+├── telegram_service.py    # 283 lines — Telegram bot lifecycle, commands, alerts
+├── broker_manager.py      # 213 lines — Credential storage, connection pooling, parallel orders
+├── strategies.py          # 23 lines — Preset trading strategies
+├── email_service.py       # Existing — SMTP service with rate limiting
+├── telemetry.py           # Existing — OpenTelemetry setup
+├── routes/
+│   ├── health.py          # 187 lines — health, traces, metrics, beta, feedback
+│   ├── brokers.py         # 152 lines — broker CRUD, test, connect, status
+│   ├── tickers.py         # 168 lines — ticker CRUD, strategies, take-profit, cash-reserve
+│   ├── trades.py          # 89 lines — trades, portfolio, positions, loss-logs
+│   ├── bot.py             # 92 lines — bot control, settings, telegram test
+│   └── ws.py              # 187 lines — WebSocket endpoint + real-time handlers
+└── brokers/               # 10 broker adapter files
+    ├── base.py, registry.py
+    └── [adapter_name].py
+```
+
+**Key design pattern**: `deps.py` holds all shared singletons (db, engine, ws_manager, etc.). Modules import `deps` — never each other. This eliminates circular imports.
 
 ## What's Been Implemented
 
@@ -18,77 +38,36 @@ Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand Fas
 - [x] Bracket orders, stop-loss, trailing stop, auto rebracket
 - [x] Risk controls, compound profits, trade cooldown
 - [x] Master Account Balance with allocation tracking
-- [x] **Live/Paper Trading Mode** — unified toggle controls trading behavior
 
 ### Live & Paper Trading (March 2026)
-- [x] **Paper Mode** (`simulate_24_7 = true`): Market always open, trades logged but NOT sent to brokers
-- [x] **Live Mode** (`simulate_24_7 = false`): Real market hours, orders routed through connected broker adapters
-- [x] **BrokerConnectionManager**: Credential storage (XOR-encrypted), connection pooling, parallel order placement
-- [x] **Broker Failure Handling**: Failed brokers skipped, Telegram alerts sent, WebSocket BROKER_FAILED events broadcast
-- [x] **Flashing broker chips**: Frontend animates failed broker chips with red pulse
-- [x] **Telegram `/reconnect_brokers`**: Remote command to reconnect all brokers
-- [x] Trade records include `trading_mode` (paper/live) and `broker_results` metadata
+- [x] Unified simulation toggle (simulate_24_7):
+  - ON = Paper mode (market always open, no live orders)
+  - OFF = Live mode (real market hours, orders routed to brokers)
+- [x] BrokerConnectionManager: encrypted credentials, parallel order placement
+- [x] Broker failure handling: skip + Telegram alert + BROKER_FAILED WebSocket event
+- [x] Flashing red broker chips on failure
+- [x] Telegram `/reconnect_brokers` command
+- [x] Trade records include `trading_mode` (paper/live) and `broker_results`
 
-### Multi-Broker Live Trading (March 2026)
-- [x] **BrokerAdapter** ABC with aiohttp session pooling, order validation
-- [x] **10 brokers** with full adapter implementations:
-  - Alpaca (official API, paper+live) — LOW risk
-  - Interactive Brokers IBKR (TWS/Gateway REST) — LOW risk
-  - TD Ameritrade / Schwab (OAuth REST) — MEDIUM risk
-  - Tradier (REST API) — LOW risk
-  - Robinhood (robin_stocks session auth) — HIGH risk
-  - TradeStation (OAuth REST) — LOW risk
-  - Thinkorswim / Schwab (OAuth REST) — MEDIUM risk
-  - Webull (unofficial API) — HIGH risk
-  - Wealthsimple (unofficial API) — HIGH risk
-  - Fidelity (placeholder, no public API) — MEDIUM risk
-- [x] Each adapter: check_connection(), get_account(), get_positions(), place_order(), cancel_order(), get_quote()
-- [x] Full credential validation pipeline: required_fields → format_validation → live_connection → account_access
-- [x] Frontend Brokers tab with colored accent strips, risk badges, test connection modal
-- [x] Factory pattern: get_broker_adapter() returns correct adapter by broker_id
-
-### Frontend
-- [x] **Trading Mode indicator** in Header (PAPER/LIVE badge)
-- [x] **Trading Mode indicator** in Watchlist (Paper Trading/Live Trading with icon)
-- [x] **Trading Mode section** in Settings with toggle and detailed explanation
-- [x] **Broker Allocations** per ticker in Settings
-- [x] **Multi-broker chips** per ticker card with failure animation support
+### Multi-Broker Support
+- [x] 10 broker adapters (9 live-ready + Fidelity placeholder)
+- [x] Multi-broker per ticker with per-broker buy power allocations
+- [x] Full credential validation pipeline
 
 ### Monitoring & Tracing
 - [x] Prometheus /api/metrics (15+ metric types)
 - [x] OpenTelemetry auto-instrumentation + custom spans
 - [x] Frontend Traces tab
 
-### Feedback & Email
-- [x] Feedback dialog (bug, error, suggestion, complaint) with email via SMTP
-- [x] Rate limiting: 2 emails/hour
-- [x] Beta registration with email notification
-
-### API Endpoints (New)
-- [x] `GET /api/health` — includes `trading_mode`, `brokers_connected`
-- [x] `GET /api/settings` — includes `simulate_24_7`, `trading_mode`
-- [x] `GET /api/brokers/status` — live connection status for all brokers
-- [x] `POST /api/brokers/reconnect` — reconnect all configured brokers
-- [x] `POST /api/brokers/{broker_id}/connect` — connect with credentials
-
-## Key DB Schema
-- **`tickers`**: `broker_ids: List[str]`, `broker_allocations: Dict[str, float]`
-- **`settings`**: `engine_state` (running, paused, simulate_24_7), `account_balance`, `telegram`
-- **`trades`**: `trading_mode` (paper/live), `broker_results` (per-broker execution data)
-- **`broker_credentials`**: Encrypted credential storage per broker
+### Refactoring (March 2026)
+- [x] Decomposed monolithic server.py (2308 lines) into 12+ focused modules
+- [x] 100% regression tested — all 17 API endpoints verified, all frontend features working
 
 ## Prioritized Backlog
 
-### P0 (Completed)
-- [x] Wire broker adapters into trading engine with live/paper mode
-- [x] Broker failure handling (skip, alert, UI flash)
-- [x] Unified simulation toggle with persistence
-- [x] Telegram /reconnect_brokers command
-
 ### P1
-- Configure SMTP credentials for email delivery
-- Prometheus+Grafana monitoring package
-- Refactor server.py (2200+ lines) into modules
+- Configure real SMTP credentials for email delivery
+- Prometheus + Grafana monitoring package
 
 ### P2
 - Auto-bracket optimizer (backtest + volatility-adaptive)
