@@ -1,8 +1,9 @@
-import React, { memo, useState, useCallback, useMemo } from 'react';
+import React, { memo, useState, useCallback, useMemo, useEffect } from 'react';
 import { useStore, TickerConfig, PricePoint } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { apiFetch } from '@/lib/api';
 import {
   Trash2,
   TrendingUp,
@@ -13,6 +14,7 @@ import {
   Activity,
   GripVertical,
   Settings2,
+  Plug,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -26,6 +28,10 @@ interface Props {
   onConfigOpen: (symbol: string) => void;
 }
 
+interface BrokerOption { id: string; name: string; color: string; supported: boolean }
+let _brokerCache: BrokerOption[] | null = null;
+let _brokerFetching = false;
+
 export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Props) {
   const { send } = useWebSocket();
   const price = useStore((s) => s.prices[ticker.symbol] ?? 0);
@@ -36,6 +42,24 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const priceHistory = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP, setConfirmTP] = useState(false);
+  const [brokers, setBrokers] = useState<BrokerOption[]>(_brokerCache || []);
+
+  useEffect(() => {
+    if (_brokerCache) { setBrokers(_brokerCache); return; }
+    if (_brokerFetching) return;
+    _brokerFetching = true;
+    apiFetch('/api/brokers').then((data: any[]) => {
+      const opts = data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color, supported: b.supported }));
+      _brokerCache = opts;
+      setBrokers(opts);
+    }).catch(() => {}).finally(() => { _brokerFetching = false; });
+  }, []);
+
+  const handleBrokerChange = useCallback((brokerId: string) => {
+    send('UPDATE_TICKER', { symbol: ticker.symbol, broker_id: brokerId });
+  }, [send, ticker.symbol]);
+
+  const selectedBroker = brokers.find(b => b.id === ticker.broker_id);
 
   const isPositive = pnl >= 0;
   const isActive = ticker.enabled;
@@ -198,6 +222,28 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
           <span className="flex items-center gap-1">
             <Zap size={10} className="text-primary" /> ${ticker.base_power.toFixed(0)}
           </span>
+        </div>
+
+        {/* Broker selector */}
+        <div className="flex items-center gap-2 mt-1.5">
+          <Plug size={10} className="text-muted-foreground shrink-0" />
+          <select
+            data-testid={`broker-select-${ticker.symbol}`}
+            value={ticker.broker_id || ''}
+            onChange={(e) => handleBrokerChange(e.target.value)}
+            className="text-[10px] bg-secondary/60 border border-border rounded-md px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer appearance-none min-w-[120px]"
+            style={selectedBroker ? { borderLeftColor: selectedBroker.color, borderLeftWidth: 3 } : undefined}
+          >
+            <option value="">No Broker</option>
+            {brokers.map(b => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+          {selectedBroker && (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full font-mono" style={{ backgroundColor: selectedBroker.color + '22', color: selectedBroker.color, border: `1px solid ${selectedBroker.color}44` }}>
+              {selectedBroker.name.split(' ')[0]}
+            </span>
+          )}
         </div>
 
         {/* Position indicator */}

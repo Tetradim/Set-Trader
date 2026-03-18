@@ -32,6 +32,7 @@ export interface TickerConfig {
   rebracket_buffer: number;
   enabled: boolean;
   strategy: string;
+  broker_id: string;
   sort_order: number;
   created_at: string;
   custom_backup?: Record<string, any>;
