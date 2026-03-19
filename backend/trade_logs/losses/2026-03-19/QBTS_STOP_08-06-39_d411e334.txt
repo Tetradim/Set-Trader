@@ -1,0 +1,36 @@
+============================================================
+  LOSS TRADE LOG — QBTS
+============================================================
+
+Trade ID:       d411e334-5f9e-4a15-9cda-c20ea2587398
+Timestamp:      2026-03-19 08:06:39 UTC
+Symbol:         QBTS
+Side:           STOP
+
+--- ORDER INFO ---
+Order Type:     LIMIT
+Rule Mode:      PERCENT
+
+--- PRICES ---
+Fill Price:     $16.50
+Entry Price:    $16.51
+Target Price:   $20.64
+Avg Price (MA): $20.11
+
+--- POSITION ---
+Quantity:       554.0800
+Total Value:    $9142.32
+Buy Power:      $9147.86
+
+--- TARGETS AT TIME OF TRADE ---
+Sell Target:    $16.51
+Stop Target:    $20.64
+
+--- P&L ---
+P&L:            $-5.54
+% Change:       -0.06%
+
+--- REASON ---
+[LMT] Stop-loss hit $16.5 <= $20.64
+
+============================================================
