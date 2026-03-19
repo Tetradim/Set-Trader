@@ -200,6 +200,12 @@ class TradingEngine:
         compound = ticker_doc.get("compound_profits", True)
         base_power = ticker_doc.get("base_power", 100.0)
 
+        # Effective buy power: sum of broker allocations if brokers assigned, else base_power
+        broker_ids = ticker_doc.get("broker_ids", [])
+        broker_allocs = ticker_doc.get("broker_allocations", {})
+        alloc_total = sum(broker_allocs.get(bid, 0) for bid in broker_ids) if broker_ids else 0
+        effective_power = alloc_total if alloc_total > 0 else base_power
+
         buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
         pos = self._positions.get(sym, {"qty": 0, "avg_entry": 0})
         entry = pos.get("avg_entry", 0)
@@ -216,11 +222,9 @@ class TradingEngine:
             should_buy = (buy_otype == "market") or (price <= buy_target)
             if should_buy:
                 exec_price = price
-                qty = round(base_power / exec_price, 4)
+                qty = round(effective_power / exec_price, 4)
                 if qty > 0:
                     is_paper = self.simulate_24_7
-                    broker_ids = ticker_doc.get("broker_ids", [])
-                    broker_allocs = ticker_doc.get("broker_allocations", {})
                     broker_results = []
 
                     if not is_paper and broker_ids:
@@ -246,7 +250,7 @@ class TradingEngine:
                         rule_mode="PERCENT" if is_buy_pct else "DOLLAR",
                         target_price=buy_target,
                         total_value=round(exec_price * qty, 2),
-                        buy_power=base_power, avg_price=avg,
+                        buy_power=effective_power, avg_price=avg,
                         sell_target=sell_target, stop_target=stop_target,
                         trading_mode="paper" if is_paper or not broker_ids else "live",
                         broker_results=broker_results,
@@ -280,8 +284,6 @@ class TradingEngine:
                     pnl = round((exec_price - entry) * pos["qty"], 2)
                     order_label = "MKT" if trail_otype == "market" else "LMT"
                     is_paper = self.simulate_24_7
-                    broker_ids = ticker_doc.get("broker_ids", [])
-                    broker_allocs = ticker_doc.get("broker_allocations", {})
                     broker_results = []
                     if not is_paper and broker_ids:
                         broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -299,7 +301,7 @@ class TradingEngine:
                         rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
                         entry_price=entry, target_price=trail_stop,
                         total_value=round(exec_price * pos["qty"], 2),
-                        buy_power=base_power, avg_price=avg,
+                        buy_power=effective_power, avg_price=avg,
                         sell_target=sell_target, stop_target=stop_target,
                         trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
                         trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
@@ -318,8 +320,6 @@ class TradingEngine:
                 pnl = round((exec_price - entry) * pos["qty"], 2)
                 order_label = "MKT" if sell_otype == "market" else "LMT"
                 is_paper = self.simulate_24_7
-                broker_ids = ticker_doc.get("broker_ids", [])
-                broker_allocs = ticker_doc.get("broker_allocations", {})
                 broker_results = []
                 if not is_paper and broker_ids:
                     broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -337,7 +337,7 @@ class TradingEngine:
                     rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
                     entry_price=entry, target_price=sell_target,
                     total_value=round(exec_price * pos["qty"], 2),
-                    buy_power=base_power, avg_price=avg,
+                    buy_power=effective_power, avg_price=avg,
                     sell_target=sell_target, stop_target=stop_target,
                     trading_mode="paper" if is_paper or not broker_ids else "live",
                     broker_results=broker_results,
@@ -354,8 +354,6 @@ class TradingEngine:
                     pnl = round((exec_price - entry) * pos["qty"], 2)
                     order_label = "MKT" if stop_otype == "market" else "LMT"
                     is_paper = self.simulate_24_7
-                    broker_ids = ticker_doc.get("broker_ids", [])
-                    broker_allocs = ticker_doc.get("broker_allocations", {})
                     broker_results = []
                     if not is_paper and broker_ids:
                         broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -372,7 +370,7 @@ class TradingEngine:
                         rule_mode="PERCENT" if is_stop_pct else "DOLLAR",
                         entry_price=entry, target_price=stop_target,
                         total_value=round(exec_price * pos["qty"], 2),
-                        buy_power=base_power, avg_price=avg,
+                        buy_power=effective_power, avg_price=avg,
                         sell_target=sell_target, stop_target=stop_target,
                         trading_mode="paper" if is_paper or not broker_ids else "live",
                         broker_results=broker_results,
