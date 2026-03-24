@@ -20,19 +20,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify files exist
+        run: |
+          echo "Checking required files..."
+          dir backend\requirements.txt
+          dir frontend\yarn.lock
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: 'backend/requirements.txt'
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'yarn'
-          cache-dependency-path: frontend/yarn.lock
+          cache-dependency-path: 'frontend/yarn.lock'
 
       - name: Install Python dependencies
         working-directory: backend

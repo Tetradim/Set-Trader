@@ -1,79 +1,117 @@
-# Sentinel Pulse — PRD
+# Sentinel Pulse - Product Requirements Document
 
 ## Original Problem Statement
-Convert a Streamlit/JS trading bot into a production-grade WebSocket/Zustand FastAPI+React+MongoDB application with bracket trading, real-time price feeds, Telegram integration, and Windows executable distribution. Expand to support beta tester onboarding, Prometheus monitoring, multi-broker live trading, feedback system, email notifications, and distributed tracing.
+Build a sophisticated trading bot with bracket-based trading rules, multi-broker support, and advanced risk management features.
 
-## Architecture (Post-Refactoring — March 2026)
+## Core Features Implemented
+
+### Trading Engine
+- **Bracket Trading**: Buy/Sell/Stop rules based on moving average offsets (% or $)
+- **Multi-Broker Support**: Alpaca, Robinhood, Interactive Brokers, TD Ameritrade, etc.
+- **Paper/Live Trading Modes**: Simulated 24/7 trading and live broker execution
+- **Partial Fills (Scale In/Out)**: Buy and sell in multiple legs at different price levels
+
+### Time-Based Risk Management (NEW - March 2025)
+- **Opening Bell Mode**: Force trailing stop during first 30 mins after market open
+  - Separate trail value (% or $) from normal trailing stop
+  - Tracks session high, sells if price drops by trail amount
+  - Auto-rebrackets to new price level after 30 min window
+- **Halve Stop Loss at Open**: Cuts stop-loss distance in half (0.5x) during opening volatility
+
+### Position Management
+- Manual position sell (market or limit orders)
+- Pending limit sell tracking
+- Trailing stop with customizable % or $ values
+- Compound profits option
+
+### Risk Controls
+- Max daily loss limit
+- Max consecutive losses limit
+- Auto-stop with manual re-enable required
+
+### Auto-Rebracket
+- Threshold-based bracket adjustment
+- Cooldown period
+- Lookback period for recent low detection
+
+### Notifications
+- Telegram bot integration for alerts
+- Trade notifications with detailed metadata
+
+## Architecture
 
 ```
-/app/backend/
-├── server.py              # 198 lines — Slim orchestrator
-├── deps.py                # 48 lines — Shared state container
-├── schemas.py             # 174 lines — All Pydantic models
-├── ws_manager.py          # 25 lines — WebSocket ConnectionManager
-├── price_service.py       # 78 lines — yfinance + drift simulation
-├── trading_engine.py      # ~580 lines — Core trading logic + manual sell
-├── telegram_service.py    # 283 lines — Telegram bot lifecycle
-├── broker_manager.py      # 213 lines — Credential storage, parallel orders
-├── strategies.py          # 23 lines — Preset trading strategies
-├── email_service.py       # Existing — SMTP service
-├── telemetry.py           # Existing — OpenTelemetry setup
-├── routes/
-│   ├── health.py          # health, traces, metrics, beta, feedback
-│   ├── brokers.py         # broker CRUD, test, connect, status
-│   ├── tickers.py         # ticker CRUD, strategies, take-profit
-│   ├── trades.py          # trades, portfolio, positions, manual sell, loss-logs
-│   ├── bot.py             # bot control, settings, telegram test
-│   └── ws.py              # WebSocket endpoint
-└── brokers/               # 10 broker adapter files
+/app
+├── backend/
+│   ├── brokers/          # Broker adapters
+│   ├── routes/           # API routes
+│   ├── broker_manager.py
+│   ├── deps.py           # Shared state
+│   ├── email_service.py
+│   ├── price_service.py
+│   ├── schemas.py        # Pydantic models
+│   ├── strategies.py
+│   ├── telegram_service.py
+│   ├── trading_engine.py # Core engine
+│   ├── ws_manager.py
+│   └── server.py         # FastAPI app
+└── frontend/
+    └── src/
+        ├── components/
+        │   ├── ConfigModal.tsx
+        │   └── tabs/
+        └── stores/
+            └── useStore.ts
 ```
 
-## What's Been Implemented
+## Database Schema (MongoDB)
 
-### Core Trading Engine
-- [x] Bracket orders, stop-loss, trailing stop, auto rebracket
-- [x] Risk controls, compound profits, trade cooldown
-- [x] Master Account Balance with allocation tracking
+### tickers collection
+- symbol, base_power, avg_days
+- buy_offset, buy_percent, buy_order_type
+- sell_offset, sell_percent, sell_order_type
+- stop_offset, stop_percent, stop_order_type
+- trailing_enabled, trailing_percent, trailing_percent_mode
+- partial_fills_enabled, buy_legs, sell_legs
+- opening_bell_enabled, opening_bell_trail_value, opening_bell_trail_is_percent
+- halve_stop_at_open, lock_trailing_at_open
+- auto_rebracket, rebracket_threshold, rebracket_spread, etc.
+- broker_ids, broker_allocations
 
-### Live & Paper Trading
-- [x] Unified simulation toggle (simulate_24_7)
-- [x] BrokerConnectionManager: encrypted credentials, parallel orders
-- [x] Broker failure handling: skip + Telegram alert + BROKER_FAILED WebSocket
-- [x] Flashing red broker chips on failure
-- [x] Telegram `/reconnect_brokers` command
+### trades collection
+- symbol, side, price, quantity, reason, pnl, timestamp
+- order_type, rule_mode, entry_price, target_price
+- trail_high, trail_trigger, trail_value, trail_mode
+- trading_mode, broker_results
 
-### Manual Position Sell (March 2026)
-- [x] **Sell button** on each position row in the Positions tab
-- [x] **Sell modal** with position details (qty, entry, current price, market value)
-- [x] **Market sell**: Execute immediately at current market price
-- [x] **Limit sell**: Place pending order, engine executes when price >= target
-- [x] **Estimated P&L** updates dynamically based on order type and price
-- [x] **Pending sells section** with cancel button
-- [x] **PAPER/LIVE badge** in modal showing current trading mode
-- [x] Backend: `POST /api/positions/{symbol}/sell`, `GET /api/positions/pending-sells`, `DELETE /api/positions/{symbol}/pending-sell`
+## API Endpoints
 
-### Refactoring (March 2026)
-- [x] Decomposed 2308-line server.py into 12+ modules
-- [x] deps.py shared state pattern eliminates circular imports
+- `GET/POST /api/tickers` - Ticker management
+- `PUT /api/tickers/{symbol}` - Update ticker config
+- `POST /api/positions/{symbol}/sell` - Manual position sell
+- `GET /api/positions/pending-sells` - Pending limit sells
+- `DELETE /api/positions/pending-sells/{symbol}` - Cancel pending sell
+- `GET /api/health` - System health check
+- `WS /api/ws` - Real-time updates
 
-### Multi-Broker Support
-- [x] 10 broker adapters (9 live-ready)
-- [x] Multi-broker per ticker with per-broker allocations
+## Backlog
 
-### Monitoring & Tracing
-- [x] Prometheus /api/metrics
-- [x] OpenTelemetry auto-instrumentation
+### P1 (High Priority)
+- [ ] Promotional landing page for beta testing
+- [ ] Broker Health Dashboard panel (connection status, latency, fill rates)
 
-## Prioritized Backlog
+### P2 (Medium Priority)
+- [ ] "Sell All Positions" emergency liquidation button
+- [ ] Volatility-adaptive brackets
+- [ ] Multi-bracket laddering
 
-### P1
-- Configure real SMTP credentials
-- Prometheus + Grafana monitoring package
+### P3 (Low Priority)
+- [ ] Real SMTP credentials for email delivery
+- [ ] Prometheus + Grafana monitoring package
+- [ ] Auto-bracket optimizer
+- [ ] CSV export for trade history
+- [ ] Multi-user authentication
 
-### P2
-- Auto-bracket optimizer
-- CSV trade history export
-
-### P3
-- Multi-user authentication
-- Fix Docker CI/CD workflow
+## Known Issues
+- Telegram uses test token (placeholder)
+- Docker-based CI/CD has path issues (bypassed with non-Docker workflow)
