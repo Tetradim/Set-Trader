@@ -26,7 +26,7 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: pip install -r requirements.txt
+        run: pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
 
       - name: Create backend .env
         working-directory: backend
@@ -87,7 +87,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
           pip install pyinstaller
 
       - name: Create desktop .env

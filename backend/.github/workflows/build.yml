@@ -77,7 +77,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
           pip install pyinstaller
 
       - name: Build Python backend executable
@@ -175,7 +175,7 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt pyinstaller
           pyinstaller --onefile --name bracket-bot-server main.py
 
       - name: Build frontend
@@ -228,7 +228,7 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: |
-          pip install -r requirements.txt pyinstaller
+          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt pyinstaller
           pyinstaller --onefile --name bracket-bot-server main.py
 
       - name: Build frontend
