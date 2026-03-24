@@ -217,6 +217,15 @@ class TradingEngine:
             sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
             stop_target = round(avg * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
 
+        # --- PARTIAL FILLS BRANCH ---
+        if ticker_doc.get("partial_fills_enabled") and (ticker_doc.get("buy_legs") or ticker_doc.get("sell_legs")):
+            await self._evaluate_partial_fills(
+                ticker_doc, sym, price, avg, pos, entry,
+                effective_power, broker_ids, broker_allocs,
+                stop_target, is_stop_pct, stop_otype, compound,
+            )
+            return
+
         # --- BUY ---
         if pos["qty"] == 0:
             should_buy = (buy_otype == "market") or (price <= buy_target)
@@ -447,6 +456,168 @@ class TradingEngine:
                 pass
 
             self._recent_prices[sym] = []
+
+    # ------------------------------------------------------------------
+    # Partial Fills — scale in/out with multiple legs
+    # ------------------------------------------------------------------
+    async def _evaluate_partial_fills(
+        self, ticker_doc, sym, price, avg, pos, entry,
+        effective_power, broker_ids, broker_allocs,
+        stop_target, is_stop_pct, stop_otype, compound,
+    ):
+        buy_legs = ticker_doc.get("buy_legs", [])
+        sell_legs = ticker_doc.get("sell_legs", [])
+        is_paper = self.simulate_24_7
+
+        filled_buy = pos.get("buy_legs_filled", [])
+        filled_sell = pos.get("sell_legs_filled", [])
+
+        # --- PARTIAL BUY LEGS ---
+        if buy_legs:
+            for i, leg in enumerate(buy_legs):
+                if i in filled_buy:
+                    continue
+                leg_offset = leg.get("offset", 0)
+                leg_is_pct = leg.get("is_percent", True)
+                leg_alloc_pct = leg.get("alloc_pct", 0)
+                if leg_alloc_pct <= 0:
+                    continue
+
+                trigger = round(avg * (1 + leg_offset / 100), 2) if leg_is_pct else round(leg_offset, 2)
+
+                if price <= trigger:
+                    leg_power = round(effective_power * leg_alloc_pct / 100, 2)
+                    qty = round(leg_power / price, 4)
+                    if qty <= 0:
+                        continue
+
+                    # Broker routing
+                    broker_results = []
+                    if not is_paper and broker_ids:
+                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                            broker_ids=broker_ids, allocations=broker_allocs,
+                            order_template={
+                                "symbol": sym, "side": "BUY", "order_type": "LIMIT",
+                                "price": price, "limit_price": trigger,
+                            },
+                        )
+
+                    # Update position with weighted average
+                    old_qty = pos.get("qty", 0)
+                    old_entry = pos.get("avg_entry", 0)
+                    new_qty = round(old_qty + qty, 4)
+                    new_entry = round(((old_entry * old_qty) + (price * qty)) / new_qty, 2) if new_qty > 0 else price
+
+                    filled_buy = list(filled_buy) + [i]
+                    self._positions[sym] = {
+                        "qty": new_qty, "avg_entry": new_entry,
+                        "buy_legs_filled": filled_buy,
+                        "sell_legs_filled": filled_sell,
+                    }
+                    pos = self._positions[sym]
+                    entry = new_entry
+
+                    trade = TradeRecord(
+                        symbol=sym, side="BUY", price=price, quantity=qty,
+                        reason=f"[PARTIAL {i+1}/{len(buy_legs)}] Leg {i+1} filled @ ${price:.2f} (trigger ${trigger:.2f}, {leg_alloc_pct}% of power)",
+                        order_type="LIMIT", rule_mode="PERCENT" if leg_is_pct else "DOLLAR",
+                        target_price=trigger,
+                        total_value=round(price * qty, 2),
+                        buy_power=leg_power, avg_price=avg,
+                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        broker_results=broker_results,
+                    )
+                    await self._record_trade(trade)
+
+        # --- STOP LOSS (applies to entire remaining position) ---
+        if pos.get("qty", 0) > 0 and entry > 0:
+            current_stop = round(entry * (1 + ticker_doc.get("stop_offset", -6.0) / 100), 2) if is_stop_pct else round(ticker_doc.get("stop_offset", 0), 2)
+            should_stop = (stop_otype == "market") or (price <= current_stop)
+            if should_stop:
+                pnl = round((price - entry) * pos["qty"], 2)
+                broker_results = []
+                if not is_paper and broker_ids:
+                    broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                        broker_ids=broker_ids, allocations=broker_allocs,
+                        order_template={
+                            "symbol": sym, "side": "SELL", "order_type": "STOP",
+                            "price": price, "quantity": pos["qty"], "stop_price": current_stop,
+                        },
+                    )
+                trade = TradeRecord(
+                    symbol=sym, side="STOP", price=price, quantity=pos["qty"],
+                    reason=f"[STOP] Full position stopped @ ${price:.2f} (stop ${current_stop:.2f})",
+                    pnl=pnl, order_type="STOP",
+                    entry_price=entry, target_price=current_stop,
+                    total_value=round(price * pos["qty"], 2),
+                    buy_power=effective_power,
+                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    broker_results=broker_results,
+                )
+                await self._record_trade(trade)
+                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._trailing_highs.pop(sym, None)
+                await self._update_profit(sym, pnl, compound)
+                return
+
+        # --- PARTIAL SELL LEGS ---
+        if sell_legs and pos.get("qty", 0) > 0 and entry > 0:
+            for i, leg in enumerate(sell_legs):
+                if i in filled_sell:
+                    continue
+                leg_offset = leg.get("offset", 0)
+                leg_is_pct = leg.get("is_percent", True)
+                leg_alloc_pct = leg.get("alloc_pct", 0)
+                if leg_alloc_pct <= 0:
+                    continue
+
+                trigger = round(entry * (1 + leg_offset / 100), 2) if leg_is_pct else round(leg_offset, 2)
+
+                if price >= trigger:
+                    current_qty = pos.get("qty", 0)
+                    sell_qty = round(current_qty * leg_alloc_pct / 100, 4)
+                    sell_qty = min(sell_qty, current_qty)
+                    if sell_qty <= 0:
+                        continue
+
+                    pnl = round((price - entry) * sell_qty, 2)
+
+                    broker_results = []
+                    if not is_paper and broker_ids:
+                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                            broker_ids=broker_ids, allocations=broker_allocs,
+                            order_template={
+                                "symbol": sym, "side": "SELL", "order_type": "LIMIT",
+                                "price": price, "quantity": sell_qty, "limit_price": trigger,
+                            },
+                        )
+
+                    remaining = round(current_qty - sell_qty, 4)
+                    filled_sell = list(filled_sell) + [i]
+                    self._positions[sym] = {
+                        "qty": remaining, "avg_entry": entry,
+                        "buy_legs_filled": filled_buy,
+                        "sell_legs_filled": filled_sell,
+                    }
+                    pos = self._positions[sym]
+
+                    trade = TradeRecord(
+                        symbol=sym, side="SELL", price=price, quantity=sell_qty,
+                        reason=f"[PARTIAL {i+1}/{len(sell_legs)}] Leg {i+1} filled @ ${price:.2f} (trigger ${trigger:.2f}, {leg_alloc_pct}% of position)",
+                        pnl=pnl, order_type="LIMIT",
+                        rule_mode="PERCENT" if leg_is_pct else "DOLLAR",
+                        entry_price=entry, target_price=trigger,
+                        total_value=round(price * sell_qty, 2),
+                        buy_power=effective_power,
+                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        broker_results=broker_results,
+                    )
+                    await self._record_trade(trade)
+                    await self._update_profit(sym, pnl, compound)
+
+            # If all sell legs filled and no position remains, clear
+            if pos.get("qty", 0) <= 0.0001:
+                self._positions[sym] = {"qty": 0, "avg_entry": 0}
 
     # ------------------------------------------------------------------
     async def _record_trade(self, trade: TradeRecord):

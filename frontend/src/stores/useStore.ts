@@ -38,6 +38,10 @@ export interface TickerConfig {
   sort_order: number;
   created_at: string;
   custom_backup?: Record<string, any>;
+  // Partial fills
+  partial_fills_enabled: boolean;
+  buy_legs: Array<{ alloc_pct: number; offset: number; is_percent: boolean }>;
+  sell_legs: Array<{ alloc_pct: number; offset: number; is_percent: boolean }>;
 }
 
 export interface TradeLog {

@@ -44,6 +44,10 @@ class TickerConfig(BaseModel):
     broker_allocations: Dict[str, float] = {}
     sort_order: int = 0
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Partial fills (scale in / scale out)
+    partial_fills_enabled: bool = False
+    buy_legs: list = []   # [{"alloc_pct": 50, "offset": -3.0, "is_percent": True}]
+    sell_legs: list = []  # [{"alloc_pct": 60, "offset": 3.0, "is_percent": True}]
 
 
 class TickerCreate(BaseModel):
@@ -81,6 +85,9 @@ class TickerUpdate(BaseModel):
     rebracket_buffer: Optional[float] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
+    partial_fills_enabled: Optional[bool] = None
+    buy_legs: Optional[list] = None
+    sell_legs: Optional[list] = None
 
 
 class TradeRecord(BaseModel):
