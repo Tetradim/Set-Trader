@@ -21,6 +21,9 @@ class TradingEngine:
         self._recent_prices: Dict[str, list] = {}
         self._last_rebracket_ts: Dict[str, datetime] = {}
         self._pending_sells: Dict[str, dict] = {}  # symbol -> {limit_price, qty, entry}
+        # Opening Bell Mode tracking
+        self._opening_bell_highs: Dict[str, float] = {}  # symbol -> opening session high
+        self._opening_bell_rebracket_done: Dict[str, str] = {}  # symbol -> date string when rebracket was done
 
     async def save_state(self):
         await deps.db.settings.update_one(
@@ -172,6 +175,22 @@ class TradingEngine:
         elapsed = (now - market_open).total_seconds()
         return 0 <= elapsed <= minutes * 60
 
+    def _is_past_opening_window(self, minutes: int = 30) -> bool:
+        """Check if we're past the opening window but still within market hours."""
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        if now.weekday() >= 5:
+            return False
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        # Past opening window but before market close
+        return elapsed > minutes * 60 and now < market_close
+
+    def _get_today_str(self) -> str:
+        """Get today's date string in Eastern Time for tracking daily operations."""
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        return now.strftime("%Y-%m-%d")
+
     # ------------------------------------------------------------------
     # evaluate_ticker — the heart of the trading logic
     # ------------------------------------------------------------------
@@ -292,6 +311,81 @@ class TradingEngine:
                     today = datetime.now(timezone.utc).date()
                     if buy_date >= today:
                         return
+
+            # --- OPENING BELL MODE ---
+            # During first 30 min: force trailing stop, override normal sell rules
+            # After 30 min: auto-rebracket to current price and resume normal trading
+            opening_bell_on = ticker_doc.get("opening_bell_enabled", False)
+            if opening_bell_on:
+                ob_trail_val = ticker_doc.get("opening_bell_trail_value", 1.0)
+                ob_trail_is_pct = ticker_doc.get("opening_bell_trail_is_percent", True)
+                today_str = self._get_today_str()
+
+                if self._is_opening_window(30):
+                    # During opening window: force trailing stop
+                    ob_high = self._opening_bell_highs.get(sym, price)
+                    if price > ob_high:
+                        self._opening_bell_highs[sym] = price
+                        ob_high = price
+
+                    ob_trail_stop = round(ob_high * (1 - ob_trail_val / 100), 2) if ob_trail_is_pct else round(ob_high - ob_trail_val, 2)
+
+                    if price <= ob_trail_stop:
+                        # Opening bell trailing stop triggered - SELL
+                        exec_price = price
+                        pnl = round((exec_price - entry) * pos["qty"], 2)
+                        is_paper = self.simulate_24_7
+                        broker_results = []
+                        if not is_paper and broker_ids:
+                            broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                                broker_ids=broker_ids, allocations=broker_allocs,
+                                order_template={
+                                    "symbol": sym, "side": "SELL", "order_type": "STOP",
+                                    "price": exec_price, "quantity": pos["qty"], "stop_price": ob_trail_stop,
+                                },
+                            )
+                        trade = TradeRecord(
+                            symbol=sym, side="TRAILING_STOP", price=exec_price,
+                            quantity=pos["qty"],
+                            reason=f"[OPENING BELL] Trailing stop hit ${ob_trail_stop} (high ${ob_high})",
+                            pnl=pnl, order_type="MARKET",
+                            rule_mode="PERCENT" if ob_trail_is_pct else "DOLLAR",
+                            entry_price=entry, target_price=ob_trail_stop,
+                            total_value=round(exec_price * pos["qty"], 2),
+                            buy_power=effective_power, avg_price=avg,
+                            sell_target=sell_target, stop_target=stop_target,
+                            trail_high=ob_high, trail_trigger=ob_trail_stop, trail_value=ob_trail_val,
+                            trail_mode="PERCENT" if ob_trail_is_pct else "DOLLAR",
+                            trading_mode="paper" if is_paper or not broker_ids else "live",
+                            broker_results=broker_results,
+                        )
+                        await self._record_trade(trade)
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._opening_bell_highs.pop(sym, None)
+                        self._trailing_highs.pop(sym, None)
+                        await self._update_profit(sym, pnl, compound)
+                        return
+                    # Still in opening window, skip normal sell/stop rules
+                    return
+
+                elif self._is_past_opening_window(30):
+                    # Past opening window - auto-rebracket once per day
+                    if self._opening_bell_rebracket_done.get(sym) != today_str:
+                        ob_high = self._opening_bell_highs.get(sym, price)
+                        # Rebracket: use the opening high as new base for brackets
+                        # Update the ticker's bracket center to the opening high
+                        await deps.db.tickers.update_one(
+                            {"symbol": sym},
+                            {"$set": {"avg_days": 1}}  # Short lookback so avg converges to recent price
+                        )
+                        self._opening_bell_rebracket_done[sym] = today_str
+                        self._opening_bell_highs.pop(sym, None)
+                        deps.logger.info(f"OPENING BELL REBRACKET: {sym} brackets reset after opening window (high was ${ob_high:.2f})")
+                        # Broadcast update
+                        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                        if doc:
+                            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+                    # Continue to normal trading logic below
 
             if trailing:
                 # TIME RULE: Lock trailing stop for first 30 min after market open

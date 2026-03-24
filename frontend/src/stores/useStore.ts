@@ -45,6 +45,10 @@ export interface TickerConfig {
   // Time-based risk rules
   lock_trailing_at_open: boolean;
   halve_stop_at_open: boolean;
+  // Opening Bell Mode
+  opening_bell_enabled: boolean;
+  opening_bell_trail_value: number;
+  opening_bell_trail_is_percent: boolean;
 }
 
 export interface TradeLog {

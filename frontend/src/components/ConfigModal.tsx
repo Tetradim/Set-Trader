@@ -218,22 +218,57 @@ function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
 }
 
 function RiskTab({ ticker, onChange, incStep, decStep }: TabProps) {
+  const openingBellEnabled = ticker.opening_bell_enabled ?? false;
+  
   return (
     <div className="space-y-5">
-      {/* Time-Based Risk Rules */}
-      <ConfigSection title="Opening Bell Protection" icon={Zap} color="text-purple-400">
+      {/* Opening Bell Mode */}
+      <ConfigSection title="Opening Bell Mode" icon={Zap} color="text-purple-400">
         <div className="col-span-2 space-y-3">
-          <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 border border-border/50">
+          <div className="flex items-center justify-between p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
             <div>
-              <p className="text-xs font-medium text-foreground">Lock Trailing Stop at Open</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Disable trailing stop for the first 30 min after market open</p>
+              <p className="text-xs font-bold text-purple-400">Force Trailing Stop at Open</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Override normal sell rules for the first 30 min after market open with a forced trailing stop
+              </p>
             </div>
             <Checkbox
-              data-testid={`lock-trailing-toggle-${ticker.symbol}`}
-              checked={ticker.lock_trailing_at_open ?? false}
-              onCheckedChange={(v) => onChange('lock_trailing_at_open', v)}
+              data-testid={`opening-bell-toggle-${ticker.symbol}`}
+              checked={openingBellEnabled}
+              onCheckedChange={(v) => onChange('opening_bell_enabled', v)}
             />
           </div>
+          
+          {openingBellEnabled && (
+            <div className="space-y-2 pl-2 border-l-2 border-purple-500/30">
+              <div className="flex items-center gap-3">
+                <SteppedInput 
+                  label={(ticker.opening_bell_trail_is_percent ?? true) ? 'Opening Trail %' : 'Opening Trail $'} 
+                  value={ticker.opening_bell_trail_value ?? 1.0} 
+                  onChange={(v) => onChange('opening_bell_trail_value', v)} 
+                  min={0.01} 
+                  max={(ticker.opening_bell_trail_is_percent ?? true) ? 20 : 99999} 
+                  incrementStep={incStep} 
+                  decrementStep={decStep} 
+                />
+                <ConfigToggle 
+                  label="Use %" 
+                  checked={ticker.opening_bell_trail_is_percent ?? true} 
+                  onChange={(v) => onChange('opening_bell_trail_is_percent', v)} 
+                />
+              </div>
+              <p className="text-[9px] text-muted-foreground/70">
+                During 9:30–10:00 AM ET, the bot tracks the session high and sells if price drops by this trail amount. 
+                After 30 min, brackets auto-reset to the new price level.
+              </p>
+            </div>
+          )}
+        </div>
+      </ConfigSection>
+
+      {/* Halve Stop Loss */}
+      <ConfigSection title="Opening Volatility Protection" icon={ShieldAlert} color="text-amber-400">
+        <div className="col-span-2">
           <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 border border-border/50">
             <div>
               <p className="text-xs font-medium text-foreground">Halve Stop Loss at Open</p>
@@ -245,8 +280,8 @@ function RiskTab({ ticker, onChange, incStep, decStep }: TabProps) {
               onCheckedChange={(v) => onChange('halve_stop_at_open', v)}
             />
           </div>
-          <p className="text-[9px] text-muted-foreground/60">
-            These rules help manage risk during the volatile opening period (9:30–10:00 AM ET).
+          <p className="text-[9px] text-muted-foreground/60 mt-2">
+            Tightens the stop-loss to protect profits if price dips to a new low during opening volatility.
           </p>
         </div>
       </ConfigSection>

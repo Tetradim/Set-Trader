@@ -51,6 +51,10 @@ class TickerConfig(BaseModel):
     # Time-based risk rules (per-ticker)
     lock_trailing_at_open: bool = False
     halve_stop_at_open: bool = False
+    # Opening Bell Mode - forced trailing stop during first 30 mins
+    opening_bell_enabled: bool = False
+    opening_bell_trail_value: float = 1.0
+    opening_bell_trail_is_percent: bool = True
 
 
 class TickerCreate(BaseModel):
@@ -93,6 +97,9 @@ class TickerUpdate(BaseModel):
     sell_legs: Optional[list] = None
     lock_trailing_at_open: Optional[bool] = None
     halve_stop_at_open: Optional[bool] = None
+    opening_bell_enabled: Optional[bool] = None
+    opening_bell_trail_value: Optional[float] = None
+    opening_bell_trail_is_percent: Optional[bool] = None
 
 
 class TradeRecord(BaseModel):
