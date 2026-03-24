@@ -84,6 +84,15 @@ async def price_broadcast_loop():
 async def trading_loop():
     while True:
         try:
+            # Check for auto mode switching based on market hours
+            if deps.engine.check_auto_mode_switch():
+                await deps.engine.save_state()
+                await deps.ws_manager.broadcast({
+                    "type": "MODE_SWITCH",
+                    "simulate_24_7": deps.engine.simulate_24_7,
+                    "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
+                })
+            
             if deps.engine.running and not deps.engine.paused and deps.engine.is_market_open():
                 tickers = await deps.db.tickers.find({"enabled": True}, {"_id": 0}).to_list(100)
                 for t in tickers:

@@ -144,6 +144,10 @@ interface BotState {
   // Settings
   simulate247: boolean;
   setSimulate247: (s: boolean) => void;
+  liveDuringMarketHours: boolean;
+  paperAfterHours: boolean;
+  setLiveDuringMarketHours: (v: boolean) => void;
+  setPaperAfterHours: (v: boolean) => void;
   telegramToken: string;
   telegramChatIds: string[];
   setTelegramConfig: (token: string, chatIds: string[]) => void;
@@ -240,6 +244,10 @@ export const useStore = create<BotState>((set) => ({
 
   simulate247: false,
   setSimulate247: (simulate247) => set({ simulate247 }),
+  liveDuringMarketHours: false,
+  paperAfterHours: false,
+  setLiveDuringMarketHours: (liveDuringMarketHours) => set({ liveDuringMarketHours }),
+  setPaperAfterHours: (paperAfterHours) => set({ paperAfterHours }),
   telegramToken: '',
   telegramChatIds: [],
   setTelegramConfig: (telegramToken, telegramChatIds) => set({ telegramToken, telegramChatIds }),

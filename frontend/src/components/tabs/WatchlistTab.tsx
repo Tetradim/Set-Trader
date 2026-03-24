@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { TickerCard } from '../TickerCard';
 import { ConfigModal } from '../ConfigModal';
-import { Shield, Zap } from 'lucide-react';
+import { Shield, Zap, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from '@/lib/api';
 import {
@@ -25,6 +25,10 @@ export function WatchlistTab() {
   const running = useStore((s) => s.running);
   const connected = useStore((s) => s.connected);
   const simulate247 = useStore((s) => s.simulate247);
+  const liveDuringMarketHours = useStore((s) => s.liveDuringMarketHours);
+  const paperAfterHours = useStore((s) => s.paperAfterHours);
+  const setLiveDuringMarketHours = useStore((s) => s.setLiveDuringMarketHours);
+  const setPaperAfterHours = useStore((s) => s.setPaperAfterHours);
   const chartEnabled = useStore((s) => s.chartEnabled);
   const [configSymbol, setConfigSymbol] = useState<string | null>(null);
 
@@ -42,6 +46,35 @@ export function WatchlistTab() {
   const handleConfigClose = useCallback(() => {
     setConfigSymbol(null);
   }, []);
+
+  // Auto-mode toggle handlers
+  const handleLiveDuringMarketToggle = useCallback(async () => {
+    const newValue = !liveDuringMarketHours;
+    setLiveDuringMarketHours(newValue);
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ live_during_market_hours: newValue }),
+      });
+    } catch (err) {
+      console.error('Failed to update live_during_market_hours:', err);
+      setLiveDuringMarketHours(!newValue); // Revert on error
+    }
+  }, [liveDuringMarketHours, setLiveDuringMarketHours]);
+
+  const handlePaperAfterHoursToggle = useCallback(async () => {
+    const newValue = !paperAfterHours;
+    setPaperAfterHours(newValue);
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ paper_after_hours: newValue }),
+      });
+    } catch (err) {
+      console.error('Failed to update paper_after_hours:', err);
+      setPaperAfterHours(!newValue); // Revert on error
+    }
+  }, [paperAfterHours, setPaperAfterHours]);
 
   // DnD sensors
   const sensors = useSensors(
@@ -88,19 +121,48 @@ export function WatchlistTab() {
     <div className="space-y-8" data-testid="watchlist-tab">
       {/* Control bar */}
       <div className="flex items-center justify-between p-3 rounded-lg glass border border-border">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span
-              data-testid="watchlist-mode-indicator"
-              className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${
-                simulate247
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+        <div className="flex items-center gap-3">
+          {/* Current mode indicator */}
+          <span
+            data-testid="watchlist-mode-indicator"
+            className={`flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${
+              simulate247
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+            }`}
+          >
+            {simulate247 ? <Shield size={12} /> : <Zap size={12} />}
+            {simulate247 ? 'Paper Trading' : 'Live Trading'}
+          </span>
+
+          {/* Auto-mode toggles */}
+          <div className="flex items-center gap-1.5 ml-2">
+            <button
+              data-testid="live-during-market-toggle"
+              onClick={handleLiveDuringMarketToggle}
+              className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full border transition-all ${
+                liveDuringMarketHours
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                  : 'bg-secondary/50 text-muted-foreground border-border hover:border-emerald-500/30 hover:text-emerald-400'
               }`}
+              title="Go LIVE during market hours (9:30 AM - 4:00 PM ET)"
             >
-              {simulate247 ? <Shield size={12} /> : <Zap size={12} />}
-              {simulate247 ? 'Paper Trading' : 'Live Trading'}
-            </span>
+              <Sun size={10} />
+              Live @ Open
+            </button>
+            <button
+              data-testid="paper-after-hours-toggle"
+              onClick={handlePaperAfterHoursToggle}
+              className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full border transition-all ${
+                paperAfterHours
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                  : 'bg-secondary/50 text-muted-foreground border-border hover:border-amber-500/30 hover:text-amber-400'
+              }`}
+              title="Switch to PAPER after market close"
+            >
+              <Moon size={10} />
+              Paper @ Close
+            </button>
           </div>
         </div>
 

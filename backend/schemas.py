@@ -150,6 +150,9 @@ class SettingsUpdate(BaseModel):
     decrement_step: Optional[float] = None
     account_balance: Optional[float] = None
     market_hours_only: Optional[bool] = None
+    # Auto mode switching
+    live_during_market_hours: Optional[bool] = None
+    paper_after_hours: Optional[bool] = None
 
 
 class BetaRegistration(BaseModel):

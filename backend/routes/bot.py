@@ -33,6 +33,12 @@ async def update_settings(body: SettingsUpdate):
     if body.market_hours_only is not None:
         deps.engine.market_hours_only = body.market_hours_only
         await deps.engine.save_state()
+    if body.live_during_market_hours is not None:
+        deps.engine.live_during_market_hours = body.live_during_market_hours
+        await deps.engine.save_state()
+    if body.paper_after_hours is not None:
+        deps.engine.paper_after_hours = body.paper_after_hours
+        await deps.engine.save_state()
     if body.increment_step is not None:
         await deps.db.settings.update_one({"key": "increment_step"}, {"$set": {"value": body.increment_step}}, upsert=True)
     if body.decrement_step is not None:
@@ -76,6 +82,8 @@ async def get_settings():
     return {
         "simulate_24_7": deps.engine.simulate_24_7,
         "market_hours_only": deps.engine.market_hours_only,
+        "live_during_market_hours": deps.engine.live_during_market_hours,
+        "paper_after_hours": deps.engine.paper_after_hours,
         "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": deps.telegram_service.running,

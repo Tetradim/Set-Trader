@@ -14,6 +14,11 @@ class TradingEngine:
         self.paused = False
         self.simulate_24_7 = False
         self.market_hours_only = True
+        # Auto mode switching
+        self.live_during_market_hours = False
+        self.paper_after_hours = False
+        self._last_mode_check: datetime = None
+        
         self._prices: Dict[str, float] = {}
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
@@ -33,6 +38,8 @@ class TradingEngine:
                 "paused": self.paused,
                 "simulate_24_7": self.simulate_24_7,
                 "market_hours_only": self.market_hours_only,
+                "live_during_market_hours": self.live_during_market_hours,
+                "paper_after_hours": self.paper_after_hours,
             }}},
             upsert=True,
         )
@@ -45,7 +52,44 @@ class TradingEngine:
             self.paused = v.get("paused", False)
             self.simulate_24_7 = v.get("simulate_24_7", False)
             self.market_hours_only = v.get("market_hours_only", True)
-            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}")
+            self.live_during_market_hours = v.get("live_during_market_hours", False)
+            self.paper_after_hours = v.get("paper_after_hours", False)
+            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
+
+    def check_auto_mode_switch(self) -> bool:
+        """Check and apply auto mode switching based on market hours. Returns True if mode changed."""
+        if not self.live_during_market_hours and not self.paper_after_hours:
+            return False
+        
+        market_open = self._is_actual_market_hours()
+        mode_changed = False
+        
+        if market_open and self.live_during_market_hours:
+            # Market is open and user wants live trading during market hours
+            if self.simulate_24_7:
+                self.simulate_24_7 = False
+                mode_changed = True
+                deps.logger.info("AUTO MODE: Switched to LIVE trading (market hours)")
+        elif not market_open and self.paper_after_hours:
+            # Market is closed and user wants paper trading after hours
+            if not self.simulate_24_7:
+                self.simulate_24_7 = True
+                mode_changed = True
+                deps.logger.info("AUTO MODE: Switched to PAPER trading (after hours)")
+        
+        return mode_changed
+
+    def _is_actual_market_hours(self) -> bool:
+        """Check if we're in actual market hours (ignoring simulate_24_7)."""
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        if now.weekday() >= 5:
+            return False
+        hour, minute = now.hour, now.minute
+        if hour < 9 or (hour == 9 and minute < 30):
+            return False
+        if hour >= 16:
+            return False
+        return True
 
     async def manual_sell(self, symbol: str, order_type: str, limit_price: float = 0) -> dict:
         """Execute a manual sell from the Positions tab.

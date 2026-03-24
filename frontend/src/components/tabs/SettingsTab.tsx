@@ -54,6 +54,8 @@ export function SettingsTab() {
         setBalanceText(String(data.account_balance ?? 0));
         setAllocated(data.allocated ?? 0);
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
+        useStore.getState().setLiveDuringMarketHours(data.live_during_market_hours || false);
+        useStore.getState().setPaperAfterHours(data.paper_after_hours || false);
         useStore.getState().setIncrementStep(data.increment_step ?? 0.5);
         useStore.getState().setDecrementStep(data.decrement_step ?? 0.5);
         if (data.account_balance !== undefined) {

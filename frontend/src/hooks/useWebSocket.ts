@@ -96,6 +96,11 @@ export function useWebSocket() {
           store.setPaused(data.paused ?? store.paused);
         }
 
+        if (data.type === 'MODE_SWITCH') {
+          if (data.simulate_24_7 !== undefined) store.setSimulate247(data.simulate_24_7);
+          if (data.trading_mode) store.setTradingMode(data.trading_mode);
+        }
+
         if (data.type === 'BROKER_FAILED') {
           store.setBrokerFailed(data.broker_id, data.reason || 'Connection failed', data.symbol || '');
           // Auto-clear after 30 seconds
