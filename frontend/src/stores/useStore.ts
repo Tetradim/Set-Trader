@@ -42,6 +42,9 @@ export interface TickerConfig {
   partial_fills_enabled: boolean;
   buy_legs: Array<{ alloc_pct: number; offset: number; is_percent: boolean }>;
   sell_legs: Array<{ alloc_pct: number; offset: number; is_percent: boolean }>;
+  // Time-based risk rules
+  lock_trailing_at_open: boolean;
+  halve_stop_at_open: boolean;
 }
 
 export interface TradeLog {

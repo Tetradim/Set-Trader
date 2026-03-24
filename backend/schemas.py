@@ -48,6 +48,9 @@ class TickerConfig(BaseModel):
     partial_fills_enabled: bool = False
     buy_legs: list = []   # [{"alloc_pct": 50, "offset": -3.0, "is_percent": True}]
     sell_legs: list = []  # [{"alloc_pct": 60, "offset": 3.0, "is_percent": True}]
+    # Time-based risk rules (per-ticker)
+    lock_trailing_at_open: bool = False
+    halve_stop_at_open: bool = False
 
 
 class TickerCreate(BaseModel):
@@ -88,6 +91,8 @@ class TickerUpdate(BaseModel):
     partial_fills_enabled: Optional[bool] = None
     buy_legs: Optional[list] = None
     sell_legs: Optional[list] = None
+    lock_trailing_at_open: Optional[bool] = None
+    halve_stop_at_open: Optional[bool] = None
 
 
 class TradeRecord(BaseModel):
@@ -137,6 +142,7 @@ class SettingsUpdate(BaseModel):
     increment_step: Optional[float] = None
     decrement_step: Optional[float] = None
     account_balance: Optional[float] = None
+    market_hours_only: Optional[bool] = None
 
 
 class BetaRegistration(BaseModel):

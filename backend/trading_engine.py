@@ -13,6 +13,7 @@ class TradingEngine:
         self.running = False
         self.paused = False
         self.simulate_24_7 = False
+        self.market_hours_only = True
         self._prices: Dict[str, float] = {}
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
@@ -28,6 +29,7 @@ class TradingEngine:
                 "running": self.running,
                 "paused": self.paused,
                 "simulate_24_7": self.simulate_24_7,
+                "market_hours_only": self.market_hours_only,
             }}},
             upsert=True,
         )
@@ -39,7 +41,8 @@ class TradingEngine:
             self.running = v.get("running", False)
             self.paused = v.get("paused", False)
             self.simulate_24_7 = v.get("simulate_24_7", False)
-            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}")
+            self.market_hours_only = v.get("market_hours_only", True)
+            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}")
 
     async def manual_sell(self, symbol: str, order_type: str, limit_price: float = 0) -> dict:
         """Execute a manual sell from the Positions tab.
@@ -148,7 +151,7 @@ class TradingEngine:
         }
 
     def is_market_open(self) -> bool:
-        if self.simulate_24_7:
+        if self.simulate_24_7 and not self.market_hours_only:
             return True
         now = datetime.now(timezone(timedelta(hours=-5)))
         if now.weekday() >= 5:
@@ -159,6 +162,15 @@ class TradingEngine:
         if hour >= 16:
             return False
         return True
+
+    def _is_opening_window(self, minutes: int = 30) -> bool:
+        """Check if we're within the first N minutes after market open (9:30 AM EST)."""
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        if now.weekday() >= 5:
+            return False
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        return 0 <= elapsed <= minutes * 60
 
     # ------------------------------------------------------------------
     # evaluate_ticker — the heart of the trading logic
@@ -282,46 +294,51 @@ class TradingEngine:
                         return
 
             if trailing:
-                high = self._trailing_highs.get(sym, price)
-                if price > high:
-                    self._trailing_highs[sym] = price
-                    high = price
-                trail_stop = round(high * (1 - trail_pct / 100), 2) if trail_is_pct else round(high - trail_pct, 2)
-                should_trail = (trail_otype == "market") or (price <= trail_stop)
-                if should_trail:
-                    exec_price = price
-                    pnl = round((exec_price - entry) * pos["qty"], 2)
-                    order_label = "MKT" if trail_otype == "market" else "LMT"
-                    is_paper = self.simulate_24_7
-                    broker_results = []
-                    if not is_paper and broker_ids:
-                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                            broker_ids=broker_ids, allocations=broker_allocs,
-                            order_template={
-                                "symbol": sym, "side": "SELL", "order_type": "STOP",
-                                "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
-                            },
+                # TIME RULE: Lock trailing stop for first 30 min after market open
+                lock_trailing = ticker_doc.get("lock_trailing_at_open", False)
+                if lock_trailing and self._is_opening_window(30):
+                    pass  # Skip trailing stop evaluation during opening window
+                else:
+                    high = self._trailing_highs.get(sym, price)
+                    if price > high:
+                        self._trailing_highs[sym] = price
+                        high = price
+                    trail_stop = round(high * (1 - trail_pct / 100), 2) if trail_is_pct else round(high - trail_pct, 2)
+                    should_trail = (trail_otype == "market") or (price <= trail_stop)
+                    if should_trail:
+                        exec_price = price
+                        pnl = round((exec_price - entry) * pos["qty"], 2)
+                        order_label = "MKT" if trail_otype == "market" else "LMT"
+                        is_paper = self.simulate_24_7
+                        broker_results = []
+                        if not is_paper and broker_ids:
+                            broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                                broker_ids=broker_ids, allocations=broker_allocs,
+                                order_template={
+                                    "symbol": sym, "side": "SELL", "order_type": "STOP",
+                                    "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
+                                },
+                            )
+                        trade = TradeRecord(
+                            symbol=sym, side="TRAILING_STOP", price=exec_price,
+                            quantity=pos["qty"],
+                            reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})",
+                            pnl=pnl, order_type=trail_otype.upper(),
+                            rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
+                            entry_price=entry, target_price=trail_stop,
+                            total_value=round(exec_price * pos["qty"], 2),
+                            buy_power=effective_power, avg_price=avg,
+                            sell_target=sell_target, stop_target=stop_target,
+                            trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
+                            trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
+                            trading_mode="paper" if is_paper or not broker_ids else "live",
+                            broker_results=broker_results,
                         )
-                    trade = TradeRecord(
-                        symbol=sym, side="TRAILING_STOP", price=exec_price,
-                        quantity=pos["qty"],
-                        reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})",
-                        pnl=pnl, order_type=trail_otype.upper(),
-                        rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
-                        entry_price=entry, target_price=trail_stop,
-                        total_value=round(exec_price * pos["qty"], 2),
-                        buy_power=effective_power, avg_price=avg,
-                        sell_target=sell_target, stop_target=stop_target,
-                        trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
-                        trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
-                        trading_mode="paper" if is_paper or not broker_ids else "live",
-                        broker_results=broker_results,
-                    )
-                    await self._record_trade(trade)
-                    self._positions[sym] = {"qty": 0, "avg_entry": 0}
-                    self._trailing_highs.pop(sym, None)
-                    await self._update_profit(sym, pnl, compound)
-                    return
+                        await self._record_trade(trade)
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._trailing_highs.pop(sym, None)
+                        await self._update_profit(sym, pnl, compound)
+                        return
 
             should_sell = (sell_otype == "market") or (price >= sell_target)
             if should_sell:
@@ -357,7 +374,15 @@ class TradingEngine:
                 await self._update_profit(sym, pnl, compound)
 
             elif price <= stop_target or stop_otype == "market":
-                should_stop = (stop_otype == "market") or (price <= stop_target)
+                # TIME RULE: Halve stop loss (0.5x) during first 30 min after open
+                # This tightens the stop to prevent being dragged down by opening volatility
+                effective_stop = stop_target
+                halve_stop = ticker_doc.get("halve_stop_at_open", False)
+                if halve_stop and self._is_opening_window(30) and entry > 0:
+                    stop_distance = entry - stop_target
+                    effective_stop = round(entry - (stop_distance * 0.5), 2)
+
+                should_stop = (stop_otype == "market") or (price <= effective_stop)
                 if should_stop:
                     exec_price = price
                     pnl = round((exec_price - entry) * pos["qty"], 2)
@@ -369,12 +394,13 @@ class TradingEngine:
                             broker_ids=broker_ids, allocations=broker_allocs,
                             order_template={
                                 "symbol": sym, "side": "SELL", "order_type": "STOP",
-                                "price": exec_price, "quantity": pos["qty"], "stop_price": stop_target,
+                                "price": exec_price, "quantity": pos["qty"], "stop_price": effective_stop,
                             },
                         )
+                    stop_note = f" [0.5x halved from ${stop_target}]" if effective_stop != stop_target else ""
                     trade = TradeRecord(
                         symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
-                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${stop_target}'}",
+                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${effective_stop}'}{stop_note}",
                         pnl=pnl, order_type=stop_otype.upper(),
                         rule_mode="PERCENT" if is_stop_pct else "DOLLAR",
                         entry_price=entry, target_price=stop_target,

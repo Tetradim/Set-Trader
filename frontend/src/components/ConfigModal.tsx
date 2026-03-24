@@ -220,6 +220,37 @@ function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
 function RiskTab({ ticker, onChange, incStep, decStep }: TabProps) {
   return (
     <div className="space-y-5">
+      {/* Time-Based Risk Rules */}
+      <ConfigSection title="Opening Bell Protection" icon={Zap} color="text-purple-400">
+        <div className="col-span-2 space-y-3">
+          <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 border border-border/50">
+            <div>
+              <p className="text-xs font-medium text-foreground">Lock Trailing Stop at Open</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Disable trailing stop for the first 30 min after market open</p>
+            </div>
+            <Checkbox
+              data-testid={`lock-trailing-toggle-${ticker.symbol}`}
+              checked={ticker.lock_trailing_at_open ?? false}
+              onCheckedChange={(v) => onChange('lock_trailing_at_open', v)}
+            />
+          </div>
+          <div className="flex items-center justify-between p-2 rounded-lg bg-secondary/30 border border-border/50">
+            <div>
+              <p className="text-xs font-medium text-foreground">Halve Stop Loss at Open</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Cut stop-loss distance in half for the first 30 min (e.g., 3% → 1.5%)</p>
+            </div>
+            <Checkbox
+              data-testid={`halve-stop-toggle-${ticker.symbol}`}
+              checked={ticker.halve_stop_at_open ?? false}
+              onCheckedChange={(v) => onChange('halve_stop_at_open', v)}
+            />
+          </div>
+          <p className="text-[9px] text-muted-foreground/60">
+            These rules help manage risk during the volatile opening period (9:30–10:00 AM ET).
+          </p>
+        </div>
+      </ConfigSection>
+
       {/* Stop Loss */}
       <ConfigSection title="Stop Loss" icon={ShieldAlert} color="text-red-400">
         <OrderTypeToggle value={(ticker.stop_order_type ?? 'limit') as 'limit' | 'market'} onChange={(v) => onChange('stop_order_type', v)} testId={`modal-stop-ot-${ticker.symbol}`} />

@@ -74,6 +74,7 @@ async def price_broadcast_loop():
                     "running": deps.engine.running,
                     "market_open": deps.engine.is_market_open(),
                     "simulate_24_7": deps.engine.simulate_24_7,
+                    "market_hours_only": deps.engine.market_hours_only,
                 })
         except Exception as e:
             deps.logger.error(f"Price broadcast error: {e}")

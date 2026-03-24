@@ -18,6 +18,7 @@ async def health():
         "running": deps.engine.running,
         "paused": deps.engine.paused,
         "market_open": deps.engine.is_market_open(),
+        "market_hours_only": deps.engine.market_hours_only,
         "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
         "yfinance": deps.YF_AVAILABLE,
         "telegram": deps.telegram_service.running,
