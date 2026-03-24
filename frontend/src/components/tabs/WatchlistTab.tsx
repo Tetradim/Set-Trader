@@ -30,10 +30,15 @@ export function WatchlistTab() {
   const setLiveDuringMarketHours = useStore((s) => s.setLiveDuringMarketHours);
   const setPaperAfterHours = useStore((s) => s.setPaperAfterHours);
   const chartEnabled = useStore((s) => s.chartEnabled);
+  const profits = useStore((s) => s.profits);
   const [configSymbol, setConfigSymbol] = useState<string | null>(null);
 
-  // Sort tickers by sort_order
-  const sorted = [...tickers].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  // Sort tickers by Net P&L (descending - best winners first)
+  const sorted = [...tickers].sort((a, b) => {
+    const pnlA = profits[a.symbol] ?? 0;
+    const pnlB = profits[b.symbol] ?? 0;
+    return pnlB - pnlA; // Descending order
+  });
   const activeTickers = sorted.filter((t) => t.enabled);
   const inactiveTickers = sorted.filter((t) => !t.enabled);
 
