@@ -18,6 +18,7 @@ class TradingEngine:
         self.live_during_market_hours = False
         self.paper_after_hours = False
         self._last_mode_check: datetime = None
+        self._last_market_state: bool = None  # Track market open/close transitions
         
         self._prices: Dict[str, float] = {}
         self._positions: Dict[str, dict] = {}
@@ -57,25 +58,33 @@ class TradingEngine:
             deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
 
     def check_auto_mode_switch(self) -> bool:
-        """Check and apply auto mode switching based on market hours. Returns True if mode changed."""
+        """Check and apply auto mode switching based on market hours. 
+        Only switches on market open/close TRANSITIONS, not continuously.
+        Returns True if mode changed."""
         if not self.live_during_market_hours and not self.paper_after_hours:
             return False
         
         market_open = self._is_actual_market_hours()
+        
+        # Only switch on transition (market state changed)
+        if self._last_market_state is not None and market_open == self._last_market_state:
+            return False  # No transition, don't override
+        
+        self._last_market_state = market_open
         mode_changed = False
         
         if market_open and self.live_during_market_hours:
-            # Market is open and user wants live trading during market hours
+            # Market just opened and user wants live trading during market hours
             if self.simulate_24_7:
                 self.simulate_24_7 = False
                 mode_changed = True
-                deps.logger.info("AUTO MODE: Switched to LIVE trading (market hours)")
+                deps.logger.info("AUTO MODE: Switched to LIVE trading (market opened)")
         elif not market_open and self.paper_after_hours:
-            # Market is closed and user wants paper trading after hours
+            # Market just closed and user wants paper trading after hours
             if not self.simulate_24_7:
                 self.simulate_24_7 = True
                 mode_changed = True
-                deps.logger.info("AUTO MODE: Switched to PAPER trading (after hours)")
+                deps.logger.info("AUTO MODE: Switched to PAPER trading (market closed)")
         
         return mode_changed
 
@@ -198,8 +207,13 @@ class TradingEngine:
         }
 
     def is_market_open(self) -> bool:
-        if self.simulate_24_7 and not self.market_hours_only:
+        # In paper mode, always allow trading (24/7 simulation)
+        if self.simulate_24_7:
             return True
+        # In live mode, respect market_hours_only setting
+        if not self.market_hours_only:
+            return True
+        # Check actual market hours (9:30 AM - 4:00 PM ET, weekdays)
         now = datetime.now(timezone(timedelta(hours=-5)))
         if now.weekday() >= 5:
             return False
@@ -782,6 +796,20 @@ class TradingEngine:
             # If all sell legs filled and no position remains, clear
             if pos.get("qty", 0) <= 0.0001:
                 self._positions[sym] = {"qty": 0, "avg_entry": 0}
+
+        # --- AUTO REBRACKET for partial fills ---
+        # Rebracket should still work when no position is held
+        rebracket_on = ticker_doc.get("auto_rebracket", False)
+        if rebracket_on and pos.get("qty", 0) == 0:
+            # Need to compute buy_target for rebracket check
+            avg = ticker_doc.get("avg_price", price)
+            buy_off = ticker_doc.get("buy_offset", -3.0)
+            is_buy_pct = ticker_doc.get("buy_percent", True)
+            sell_off = ticker_doc.get("sell_offset", 2.0)
+            is_sell_pct = ticker_doc.get("sell_percent", True)
+            buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
+            sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
+            await self._auto_rebracket(sym, ticker_doc, price, buy_target, sell_target)
 
     # ------------------------------------------------------------------
     async def _record_trade(self, trade: TradeRecord):

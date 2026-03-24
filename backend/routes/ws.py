@@ -48,6 +48,8 @@ async def ws_endpoint(websocket: WebSocket):
             "market_open": deps.engine.is_market_open(),
             "simulate_24_7": deps.engine.simulate_24_7,
             "market_hours_only": deps.engine.market_hours_only,
+            "live_during_market_hours": deps.engine.live_during_market_hours,
+            "paper_after_hours": deps.engine.paper_after_hours,
         })
 
         while True:

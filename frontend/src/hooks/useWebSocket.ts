@@ -43,6 +43,8 @@ export function useWebSocket() {
             store.setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
           }
           if (data.simulate_24_7 !== undefined) store.setSimulate247(data.simulate_24_7);
+          if (data.live_during_market_hours !== undefined) store.setLiveDuringMarketHours(data.live_during_market_hours);
+          if (data.paper_after_hours !== undefined) store.setPaperAfterHours(data.paper_after_hours);
           store.setPaused(data.paused ?? false);
           store.setRunning(data.running ?? false);
           store.setMarketOpen(data.market_open ?? false);
