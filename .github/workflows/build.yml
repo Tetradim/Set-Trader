@@ -9,7 +9,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -30,7 +30,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -46,6 +46,25 @@ jobs:
         run: |
           if (Test-Path backend\static) { Remove-Item -Recurse -Force backend\static }
           Copy-Item -Recurse frontend\dist backend\static
+        shell: pwsh
+
+      - name: Create app icon
+        run: |
+          python -c "
+          from PIL import Image, ImageDraw
+          # Create a simple icon - purple/blue gradient circle with 'SP' text
+          sizes = [16, 32, 48, 64, 128, 256]
+          images = []
+          for size in sizes:
+              img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+              draw = ImageDraw.Draw(img)
+              # Purple gradient circle
+              draw.ellipse([0, 0, size-1, size-1], fill=(139, 92, 246, 255))
+              draw.ellipse([2, 2, size-3, size-3], fill=(124, 58, 237, 255))
+              images.append(img)
+          images[0].save('app.ico', format='ICO', sizes=[(s, s) for s in sizes])
+          "
+          Copy-Item app.ico backend\app.ico
         shell: pwsh
 
       - name: Create default .env
@@ -65,7 +84,7 @@ jobs:
             --name "SentinelPulse" `
             --onedir `
             --console `
-            --icon "../frontend/public/favicon.ico" `
+            --icon "app.ico" `
             --add-data "static;static" `
             --add-data ".env;." `
             --hidden-import "uvicorn.logging" `
@@ -99,6 +118,19 @@ jobs:
             server.py
         shell: pwsh
 
+      - name: Download MongoDB
+        run: |
+          # Download MongoDB Community Server 7.0 (portable zip)
+          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14-signed.msi"
+          Invoke-WebRequest -Uri $mongoUrl -OutFile mongodb.msi
+          # Extract MSI to folder
+          msiexec /a mongodb.msi /qn TARGETDIR="$PWD\mongodb_extracted"
+          # Copy just the bin folder (mongod.exe)
+          New-Item -ItemType Directory -Force -Path "mongodb"
+          Copy-Item "mongodb_extracted\MongoDB\Server\7.0\bin\mongod.exe" "mongodb\"
+          Copy-Item "mongodb_extracted\MongoDB\Server\7.0\bin\mongo*.dll" "mongodb\" -ErrorAction SilentlyContinue
+        shell: pwsh
+
       - name: Install Inno Setup
         run: choco install innosetup -y
 
@@ -116,32 +148,59 @@ jobs:
           Compression=lzma2
           SolidCompression=yes
           PrivilegesRequired=admin
-          SetupIconFile=backend\dist\SentinelPulse\static\favicon.ico
-          UninstallDisplayIcon={app}\SentinelPulse.exe
           WizardStyle=modern
+          DisableProgramGroupPage=yes
 
           [Files]
+          ; Main application
           Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+          ; MongoDB
+          Source: "mongodb\*"; DestDir: "{app}\mongodb"; Flags: ignoreversion
+
+          [Dirs]
+          Name: "{app}\data"; Permissions: users-full
 
           [Icons]
           Name: "{group}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"
           Name: "{group}\Uninstall Sentinel Pulse"; Filename: "{uninstallexe}"
-          Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+          Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
 
           [Tasks]
           Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
 
           [Run]
-          Filename: "{app}\SentinelPulse.exe"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent
-          "@ | Out-File -Encoding UTF8 setup.iss
-        shell: pwsh
+          Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent shellexec
 
-      - name: Check for favicon
-        run: |
-          if (-not (Test-Path "backend\dist\SentinelPulse\static\favicon.ico")) {
-            # Create a simple icon if missing
-            Copy-Item "frontend\public\vite.svg" "backend\dist\SentinelPulse\static\favicon.ico" -ErrorAction SilentlyContinue
-          }
+          [Code]
+          procedure CurStepChanged(CurStep: TSetupStep);
+          var
+            BatchFile: String;
+          begin
+            if CurStep = ssPostInstall then
+            begin
+              BatchFile := ExpandConstant('{app}\Start Sentinel Pulse.bat');
+              SaveStringToFile(BatchFile,
+                '@echo off' + #13#10 +
+                'title Sentinel Pulse' + #13#10 +
+                'echo.' + #13#10 +
+                'echo  ==========================================' + #13#10 +
+                'echo    Sentinel Pulse - Trading Bot' + #13#10 +
+                'echo  ==========================================' + #13#10 +
+                'echo.' + #13#10 +
+                'echo  Starting MongoDB...' + #13#10 +
+                'if not exist "%~dp0data" mkdir "%~dp0data"' + #13#10 +
+                'start /min "" "%~dp0mongodb\mongod.exe" --dbpath "%~dp0data" --port 27017' + #13#10 +
+                'timeout /t 3 /nobreak > nul' + #13#10 +
+                'echo  Starting Sentinel Pulse...' + #13#10 +
+                'echo  Browser will open at http://localhost:8001' + #13#10 +
+                'echo.' + #13#10 +
+                'start http://localhost:8001' + #13#10 +
+                'cd /d "%~dp0"' + #13#10 +
+                'SentinelPulse.exe' + #13#10,
+                False);
+            end;
+          end;
+          "@ | Out-File -Encoding UTF8 setup.iss
         shell: pwsh
 
       - name: Build installer with Inno Setup
@@ -167,15 +226,21 @@ jobs:
             
             ### Installation
             1. Download `SentinelPulse-Setup.exe`
-            2. Run the installer
+            2. Run the installer (may need to click "More info" → "Run anyway")
             3. Follow the installation wizard
-            4. Launch from Desktop shortcut or Start Menu
+            4. Launch from Desktop shortcut
+            
+            ### What's Included
+            - Sentinel Pulse trading bot
+            - MongoDB database (bundled, no separate install needed)
+            - Auto-starts MongoDB when you launch the app
             
             ### Requirements
             - Windows 10/11 (64-bit)
-            - MongoDB running locally OR MongoDB Atlas connection
             - Internet connection for live price data
             
             ### First Run
-            The app opens a terminal window and your browser to http://localhost:8001
-            Configure your MongoDB connection in Settings if using Atlas.
+            Click the desktop shortcut. A terminal window opens showing:
+            1. MongoDB starting
+            2. Sentinel Pulse starting
+            3. Browser opens to http://localhost:8001
