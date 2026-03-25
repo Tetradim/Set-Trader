@@ -140,7 +140,7 @@ jobs:
 
       - name: Create Inno Setup script
         run: |
-          @"
+          $script = @'
           [Setup]
           AppName=Sentinel Pulse
           AppVersion=1.0.0
@@ -156,55 +156,46 @@ jobs:
           DisableProgramGroupPage=yes
 
           [Files]
-          ; Main application
           Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-          ; MongoDB
           Source: "mongodb\*"; DestDir: "{app}\mongodb"; Flags: ignoreversion
 
           [Dirs]
           Name: "{app}\data"; Permissions: users-full
 
           [Icons]
-          Name: "{group}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"
+          Name: "{group}\Sentinel Pulse"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"
           Name: "{group}\Uninstall Sentinel Pulse"; Filename: "{uninstallexe}"
           Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
 
           [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
           [Run]
           Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent shellexec
-
-          [Code]
-          procedure CurStepChanged(CurStep: TSetupStep);
-          var
-            BatchFile: String;
-          begin
-            if CurStep = ssPostInstall then
-            begin
-              BatchFile := ExpandConstant('{app}\Start Sentinel Pulse.bat');
-              SaveStringToFile(BatchFile,
-                '@echo off' + #13#10 +
-                'title Sentinel Pulse' + #13#10 +
-                'echo.' + #13#10 +
-                'echo  ==========================================' + #13#10 +
-                'echo    Sentinel Pulse - Trading Bot' + #13#10 +
-                'echo  ==========================================' + #13#10 +
-                'echo.' + #13#10 +
-                'echo  Starting MongoDB...' + #13#10 +
-                'if not exist "%~dp0data" mkdir "%~dp0data"' + #13#10 +
-                'start /min "" "%~dp0mongodb\mongod.exe" --dbpath "%~dp0data" --port 27017' + #13#10 +
-                'timeout /t 3 /nobreak > nul' + #13#10 +
-                'echo  Starting Sentinel Pulse...' + #13#10 +
-                'echo  Browser will open at http://localhost:8001' + #13#10 +
-                'echo.' + #13#10 +
-                'start http://localhost:8001' + #13#10 +
-                'cd /d "%~dp0"' + #13#10 +
-                'SentinelPulse.exe' + #13#10,
-                False);
-            end;
-          end;
-          "@ | Out-File -Encoding UTF8 setup.iss
+          '@
+          $script | Out-File -FilePath setup.iss -Encoding ASCII
+          
+          # Create the batch file separately
+          $batch = @'
+          @echo off
+          title Sentinel Pulse
+          echo.
+          echo  ==========================================
+          echo    Sentinel Pulse - Trading Bot
+          echo  ==========================================
+          echo.
+          echo  Starting MongoDB...
+          if not exist "%~dp0data" mkdir "%~dp0data"
+          start /min "" "%~dp0mongodb\mongod.exe" --dbpath "%~dp0data" --port 27017
+          timeout /t 3 /nobreak > nul
+          echo  Starting Sentinel Pulse...
+          echo  Browser will open at http://localhost:8001
+          echo.
+          start http://localhost:8001
+          cd /d "%~dp0"
+          SentinelPulse.exe
+          '@
+          $batch | Out-File -FilePath "backend\dist\SentinelPulse\Start Sentinel Pulse.bat" -Encoding ASCII
         shell: pwsh
 
       - name: Build installer with Inno Setup
