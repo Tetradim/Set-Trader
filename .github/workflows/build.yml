@@ -2,11 +2,6 @@ name: Build Sentinel Pulse
 
 on:
   workflow_dispatch:
-    inputs:
-      mongo_uri:
-        description: 'MongoDB URI (leave empty for localhost)'
-        required: false
-        default: ''
   push:
     tags:
       - 'v*'
@@ -14,7 +9,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -53,13 +48,11 @@ jobs:
           Copy-Item -Recurse frontend\dist backend\static
         shell: pwsh
 
-      - name: Create .env file
+      - name: Create default .env
         working-directory: backend
         run: |
-          $mongo = "${{ github.event.inputs.mongo_uri }}"
-          if ([string]::IsNullOrEmpty($mongo)) { $mongo = "mongodb://localhost:27017" }
           @"
-          MONGO_URL=$mongo
+          MONGO_URL=mongodb://localhost:27017
           DB_NAME=sentinelpulse
           CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
           "@ | Out-File -Encoding UTF8 .env
@@ -71,7 +64,8 @@ jobs:
           pyinstaller `
             --name "SentinelPulse" `
             --onedir `
-            --noconsole `
+            --console `
+            --icon "../frontend/public/favicon.ico" `
             --add-data "static;static" `
             --add-data ".env;." `
             --hidden-import "uvicorn.logging" `
@@ -95,90 +89,93 @@ jobs:
             --hidden-import "opentelemetry.trace" `
             --hidden-import "opentelemetry.sdk" `
             --hidden-import "opentelemetry.sdk.trace" `
+            --hidden-import "email.mime.text" `
+            --hidden-import "email.mime.multipart" `
             --collect-all "yfinance" `
             --collect-all "certifi" `
+            --collect-all "motor" `
+            --collect-all "pymongo" `
             --noconfirm `
             server.py
         shell: pwsh
 
-      - name: Create launcher batch file
-        working-directory: backend/dist
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Create Inno Setup script
         run: |
           @"
-          @echo off
-          title Sentinel Pulse
-          echo.
-          echo  ==========================================
-          echo    Sentinel Pulse - Trading Bot
-          echo  ==========================================
-          echo.
-          echo  Starting server...
-          echo  Browser will open at http://localhost:8001
-          echo.
-          echo  Press Ctrl+C to stop.
-          echo.
-          timeout /t 2 /nobreak > nul
-          start http://localhost:8001
-          cd /d "%~dp0SentinelPulse"
-          SentinelPulse.exe
-          "@ | Out-File -Encoding ASCII "Start Sentinel Pulse.bat"
+          [Setup]
+          AppName=Sentinel Pulse
+          AppVersion=1.0.0
+          AppPublisher=Signal Forge Laboratory
+          DefaultDirName={autopf}\SentinelPulse
+          DefaultGroupName=Sentinel Pulse
+          OutputDir=.
+          OutputBaseFilename=SentinelPulse-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          PrivilegesRequired=admin
+          SetupIconFile=backend\dist\SentinelPulse\static\favicon.ico
+          UninstallDisplayIcon={app}\SentinelPulse.exe
+          WizardStyle=modern
+
+          [Files]
+          Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+
+          [Icons]
+          Name: "{group}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"
+          Name: "{group}\Uninstall Sentinel Pulse"; Filename: "{uninstallexe}"
+          Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
+
+          [Run]
+          Filename: "{app}\SentinelPulse.exe"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent
+          "@ | Out-File -Encoding UTF8 setup.iss
         shell: pwsh
 
-      - name: Create README
-        working-directory: backend/dist
+      - name: Check for favicon
         run: |
-          @"
-          # Sentinel Pulse - Windows Release
-
-          ## Quick Start
-          1. Install MongoDB Community Edition OR use MongoDB Atlas
-          2. Double-click "Start Sentinel Pulse.bat"
-          3. Browser opens to http://localhost:8001
-
-          ## Configuration
-          Edit SentinelPulse\.env to change:
-          - MONGO_URL - Your MongoDB connection string
-          - DB_NAME - Database name (default: sentinelpulse)
-
-          ## MongoDB Atlas (Cloud)
-          1. Create a free cluster at https://cloud.mongodb.com
-          2. Get your connection string
-          3. Edit SentinelPulse\.env:
-             MONGO_URL=mongodb+srv://user:password@cluster.mongodb.net
-
-          ## Troubleshooting
-          - Make sure MongoDB is running
-          - Check port 8001 is available
-          - Logs appear in the terminal window
-          "@ | Out-File -Encoding UTF8 "README.txt"
+          if (-not (Test-Path "backend\dist\SentinelPulse\static\favicon.ico")) {
+            # Create a simple icon if missing
+            Copy-Item "frontend\public\vite.svg" "backend\dist\SentinelPulse\static\favicon.ico" -ErrorAction SilentlyContinue
+          }
         shell: pwsh
 
-      - name: Create zip package
-        run: Compress-Archive -Path backend\dist\* -DestinationPath SentinelPulse-Windows.zip
+      - name: Build installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
         shell: pwsh
 
-      - name: Upload artifact
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: SentinelPulse-Windows
-          path: SentinelPulse-Windows.zip
+          name: SentinelPulse-Installer
+          path: SentinelPulse-Setup.exe
           retention-days: 90
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: SentinelPulse-Windows.zip
+          files: SentinelPulse-Setup.exe
           generate_release_notes: true
           body: |
-            ## Sentinel Pulse - Windows Release
+            ## Sentinel Pulse - Windows Installer
             
             ### Installation
-            1. Download `SentinelPulse-Windows.zip`
-            2. Extract to any folder
-            3. Run `Start Sentinel Pulse.bat`
+            1. Download `SentinelPulse-Setup.exe`
+            2. Run the installer
+            3. Follow the installation wizard
+            4. Launch from Desktop shortcut or Start Menu
             
             ### Requirements
             - Windows 10/11 (64-bit)
-            - MongoDB (local or Atlas cloud)
-            - Internet connection for price data
+            - MongoDB running locally OR MongoDB Atlas connection
+            - Internet connection for live price data
+            
+            ### First Run
+            The app opens a terminal window and your browser to http://localhost:8001
+            Configure your MongoDB connection in Settings if using Atlas.
