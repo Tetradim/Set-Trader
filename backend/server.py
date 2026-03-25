@@ -12,6 +12,9 @@ This is the slim orchestrator that wires together all modules:
 """
 import asyncio
 import os
+import sys
+import webbrowser
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -209,3 +212,26 @@ if _static_dir.is_dir():
         if file.is_file():
             return FileResponse(file)
         return FileResponse(_static_dir / "index.html")
+
+
+# --- Run as standalone executable ---
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Open browser after a short delay
+    def open_browser():
+        import time
+        time.sleep(2)
+        webbrowser.open("http://localhost:8001")
+    
+    # Check if running as frozen executable (PyInstaller)
+    if getattr(sys, 'frozen', False):
+        threading.Thread(target=open_browser, daemon=True).start()
+        print("\n" + "="*50)
+        print("  Sentinel Pulse - Trading Bot")
+        print("="*50)
+        print(f"\n  Server starting on http://localhost:8001")
+        print("  Browser will open automatically...")
+        print("\n  Press Ctrl+C to stop the server.\n")
+    
+    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")

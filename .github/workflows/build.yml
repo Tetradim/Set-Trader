@@ -186,25 +186,33 @@ jobs:
           '@
           $script | Out-File -FilePath setup.iss -Encoding ASCII
           
-          # Create the batch file separately
+          # Create the batch file
           $batch = @'
           @echo off
           title Sentinel Pulse
-          echo.
-          echo  ==========================================
-          echo    Sentinel Pulse - Trading Bot
-          echo  ==========================================
-          echo.
-          echo  Starting MongoDB...
-          if not exist "%~dp0data" mkdir "%~dp0data"
-          start /min "" "%~dp0mongodb\mongod.exe" --dbpath "%~dp0data" --port 27017
-          timeout /t 3 /nobreak > nul
-          echo  Starting Sentinel Pulse...
-          echo  Browser will open at http://localhost:8001
-          echo.
-          start http://localhost:8001
           cd /d "%~dp0"
+          echo.
+          echo  ==================================================
+          echo    Sentinel Pulse - Trading Bot
+          echo  ==================================================
+          echo.
+          echo  [1/2] Starting MongoDB database...
+          if not exist "data" mkdir "data"
+          start "" /min "mongodb\mongod.exe" --dbpath "data" --port 27017
+          echo        MongoDB started on port 27017
+          echo.
+          echo  [2/2] Starting Sentinel Pulse server...
+          timeout /t 3 /nobreak > nul
+          echo        Browser will open automatically...
+          echo.
+          echo  --------------------------------------------------
+          echo  Press Ctrl+C to stop the server when done.
+          echo  --------------------------------------------------
+          echo.
           SentinelPulse.exe
+          echo.
+          echo  Server stopped.
+          pause
           '@
           $batch | Out-File -FilePath "backend\dist\SentinelPulse\Start Sentinel Pulse.bat" -Encoding ASCII
         shell: pwsh
