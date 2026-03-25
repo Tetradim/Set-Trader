@@ -135,6 +135,15 @@ jobs:
           dir mongodb
         shell: pwsh
 
+      - name: Download VC++ Redistributable
+        run: |
+          # Download Visual C++ Redistributable 2015-2022 (required for Python/PyInstaller apps)
+          $vcUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+          Write-Host "Downloading VC++ Redistributable..."
+          Invoke-WebRequest -Uri $vcUrl -OutFile vc_redist.x64.exe
+          Write-Host "VC++ Redistributable downloaded"
+        shell: pwsh
+
       - name: Install Inno Setup
         run: choco install innosetup -y
 
@@ -158,6 +167,7 @@ jobs:
           [Files]
           Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
           Source: "mongodb\*"; DestDir: "{app}\mongodb"; Flags: ignoreversion
+          Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
           [Dirs]
           Name: "{app}\data"; Permissions: users-full
@@ -171,6 +181,7 @@ jobs:
           Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
           [Run]
+          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated
           Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent shellexec
           '@
           $script | Out-File -FilePath setup.iss -Encoding ASCII
