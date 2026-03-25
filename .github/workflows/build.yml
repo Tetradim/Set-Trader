@@ -120,15 +120,19 @@ jobs:
 
       - name: Download MongoDB
         run: |
-          # Download MongoDB Community Server 7.0 (portable zip)
-          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14-signed.msi"
-          Invoke-WebRequest -Uri $mongoUrl -OutFile mongodb.msi
-          # Extract MSI to folder
-          msiexec /a mongodb.msi /qn TARGETDIR="$PWD\mongodb_extracted"
-          # Copy just the bin folder (mongod.exe)
+          # Download MongoDB Community Server 7.0 (zip version - easier to extract)
+          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip"
+          Write-Host "Downloading MongoDB..."
+          Invoke-WebRequest -Uri $mongoUrl -OutFile mongodb.zip
+          Write-Host "Extracting MongoDB..."
+          Expand-Archive -Path mongodb.zip -DestinationPath mongodb_temp -Force
+          # Find and copy mongod.exe
           New-Item -ItemType Directory -Force -Path "mongodb"
-          Copy-Item "mongodb_extracted\MongoDB\Server\7.0\bin\mongod.exe" "mongodb\"
-          Copy-Item "mongodb_extracted\MongoDB\Server\7.0\bin\mongo*.dll" "mongodb\" -ErrorAction SilentlyContinue
+          $mongodPath = Get-ChildItem -Path "mongodb_temp" -Recurse -Filter "mongod.exe" | Select-Object -First 1
+          Write-Host "Found mongod at: $($mongodPath.FullName)"
+          Copy-Item $mongodPath.FullName "mongodb\"
+          Write-Host "MongoDB ready"
+          dir mongodb
         shell: pwsh
 
       - name: Install Inno Setup
