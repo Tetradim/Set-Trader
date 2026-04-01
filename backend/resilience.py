@@ -195,10 +195,18 @@ class BrokerResilience:
         self._create_limiter(broker_id)
     
     def _create_limiter(self, broker_id: str):
-        """Create or recreate the rate limiter for a broker."""
+        """Create or recreate the rate limiter for a broker.
+        
+        AsyncLimiter(max_rate, time_period) fills at max_rate/time_period tokens per second
+        and allows up to max_rate tokens in a burst.  To get:
+          - sustained throughput: cfg.max_rps tokens/second
+          - burst capacity: cfg.burst tokens
+        set time_period = burst / max_rps so the bucket holds exactly burst tokens.
+        """
         cfg = self._configs.get(broker_id, BrokerResilienceConfig())
-        # AsyncLimiter(max_rate, time_period) - e.g., 10 requests per 1 second
-        self._limiters[broker_id] = AsyncLimiter(cfg.max_rps, 1.0)
+        # Guard against division by zero
+        time_period = max(cfg.burst / cfg.max_rps, 0.001)
+        self._limiters[broker_id] = AsyncLimiter(cfg.burst, time_period)
     
     def _get_circuit(self, broker_id: str) -> CircuitBreakerState:
         """Get or create circuit breaker state."""
