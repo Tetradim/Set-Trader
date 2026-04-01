@@ -13,6 +13,8 @@ import { TradeLogSidebar } from './TradeLogSidebar';
 import { CommandPalette } from './CommandPalette';
 import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
+import { useEffect } from 'react';
+import { apiFetch } from '@/lib/api';
 
 const TABS = [
   { id: 'watchlist', label: 'Watchlist', icon: LayoutDashboard },
@@ -28,6 +30,24 @@ const TABS = [
 export function Dashboard() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
+  const setFxRates = useStore((s) => s.setFxRates);
+  const setCurrencyDisplay = useStore((s) => s.setCurrencyDisplay);
+
+  // Pre-load FX rates and currency preference on app start so TickerCards
+  // can convert prices immediately without requiring a visit to the Foreign tab.
+  useEffect(() => {
+    apiFetch('/api/fx-rates')
+      .then((d) => setFxRates(d.rates))
+      .catch(() => {});
+    apiFetch('/api/settings/currency-display')
+      .then((d) => setCurrencyDisplay(d.mode))
+      .catch(() => {});
+    // Refresh FX every 5 minutes
+    const timer = setInterval(() => {
+      apiFetch('/api/fx-rates').then((d) => setFxRates(d.rates)).catch(() => {});
+    }, 5 * 60_000);
+    return () => clearInterval(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen flex flex-col" data-testid="dashboard-container">

@@ -22,6 +22,7 @@ import {
 } from 'recharts';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { getMarketMeta, formatPrice, formatPriceSecondary } from '@/lib/market-utils';
 
 interface Props {
   ticker: TickerConfig;
@@ -48,9 +49,21 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const chartEnabled = useStore((s) => s.chartEnabled[ticker.symbol] ?? false);
   const toggleChart = useStore((s) => s.toggleChart);
   const priceHistory = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
+  const currencyDisplay = useStore((s) => s.currencyDisplay);
+  const fxRates = useStore((s) => s.fxRates);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP, setConfirmTP] = useState(false);
   const [brokers, setBrokers] = useState<BrokerOption[]>([]);
+
+  useEffect(() => {
+    fetchBrokers().then(setBrokers);
+  }, []);
+
+  // Market / currency helpers
+  const marketMeta = getMarketMeta(ticker);
+  const isNonUS = marketMeta.currency !== 'USD';
+  const primaryPrice   = formatPrice(price, ticker, currencyDisplay, fxRates);
+  const secondaryPrice = formatPriceSecondary(price, ticker, currencyDisplay, fxRates);
 
   useEffect(() => {
     fetchBrokers().then(setBrokers);
@@ -177,7 +190,14 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
             />
             <h3 className={`text-lg font-bold tracking-tight ${
               ticker.auto_stopped ? 'text-red-500 animate-pulse' : 'text-foreground'
-            }`}>{ticker.symbol}</h3>
+            }`}>
+              {isNonUS && (
+                <span className="mr-1 text-base" title={`${marketMeta.currency} market`}>
+                  {marketMeta.flag}
+                </span>
+              )}
+              {ticker.symbol}
+            </h3>
             {ticker.auto_stopped && (
               <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-red-500/20 text-red-500 border border-red-500/40 tracking-wider" data-testid={`auto-stopped-badge-${ticker.symbol}`}>
                 AUTO-STOPPED
@@ -207,31 +227,39 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
         <div className="grid grid-cols-2 gap-4 mb-3">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Price</p>
-            <p className="font-mono text-xl font-bold tracking-tight text-foreground">${price.toFixed(2)}</p>
+            <p className="font-mono text-xl font-bold tracking-tight text-foreground" data-testid={`price-${ticker.symbol}`}>{primaryPrice}</p>
+            {secondaryPrice && (
+              <p className="font-mono text-[10px] text-muted-foreground/60 mt-0.5" data-testid={`price-secondary-${ticker.symbol}`}>{secondaryPrice}</p>
+            )}
           </div>
           <div className="text-right">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Net P&L</p>
             <p className={`font-mono text-xl font-bold tracking-tight ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-              {isPositive ? '+' : ''}${pnl.toFixed(2)}
+              {pnl >= 0 ? '+' : '-'}{formatPrice(Math.abs(pnl), ticker, currencyDisplay, fxRates)}
             </p>
+            {isNonUS && (
+              <p className="font-mono text-[10px] text-muted-foreground/60 mt-0.5">
+                {pnl >= 0 ? '+' : '-'}{formatPriceSecondary(Math.abs(pnl), ticker, currencyDisplay, fxRates)}
+              </p>
+            )}
           </div>
         </div>
 
         {/* Quick stats */}
         <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
           <span className="flex items-center gap-1">
-            <TrendingDown size={10} className="text-emerald-400" /> Buy: ${buyTarget}
+            <TrendingDown size={10} className="text-emerald-400" /> Buy: {formatPrice(parseFloat(buyTarget), ticker, currencyDisplay, fxRates)}
           </span>
           <span className="flex items-center gap-1">
-            <TrendingUp size={10} className="text-blue-400" /> Sell: ${sellTarget}
+            <TrendingUp size={10} className="text-blue-400" /> Sell: {formatPrice(parseFloat(sellTarget), ticker, currencyDisplay, fxRates)}
           </span>
           <span className="flex items-center gap-1">
-            <Zap size={10} className="text-primary" /> ${ticker.base_power.toFixed(0)}
+            <Zap size={10} className="text-primary" /> {formatPrice(ticker.base_power, ticker, currencyDisplay, fxRates, 0)}
             {Object.keys(ticker.broker_allocations || {}).length > 1 && (
               <span className="text-muted-foreground/50">
                 ({Object.entries(ticker.broker_allocations || {}).map(([bid, amt]) => {
                   const b = selectedBrokers.find(br => br.id === bid);
-                  return b ? `${b.name.split('(')[0].split(' ')[0]}:$${(amt as number).toFixed(0)}` : null;
+                  return b ? `${b.name.split('(')[0].split(' ')[0]}:${marketMeta.currencySymbol}${(amt as number).toFixed(0)}` : null;
                 }).filter(Boolean).join(' + ')})
               </span>
             )}
@@ -282,9 +310,9 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
             <span className="text-muted-foreground">Holding: </span>
             <span className="text-foreground font-bold">{position.quantity.toFixed(4)}</span>
             <span className="text-muted-foreground"> @ </span>
-            <span className="text-foreground">${position.avg_entry.toFixed(2)}</span>
+            <span className="text-foreground">{formatPrice(position.avg_entry, ticker, currencyDisplay, fxRates)}</span>
             <span className={`ml-2 font-bold ${position.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {position.unrealized_pnl >= 0 ? '+' : ''}${position.unrealized_pnl.toFixed(2)}
+              {position.unrealized_pnl >= 0 ? '+' : '-'}{formatPrice(Math.abs(position.unrealized_pnl), ticker, currencyDisplay, fxRates)}
             </span>
           </div>
         )}

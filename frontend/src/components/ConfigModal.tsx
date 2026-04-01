@@ -4,6 +4,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getMarketMeta } from '@/lib/market-utils';
 
 /* Re-use the sub-components from TickerCard */
 import {
@@ -174,9 +175,23 @@ interface TabProps {
 function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
   const accountBalance = useStore((s) => s.accountBalance);
   const tickers = useStore((s) => s.tickers);
+  const fxRates = useStore((s) => s.fxRates);
   const totalAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
   const otherAllocated = totalAllocated - (ticker.base_power ?? 0);
   const availableForThis = accountBalance - otherAllocated;
+
+  const marketMeta = getMarketMeta(ticker);
+  const isNonUS = marketMeta.currency !== 'USD';
+  const fxRate = fxRates[marketMeta.currency] ?? null;
+
+  // USD equivalent of base_power (for informational display)
+  const usdEquiv = isNonUS && fxRate ? ticker.base_power * fxRate : null;
+  // Native equivalent when account balance is in USD
+  const nativeEquiv = isNonUS && fxRate ? accountBalance / fxRate : null;
+
+  const buyPowerLabel = isNonUS
+    ? `Buy Power (${marketMeta.currencySymbol})`
+    : 'Buy Power ($)';
 
   return (
     <div className="space-y-5">
@@ -192,8 +207,14 @@ function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
         <OffsetInput label={ticker.buy_percent ? 'Buy Offset (%)' : 'Buy Price ($)'} value={ticker.buy_offset} isPercent={ticker.buy_percent} mode="buy" onChange={(v) => onChange('buy_offset', v)} incrementStep={incStep} decrementStep={decStep} />
         <ConfigToggle label="Use %" checked={ticker.buy_percent} onChange={(v) => onChange('buy_percent', v)} />
         <div>
-          <SteppedInput label="Buy Power ($)" value={ticker.base_power} onChange={(v) => onChange('base_power', v)} min={1} incrementStep={incStep} decrementStep={decStep} />
-          {accountBalance > 0 && (
+          <SteppedInput label={buyPowerLabel} value={ticker.base_power} onChange={(v) => onChange('base_power', v)} min={1} incrementStep={incStep} decrementStep={decStep} />
+          {/* Currency-aware buy power context */}
+          {isNonUS && usdEquiv !== null && (
+            <p className="text-[9px] mt-0.5 font-mono text-primary/70">
+              ≈ ${usdEquiv.toFixed(2)} USD at {fxRate!.toFixed(4)} {marketMeta.currency}/USD
+            </p>
+          )}
+          {!isNonUS && accountBalance > 0 && (
             <p className={`text-[9px] mt-0.5 font-mono ${
               ticker.base_power > availableForThis ? 'text-amber-400' : 'text-muted-foreground/50'
             }`}>
