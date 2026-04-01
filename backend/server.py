@@ -117,6 +117,8 @@ async def lifespan(application: FastAPI):
     await deps.db.tickers.create_index("symbol", unique=True)
     await deps.db.trades.create_index("timestamp")
     await deps.db.profits.create_index("symbol", unique=True)
+    await deps.db.audit_logs.create_index("timestamp")
+    await deps.db.audit_logs.create_index("event_type")
 
     # Seed defaults if empty
     count = await deps.db.tickers.count_documents({})
@@ -129,6 +131,19 @@ async def lifespan(application: FastAPI):
 
     # Restore engine state
     await deps.engine.load_state()
+    
+    # Load price service preference
+    pref_doc = await deps.db.settings.find_one({"key": "prefer_broker_feeds"})
+    if pref_doc:
+        deps.price_service.set_prefer_broker_feeds(pref_doc.get("value", True))
+    
+    # Load custom rate limit configs
+    from rate_limiter import rate_limiter, BrokerRateLimitConfig
+    async for doc in deps.db.settings.find({"key": {"$regex": "^rate_limit_"}}):
+        broker_id = doc["key"].replace("rate_limit_", "")
+        v = doc.get("value", {})
+        rate_limiter.set_config(broker_id, BrokerRateLimitConfig(**v))
+        deps.logger.info(f"Loaded rate limit config for {broker_id}")
 
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)
@@ -184,6 +199,7 @@ from routes.tickers import router as tickers_router
 from routes.trades import router as trades_router
 from routes.bot import router as bot_router
 from routes.ws import router as ws_router
+from routes.system import router as system_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -191,6 +207,7 @@ api.include_router(tickers_router)
 api.include_router(trades_router)
 api.include_router(bot_router)
 api.include_router(ws_router)
+api.include_router(system_router)
 
 app.include_router(api)
 

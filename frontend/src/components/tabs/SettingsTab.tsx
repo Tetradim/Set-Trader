@@ -22,6 +22,9 @@ import {
   Plug,
   Shield,
   Zap,
+  Activity,
+  Database,
+  Gauge,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -182,6 +185,9 @@ export function SettingsTab() {
 
       {/* Trading Mode Toggle */}
       <TradingModeSection />
+
+      {/* Price Feed & API Settings */}
+      <PriceFeedSection />
 
       {/* Broker Allocations per Ticker */}
       <BrokerAllocationsSection />
@@ -516,6 +522,135 @@ function TradingModeSection() {
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+function PriceFeedSection() {
+  const [preferBrokerFeeds, setPreferBrokerFeeds] = useState(true);
+  const [priceSources, setPriceSources] = useState<Record<string, string>>({});
+  const [rateLimits, setRateLimits] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Load price source preference
+    apiFetch('/api/price-sources')
+      .then((data) => {
+        setPreferBrokerFeeds(data.prefer_broker_feeds ?? true);
+        setPriceSources(data.sources || {});
+      })
+      .catch(() => {});
+
+    // Load rate limit statuses
+    apiFetch('/api/rate-limits')
+      .then((data) => setRateLimits(data.brokers || []))
+      .catch(() => {});
+  }, []);
+
+  const togglePriceFeed = async () => {
+    setLoading(true);
+    try {
+      const newValue = !preferBrokerFeeds;
+      await apiFetch(`/api/price-sources/toggle?prefer_broker=${newValue}`, { method: 'POST' });
+      setPreferBrokerFeeds(newValue);
+      toast.success(`Price feed: ${newValue ? 'Broker feeds preferred' : 'yfinance only'}`);
+    } catch (err) {
+      toast.error('Failed to update price feed preference');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="glass rounded-xl border border-border p-6 space-y-5" data-testid="price-feed-section">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Activity size={18} className="text-primary" />
+          <h3 className="text-sm font-bold text-foreground">Price Feeds & Rate Limits</h3>
+        </div>
+      </div>
+
+      {/* Price Feed Toggle */}
+      <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Database size={14} className="text-accent" />
+            <span className="text-xs font-medium text-foreground">Prefer Broker Market Data</span>
+          </div>
+          <Switch
+            data-testid="prefer-broker-feeds-toggle"
+            checked={preferBrokerFeeds}
+            onCheckedChange={togglePriceFeed}
+            disabled={loading}
+          />
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          {preferBrokerFeeds ? (
+            <>
+              <span className="text-emerald-400 font-medium">ON:</span> Uses broker WebSocket feeds (Alpaca, IBKR) for lower latency. Falls back to yfinance if broker feed unavailable.
+            </>
+          ) : (
+            <>
+              <span className="text-amber-400 font-medium">OFF:</span> Uses yfinance for all price data. Simpler but higher latency.
+            </>
+          )}
+        </p>
+
+        {/* Price Sources */}
+        {Object.keys(priceSources).length > 0 && (
+          <div className="pt-2 border-t border-border/50">
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Current Sources</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(priceSources).map(([symbol, source]) => (
+                <span
+                  key={symbol}
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${
+                    source.startsWith('broker:')
+                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      : 'bg-secondary text-muted-foreground border border-border'
+                  }`}
+                >
+                  {symbol}: {source.replace('broker:', '')}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Rate Limits */}
+      {rateLimits.length > 0 && (
+        <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Gauge size={14} className="text-accent" />
+            <span className="text-xs font-medium text-foreground">Broker Rate Limits</span>
+          </div>
+          <div className="space-y-2">
+            {rateLimits.map((rl) => (
+              <div key={rl.broker_id} className="flex items-center justify-between text-xs">
+                <span className="font-mono text-foreground">{rl.broker_id}</span>
+                <div className="flex items-center gap-3">
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    rl.circuit_state === 'closed'
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : rl.circuit_state === 'open'
+                      ? 'bg-red-500/10 text-red-400'
+                      : 'bg-amber-500/10 text-amber-400'
+                  }`}>
+                    {rl.circuit_state.toUpperCase()}
+                  </span>
+                  <span className="text-muted-foreground font-mono">
+                    {rl.requests_last_minute}/{rl.limits.requests_per_minute}/min
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-muted-foreground pt-2 border-t border-border/50">
+            Circuit breakers protect against API abuse. If a broker fails repeatedly, requests are paused until recovery.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

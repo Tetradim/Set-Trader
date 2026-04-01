@@ -220,9 +220,34 @@ class BrokerConnectionManager:
         return output
 
     async def _place_single(self, adapter: BrokerAdapter, broker_id: str, order: BrokerOrder, symbol: str = "") -> dict:
-        """Place a single order through a broker adapter."""
+        """Place a single order through a broker adapter with rate limiting."""
+        from rate_limiter import rate_limiter
+        from audit_service import audit_service, AuditEventType
+        import time
+        
+        # Check rate limit
+        allowed, error_msg = await rate_limiter.check_rate_limit(broker_id)
+        if not allowed:
+            await audit_service.log_broker_api(
+                broker_id, "place_order", "POST",
+                success=False, error_message=error_msg,
+                request_data={"symbol": symbol, "side": order.side, "qty": order.quantity},
+            )
+            raise Exception(f"Rate limited: {error_msg}")
+        
+        start_time = time.time()
         try:
             result = await adapter.place_order(order)
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            # Record success
+            await rate_limiter.record_success(broker_id)
+            await audit_service.log_broker_api(
+                broker_id, "place_order", "POST",
+                success=True, response_time_ms=elapsed_ms,
+                request_data={"symbol": symbol, "side": order.side, "qty": order.quantity},
+            )
+            
             return {
                 "status": result.status,
                 "order_id": result.broker_order_id,
@@ -230,6 +255,15 @@ class BrokerConnectionManager:
                 "error": result.error,
             }
         except Exception as e:
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            # Record failure
+            await rate_limiter.record_failure(broker_id, str(e))
+            await audit_service.log_broker_api(
+                broker_id, "place_order", "POST",
+                success=False, response_time_ms=elapsed_ms, error_message=str(e),
+                request_data={"symbol": symbol, "side": order.side, "qty": order.quantity},
+            )
             self._failed[broker_id] = str(e)
             self._adapters.pop(broker_id, None)
             raise
