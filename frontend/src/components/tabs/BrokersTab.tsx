@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
-import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, FlaskConical, X, Loader2, DollarSign } from 'lucide-react';
+import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, FlaskConical, X, Loader2, DollarSign, Settings2, Gauge, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BrokerRiskWarning {
@@ -17,6 +17,25 @@ interface BrokerData {
   docs_url: string;
   color: string;
   risk_warning: BrokerRiskWarning | null;
+}
+
+interface RateLimitConfig {
+  requests_per_minute: number;
+  requests_per_second: number;
+  burst_limit: number;
+  failure_threshold: number;
+  recovery_timeout_seconds: number;
+}
+
+interface RateLimitStatus {
+  broker_id: string;
+  circuit_state: string;
+  failure_count: number;
+  requests_last_minute: number;
+  requests_last_second: number;
+  concurrent_requests: number;
+  limits: RateLimitConfig;
+  recovery_remaining_seconds: number | null;
 }
 
 interface TestCheck {
@@ -117,6 +136,18 @@ export function BrokersTab() {
 function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; onTestClick: () => void; accountInfo?: { buyingPower: number; balance: number } }) {
   const risk = broker.risk_warning;
   const colors = risk ? RISK_COLORS[risk.level] || RISK_COLORS.medium : RISK_COLORS.low;
+  const [showConfig, setShowConfig] = useState(false);
+  const [rateLimitStatus, setRateLimitStatus] = useState<RateLimitStatus | null>(null);
+  const [useBrokerPrices, setUseBrokerPrices] = useState(false);
+
+  // Load rate limit status when expanded
+  useEffect(() => {
+    if (showConfig && accountInfo) {
+      apiFetch(`/api/rate-limits/${broker.id}`)
+        .then((data) => setRateLimitStatus(data))
+        .catch(() => {});
+    }
+  }, [showConfig, accountInfo, broker.id]);
 
   return (
     <div className={`border rounded-xl overflow-hidden transition-all ${colors.border} ${colors.bg}`} data-testid={`broker-card-${broker.id}`}>
@@ -178,9 +209,231 @@ function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; 
           >
             {broker.supported ? 'Connect' : 'Unavailable'}
           </button>
+          {accountInfo && (
+            <button
+              onClick={() => setShowConfig(!showConfig)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+              data-testid={`broker-config-toggle-${broker.id}`}
+            >
+              <Settings2 size={12} /> {showConfig ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Configuration Panel */}
+      {showConfig && accountInfo && (
+        <BrokerConfigPanel 
+          brokerId={broker.id} 
+          brokerName={broker.name}
+          rateLimitStatus={rateLimitStatus}
+          useBrokerPrices={useBrokerPrices}
+          setUseBrokerPrices={setUseBrokerPrices}
+          onRateLimitUpdate={(status) => setRateLimitStatus(status)}
+        />
+      )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BrokerConfigPanel({ 
+  brokerId, 
+  brokerName,
+  rateLimitStatus, 
+  useBrokerPrices,
+  setUseBrokerPrices,
+  onRateLimitUpdate 
+}: { 
+  brokerId: string; 
+  brokerName: string;
+  rateLimitStatus: RateLimitStatus | null;
+  useBrokerPrices: boolean;
+  setUseBrokerPrices: (v: boolean) => void;
+  onRateLimitUpdate: (status: RateLimitStatus) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [config, setConfig] = useState<RateLimitConfig>({
+    requests_per_minute: 60,
+    requests_per_second: 5,
+    burst_limit: 10,
+    failure_threshold: 5,
+    recovery_timeout_seconds: 60,
+  });
+
+  useEffect(() => {
+    if (rateLimitStatus?.limits) {
+      setConfig(rateLimitStatus.limits);
+    }
+  }, [rateLimitStatus]);
+
+  const saveRateLimits = async () => {
+    setSaving(true);
+    try {
+      const params = new URLSearchParams({
+        requests_per_minute: String(config.requests_per_minute),
+        requests_per_second: String(config.requests_per_second),
+        burst_limit: String(config.burst_limit),
+        failure_threshold: String(config.failure_threshold),
+        recovery_timeout_seconds: String(config.recovery_timeout_seconds),
+      });
+      const res = await apiFetch(`/api/rate-limits/${brokerId}?${params}`, { method: 'POST' });
+      onRateLimitUpdate(res.config);
+      toast.success('Rate limits updated');
+    } catch (err) {
+      toast.error('Failed to update rate limits');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleBrokerPrices = async () => {
+    try {
+      await apiFetch(`/api/price-sources/toggle?prefer_broker=${!useBrokerPrices}`, { method: 'POST' });
+      setUseBrokerPrices(!useBrokerPrices);
+      toast.success(useBrokerPrices ? 'Using yfinance for prices' : `Using ${brokerName} for prices`);
+    } catch (err) {
+      toast.error('Failed to update price source');
+    }
+  };
+
+  return (
+    <div className="border-t border-border bg-secondary/20 p-4 space-y-4">
+      <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+        <Settings2 size={14} className="text-primary" />
+        Broker Configuration
+      </div>
+
+      {/* Price Feed Toggle */}
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Activity size={12} className="text-accent" />
+            <span className="text-xs font-medium">Use {brokerName} Price Feed</span>
+          </div>
+          <button
+            onClick={toggleBrokerPrices}
+            className={`relative w-10 h-5 rounded-full transition-colors ${useBrokerPrices ? 'bg-emerald-500' : 'bg-secondary'}`}
+            data-testid={`broker-price-toggle-${brokerId}`}
+          >
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${useBrokerPrices ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          {useBrokerPrices 
+            ? `Real-time prices from ${brokerName}'s WebSocket feed. Lower latency.`
+            : 'Using yfinance for price data. Falls back if broker feed unavailable.'}
+        </p>
+      </div>
+
+      {/* Rate Limits */}
+      <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Gauge size={12} className="text-accent" />
+            <span className="text-xs font-medium">Rate Limits</span>
+          </div>
+          {rateLimitStatus && (
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+              rateLimitStatus.circuit_state === 'closed'
+                ? 'bg-emerald-500/10 text-emerald-400'
+                : rateLimitStatus.circuit_state === 'open'
+                ? 'bg-red-500/10 text-red-400'
+                : 'bg-amber-500/10 text-amber-400'
+            }`}>
+              Circuit: {rateLimitStatus.circuit_state.toUpperCase()}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-1">Requests/Min</label>
+            <select
+              value={config.requests_per_minute}
+              onChange={(e) => setConfig({ ...config, requests_per_minute: Number(e.target.value) })}
+              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs"
+              data-testid={`broker-rpm-${brokerId}`}
+            >
+              {[10, 20, 30, 60, 100, 200].map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-1">Requests/Sec</label>
+            <select
+              value={config.requests_per_second}
+              onChange={(e) => setConfig({ ...config, requests_per_second: Number(e.target.value) })}
+              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs"
+              data-testid={`broker-rps-${brokerId}`}
+            >
+              {[1, 2, 3, 5, 10, 20].map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-1">Burst Limit</label>
+            <select
+              value={config.burst_limit}
+              onChange={(e) => setConfig({ ...config, burst_limit: Number(e.target.value) })}
+              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs"
+              data-testid={`broker-burst-${brokerId}`}
+            >
+              {[3, 5, 10, 15, 20, 30].map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-muted-foreground block mb-1">Failure Threshold</label>
+            <select
+              value={config.failure_threshold}
+              onChange={(e) => setConfig({ ...config, failure_threshold: Number(e.target.value) })}
+              className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs"
+              data-testid={`broker-failures-${brokerId}`}
+            >
+              {[2, 3, 5, 10, 15].map((v) => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[10px] text-muted-foreground block mb-1">Recovery Timeout (seconds)</label>
+          <select
+            value={config.recovery_timeout_seconds}
+            onChange={(e) => setConfig({ ...config, recovery_timeout_seconds: Number(e.target.value) })}
+            className="w-full bg-secondary border border-border rounded px-2 py-1 text-xs"
+            data-testid={`broker-recovery-${brokerId}`}
+          >
+            {[30, 60, 120, 180, 300, 600].map((v) => (
+              <option key={v} value={v}>{v}s ({v / 60} min)</option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          onClick={saveRateLimits}
+          disabled={saving}
+          className="w-full py-1.5 text-xs font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          data-testid={`broker-save-limits-${brokerId}`}
+        >
+          {saving ? 'Saving...' : 'Save Rate Limits'}
+        </button>
+
+        {rateLimitStatus && (
+          <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/50">
+            <span className="font-mono">{rateLimitStatus.requests_last_minute}/{config.requests_per_minute}</span> requests/min • 
+            <span className="font-mono ml-1">{rateLimitStatus.failure_count}</span> failures
+            {rateLimitStatus.recovery_remaining_seconds && (
+              <span className="ml-1 text-amber-400">• Recovery in {Math.round(rateLimitStatus.recovery_remaining_seconds)}s</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
