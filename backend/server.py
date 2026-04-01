@@ -97,7 +97,9 @@ async def trading_loop():
                     "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
                 })
             
-            if deps.engine.running and not deps.engine.paused and deps.engine.is_market_open():
+            if deps.engine.running and not deps.engine.paused:
+                # Market hours checked per-ticker inside evaluate_ticker
+                # to support multiple international exchanges simultaneously
                 tickers = await deps.db.tickers.find({"enabled": True}, {"_id": 0}).to_list(100)
                 for t in tickers:
                     try:
@@ -201,6 +203,7 @@ from routes.trades import router as trades_router
 from routes.bot import router as bot_router
 from routes.ws import router as ws_router
 from routes.system import router as system_router
+from routes.markets import router as markets_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -209,6 +212,7 @@ api.include_router(trades_router)
 api.include_router(bot_router)
 api.include_router(ws_router)
 api.include_router(system_router)
+api.include_router(markets_router)
 
 app.include_router(api)
 

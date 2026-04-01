@@ -60,7 +60,9 @@ async def ws_endpoint(websocket: WebSocket):
             if action == "ADD_TICKER":
                 sym = msg.get("symbol", "").upper().strip()
                 if sym:
-                    t = TickerConfig(symbol=sym, base_power=msg.get("base_power", 100.0))
+                    from markets import detect_market_from_symbol
+                    market = msg.get("market") or detect_market_from_symbol(sym)
+                    t = TickerConfig(symbol=sym, base_power=msg.get("base_power", 100.0), market=market)
                     doc = t.model_dump()
                     try:
                         await deps.db.tickers.insert_one(doc)

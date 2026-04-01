@@ -14,6 +14,8 @@ class PriceService:
         self._broker_streams: Dict[str, dict] = {}  # symbol -> {broker_id, price, timestamp}
         self.prefer_broker_feeds = True  # Toggle for broker vs yfinance
         self._price_source: Dict[str, str] = {}  # Track which source was used
+        self._fx_cache: Dict[str, float] = {"USD": 1.0}
+        self._fx_last_fetch: Optional[datetime] = None
     
     def set_prefer_broker_feeds(self, prefer: bool):
         """Toggle preference for broker market data feeds."""
@@ -116,3 +118,41 @@ class PriceService:
     def get_all_sources(self) -> Dict[str, str]:
         """Get price sources for all tracked symbols."""
         return dict(self._price_source)
+
+    async def get_fx_rates(self) -> Dict[str, float]:
+        """Fetch FX rates (native currency → USD) for all supported markets.
+        Results are cached for 5 minutes."""
+        now = datetime.now(timezone.utc)
+        if self._fx_last_fetch and (now - self._fx_last_fetch).total_seconds() < 300:
+            return dict(self._fx_cache)
+
+        from markets import MARKETS
+        pairs: Dict[str, str] = {}
+        for m in MARKETS.values():
+            if m.yf_fx_pair and m.currency not in self._fx_cache:
+                pairs[m.currency] = m.yf_fx_pair
+
+        for currency, pair in pairs.items():
+            try:
+                loop = asyncio.get_event_loop()
+                rate = await loop.run_in_executor(None, self._fetch_fx_rate, pair)
+                if rate > 0:
+                    self._fx_cache[currency] = round(rate, 6)
+            except Exception as e:
+                deps.logger.warning(f"FX rate fetch failed for {pair}: {e}")
+
+        self._fx_last_fetch = now
+        deps.logger.info(f"FX rates refreshed: {self._fx_cache}")
+        return dict(self._fx_cache)
+
+    def _fetch_fx_rate(self, pair: str) -> float:
+        """Fetch a single FX pair rate from yfinance."""
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(pair)
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                return float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+        return 0.0

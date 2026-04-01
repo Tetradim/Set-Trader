@@ -90,7 +90,7 @@ class TradingEngine:
         return mode_changed
 
     def _is_actual_market_hours(self) -> bool:
-        """Check if we're in actual market hours (ignoring simulate_24_7)."""
+        """Check if we're in actual US market hours (ignoring simulate_24_7)."""
         now = datetime.now(timezone(timedelta(hours=-5)))
         if now.weekday() >= 5:
             return False
@@ -100,6 +100,50 @@ class TradingEngine:
         if hour >= 16:
             return False
         return True
+
+    # ------------------------------------------------------------------
+    # Market-aware helpers (support international exchanges)
+    # ------------------------------------------------------------------
+
+    def _get_market(self, ticker_doc: dict):
+        """Get the MarketConfig for a ticker (auto-detected from symbol suffix if not set)."""
+        from markets import MARKETS, detect_market_from_symbol
+        market_code = ticker_doc.get("market") or detect_market_from_symbol(ticker_doc.get("symbol", ""))
+        return MARKETS.get(market_code, MARKETS["US"])
+
+    def _is_ticker_market_open(self, ticker_doc: dict) -> bool:
+        """Check if the market for this specific ticker is currently open."""
+        if self.simulate_24_7:
+            return True
+        if not self.market_hours_only:
+            return True
+        return self._get_market(ticker_doc).is_open_now()
+
+    def _is_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
+        """True during the first `minutes` after market open.
+        Uses ticker's specific market when ticker_doc is provided."""
+        if ticker_doc is not None:
+            return self._get_market(ticker_doc).is_opening_window(minutes)
+        # Legacy fallback: US ET
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        if now.weekday() >= 5:
+            return False
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        return 0 <= elapsed <= minutes * 60
+
+    def _is_past_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
+        """True when past the opening window but still within market hours."""
+        if ticker_doc is not None:
+            return self._get_market(ticker_doc).is_past_opening_window(minutes)
+        # Legacy fallback: US ET
+        now = datetime.now(timezone(timedelta(hours=-5)))
+        if now.weekday() >= 5:
+            return False
+        market_open  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        market_close = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        return elapsed > minutes * 60 and now < market_close
 
     async def manual_sell(self, symbol: str, order_type: str, limit_price: float = 0) -> dict:
         """Execute a manual sell from the Positions tab.
@@ -260,6 +304,10 @@ class TradingEngine:
         if ticker_doc.get("auto_stopped", False):
             return
 
+        # Per-ticker market hours check (handles US, HK, AU, UK, CA, CN, etc.)
+        if not self._is_ticker_market_open(ticker_doc):
+            return
+
         now = datetime.now(timezone.utc)
         last = self._last_trade_ts.get(sym)
         if last and (now - last).total_seconds() < self.TRADE_COOLDOWN_SECS:
@@ -380,7 +428,7 @@ class TradingEngine:
                 ob_trail_is_pct = ticker_doc.get("opening_bell_trail_is_percent", True)
                 today_str = self._get_today_str()
 
-                if self._is_opening_window(30):
+                if self._is_opening_window(30, ticker_doc):
                     # During opening window: force trailing stop
                     ob_high = self._opening_bell_highs.get(sym, price)
                     if price > ob_high:
@@ -427,7 +475,7 @@ class TradingEngine:
                     # Still in opening window, skip normal sell/stop rules
                     return
 
-                elif self._is_past_opening_window(30):
+                elif self._is_past_opening_window(30, ticker_doc):
                     # Past opening window - auto-rebracket once per day
                     if self._opening_bell_rebracket_done.get(sym) != today_str:
                         ob_high = self._opening_bell_highs.get(sym, price)
@@ -449,7 +497,7 @@ class TradingEngine:
             if trailing:
                 # TIME RULE: Lock trailing stop for first 30 min after market open
                 lock_trailing = ticker_doc.get("lock_trailing_at_open", False)
-                if lock_trailing and self._is_opening_window(30):
+                if lock_trailing and self._is_opening_window(30, ticker_doc):
                     pass  # Skip trailing stop evaluation during opening window
                 else:
                     high = self._trailing_highs.get(sym, price)
@@ -531,7 +579,7 @@ class TradingEngine:
                 # This tightens the stop to prevent being dragged down by opening volatility
                 effective_stop = stop_target
                 halve_stop = ticker_doc.get("halve_stop_at_open", False)
-                if halve_stop and self._is_opening_window(30) and entry > 0:
+                if halve_stop and self._is_opening_window(30, ticker_doc) and entry > 0:
                     stop_distance = entry - stop_target
                     effective_stop = round(entry - (stop_distance * 0.5), 2)
 

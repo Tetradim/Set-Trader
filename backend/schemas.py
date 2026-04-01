@@ -55,11 +55,14 @@ class TickerConfig(BaseModel):
     opening_bell_enabled: bool = False
     opening_bell_trail_value: float = 1.0
     opening_bell_trail_is_percent: bool = True
+    # Market / exchange (determines trading hours, currency, opening bell time)
+    market: str = "US"
 
 
 class TickerCreate(BaseModel):
     symbol: str
     base_power: float = 100.0
+    market: Optional[str] = None  # Auto-detected from symbol suffix if not provided
 
 
 class TickerUpdate(BaseModel):
@@ -100,6 +103,7 @@ class TickerUpdate(BaseModel):
     opening_bell_enabled: Optional[bool] = None
     opening_bell_trail_value: Optional[float] = None
     opening_bell_trail_is_percent: Optional[bool] = None
+    market: Optional[str] = None
 
 
 class TradeRecord(BaseModel):
