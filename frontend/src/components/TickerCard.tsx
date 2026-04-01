@@ -65,10 +65,6 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen }: Pro
   const primaryPrice   = formatPrice(price, ticker, currencyDisplay, fxRates);
   const secondaryPrice = formatPriceSecondary(price, ticker, currencyDisplay, fxRates);
 
-  useEffect(() => {
-    fetchBrokers().then(setBrokers);
-  }, []);
-
   const handleBrokerToggle = useCallback((brokerId: string) => {
     const current = ticker.broker_ids || [];
     const updated = current.includes(brokerId)
