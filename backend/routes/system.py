@@ -1,13 +1,17 @@
-"""Audit log and system monitoring routes."""
+"""Audit log, resilience monitoring, and system routes."""
 from typing import Optional
 from fastapi import APIRouter, Query
 
 import deps
 from audit_service import audit_service
-from rate_limiter import rate_limiter, BrokerRateLimitConfig
+from resilience import broker_resilience, BrokerResilienceConfig
 
 router = APIRouter(tags=["System"])
 
+
+# ---------------------------------------------------------------------------
+# Audit Logs
+# ---------------------------------------------------------------------------
 
 @router.get("/audit-logs")
 async def get_audit_logs(
@@ -37,58 +41,68 @@ async def get_event_types():
     return {"event_types": [e.value for e in AuditEventType]}
 
 
+# ---------------------------------------------------------------------------
+# Resilience — rate limits + circuit breakers (replaces legacy rate_limiter)
+# ---------------------------------------------------------------------------
+
 @router.get("/rate-limits")
 async def get_rate_limit_status():
-    """Get rate limit and circuit breaker status for all brokers."""
-    return {"brokers": rate_limiter.get_all_statuses()}
+    """Get resilience status (token-bucket rate limits + circuit breakers) for all brokers."""
+    return {"brokers": broker_resilience.get_all_statuses()}
 
 
 @router.get("/rate-limits/{broker_id}")
 async def get_broker_rate_limit(broker_id: str):
-    """Get rate limit status for a specific broker."""
-    return rate_limiter.get_status(broker_id)
+    """Get resilience status for a specific broker."""
+    return broker_resilience.get_status(broker_id)
 
 
 @router.post("/rate-limits/{broker_id}")
 async def set_broker_rate_limit(
     broker_id: str,
-    requests_per_minute: int = Query(60, ge=1, le=1000),
-    requests_per_second: int = Query(5, ge=1, le=100),
-    burst_limit: int = Query(10, ge=1, le=100),
-    failure_threshold: int = Query(5, ge=1, le=50),
-    recovery_timeout_seconds: int = Query(60, ge=10, le=600),
+    max_rps: float = Query(10.0, ge=0.1, le=500, description="Max requests per second (token bucket)"),
+    burst: int = Query(20, ge=1, le=200, description="Burst capacity"),
+    cooldown_ms: int = Query(100, ge=0, le=5000, description="Min ms between requests"),
+    failure_threshold: int = Query(5, ge=1, le=50, description="Failures in window to trip circuit"),
+    failure_window_seconds: int = Query(60, ge=10, le=600, description="Sliding window for failure counting"),
+    recovery_timeout_seconds: int = Query(60, ge=10, le=600, description="How long circuit stays OPEN"),
+    half_open_max_calls: int = Query(2, ge=1, le=10, description="Test calls in HALF_OPEN state"),
+    skip_during_opening: bool = Query(False, description="Skip this broker during market opening window"),
 ):
-    """Set custom rate limit configuration for a broker."""
-    config = BrokerRateLimitConfig(
-        requests_per_minute=requests_per_minute,
-        requests_per_second=requests_per_second,
-        burst_limit=burst_limit,
+    """Set resilience configuration for a broker and persist to database."""
+    old_cfg = broker_resilience.get_config(broker_id)
+    config = BrokerResilienceConfig(
+        max_rps=max_rps,
+        burst=burst,
+        cooldown_ms=cooldown_ms,
         failure_threshold=failure_threshold,
+        failure_window_seconds=failure_window_seconds,
         recovery_timeout_seconds=recovery_timeout_seconds,
+        half_open_max_calls=half_open_max_calls,
+        skip_during_opening=skip_during_opening,
     )
-    rate_limiter.set_config(broker_id, config)
-    
-    # Save to database for persistence
-    await deps.db.settings.update_one(
-        {"key": f"rate_limit_{broker_id}"},
-        {"$set": {"value": {
-            "requests_per_minute": requests_per_minute,
-            "requests_per_second": requests_per_second,
-            "burst_limit": burst_limit,
-            "failure_threshold": failure_threshold,
-            "recovery_timeout_seconds": recovery_timeout_seconds,
-        }}},
-        upsert=True,
-    )
-    
-    await audit_service.log_setting_change(
-        f"rate_limit_{broker_id}",
-        None,
-        config.__dict__,
-    )
-    
-    return {"ok": True, "config": rate_limiter.get_status(broker_id)}
+    broker_resilience.set_config(broker_id, config)
+    await broker_resilience.save_config()
 
+    await audit_service.log_setting_change(
+        f"resilience_{broker_id}",
+        vars(old_cfg),
+        vars(config),
+    )
+
+    return {"ok": True, "config": broker_resilience.get_status(broker_id)}
+
+
+@router.post("/circuit/{broker_id}/reset")
+async def reset_circuit_breaker(broker_id: str):
+    """Manually reset a tripped circuit breaker back to CLOSED."""
+    await broker_resilience.reset_circuit(broker_id)
+    return {"ok": True, "broker_id": broker_id, "circuit_state": "closed"}
+
+
+# ---------------------------------------------------------------------------
+# Price sources
+# ---------------------------------------------------------------------------
 
 @router.get("/price-sources")
 async def get_price_sources():
@@ -104,20 +118,19 @@ async def toggle_price_source(prefer_broker: bool = Query(...)):
     """Toggle between broker feeds and yfinance for price data."""
     old_value = deps.price_service.prefer_broker_feeds
     deps.price_service.set_prefer_broker_feeds(prefer_broker)
-    
-    # Save to database
+
     await deps.db.settings.update_one(
         {"key": "prefer_broker_feeds"},
         {"$set": {"value": prefer_broker}},
         upsert=True,
     )
-    
+
     await audit_service.log_setting_change(
         "prefer_broker_feeds",
         old_value,
         prefer_broker,
     )
-    
+
     return {
         "ok": True,
         "prefer_broker_feeds": prefer_broker,

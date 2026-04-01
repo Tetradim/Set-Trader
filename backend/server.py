@@ -29,6 +29,7 @@ from price_service import PriceService
 from trading_engine import TradingEngine
 from telegram_service import TelegramService
 from broker_manager import BrokerConnectionManager
+from resilience import CircuitOpenError
 
 # --- Instantiate singletons and register in deps ---
 deps.ws_manager = ConnectionManager()
@@ -101,6 +102,8 @@ async def trading_loop():
                 for t in tickers:
                     try:
                         await deps.engine.evaluate_ticker(t)
+                    except CircuitOpenError as ce:
+                        deps.logger.warning(f"Skipping {t.get('symbol','?')} — {ce}")
                     except Exception as te:
                         deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
             # Always check pending limit sells (even when paused — user explicitly requested)
@@ -137,13 +140,11 @@ async def lifespan(application: FastAPI):
     if pref_doc:
         deps.price_service.set_prefer_broker_feeds(pref_doc.get("value", True))
     
-    # Load custom rate limit configs
-    from rate_limiter import rate_limiter, BrokerRateLimitConfig
-    async for doc in deps.db.settings.find({"key": {"$regex": "^rate_limit_"}}):
-        broker_id = doc["key"].replace("rate_limit_", "")
-        v = doc.get("value", {})
-        rate_limiter.set_config(broker_id, BrokerRateLimitConfig(**v))
-        deps.logger.info(f"Loaded rate limit config for {broker_id}")
+    # Initialize resilience (token-bucket rate limiter + circuit breakers)
+    from resilience import broker_resilience
+    broker_resilience.set_telegram(deps.telegram_service)
+    broker_resilience.set_ws_manager(deps.ws_manager)
+    await broker_resilience.load_config()
 
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)
@@ -247,7 +248,7 @@ if __name__ == "__main__":
         print("\n" + "="*50)
         print("  Sentinel Pulse - Trading Bot")
         print("="*50)
-        print(f"\n  Server starting on http://localhost:8001")
+        print("\n  Server starting on http://localhost:8001")
         print("  Browser will open automatically...")
         print("\n  Press Ctrl+C to stop the server.\n")
     

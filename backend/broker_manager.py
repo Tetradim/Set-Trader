@@ -220,34 +220,28 @@ class BrokerConnectionManager:
         return output
 
     async def _place_single(self, adapter: BrokerAdapter, broker_id: str, order: BrokerOrder, symbol: str = "") -> dict:
-        """Place a single order through a broker adapter with rate limiting."""
-        from rate_limiter import rate_limiter
-        from audit_service import audit_service, AuditEventType
+        """Place a single order through a broker adapter with resilience (token-bucket rate limiting + circuit breaker)."""
+        from resilience import broker_resilience, CircuitOpenError
+        from audit_service import audit_service
         import time
-        
-        # Check rate limit
-        allowed, error_msg = await rate_limiter.check_rate_limit(broker_id)
-        if not allowed:
-            await audit_service.log_broker_api(
-                broker_id, "place_order", "POST",
-                success=False, error_message=error_msg,
-                request_data={"symbol": symbol, "side": order.side, "qty": order.quantity},
-            )
-            raise Exception(f"Rate limited: {error_msg}")
-        
+
+        # Acquire rate-limit token and verify circuit state.
+        # CircuitOpenError is re-raised so place_orders_for_ticker records it as a broker failure.
+        try:
+            await broker_resilience.before_call(broker_id)
+        except CircuitOpenError as e:
+            raise Exception(f"Circuit OPEN for {broker_id}: retry in {e.recovery_seconds}s") from e
+
         start_time = time.time()
         try:
             result = await adapter.place_order(order)
             elapsed_ms = (time.time() - start_time) * 1000
-            
-            # Record success
-            await rate_limiter.record_success(broker_id)
+            await broker_resilience.record_success(broker_id)
             await audit_service.log_broker_api(
                 broker_id, "place_order", "POST",
                 success=True, response_time_ms=elapsed_ms,
                 request_data={"symbol": symbol, "side": order.side, "qty": order.quantity},
             )
-            
             return {
                 "status": result.status,
                 "order_id": result.broker_order_id,
@@ -256,9 +250,7 @@ class BrokerConnectionManager:
             }
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            
-            # Record failure
-            await rate_limiter.record_failure(broker_id, str(e))
+            await broker_resilience.record_failure(broker_id, e)
             await audit_service.log_broker_api(
                 broker_id, "place_order", "POST",
                 success=False, response_time_ms=elapsed_ms, error_message=str(e),

@@ -4,6 +4,7 @@ from typing import Dict
 
 import deps
 from schemas import TradeRecord
+from resilience import CircuitOpenError
 
 
 class TradingEngine:
