@@ -269,26 +269,6 @@ class TradingEngine:
             return False
         return True
 
-    def _is_opening_window(self, minutes: int = 30) -> bool:
-        """Check if we're within the first N minutes after market open (9:30 AM EST)."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        if now.weekday() >= 5:
-            return False
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        elapsed = (now - market_open).total_seconds()
-        return 0 <= elapsed <= minutes * 60
-
-    def _is_past_opening_window(self, minutes: int = 30) -> bool:
-        """Check if we're past the opening window but still within market hours."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        if now.weekday() >= 5:
-            return False
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        elapsed = (now - market_open).total_seconds()
-        # Past opening window but before market close
-        return elapsed > minutes * 60 and now < market_close
-
     def _get_today_str(self) -> str:
         """Get today's date string in Eastern Time for tracking daily operations."""
         now = datetime.now(timezone(timedelta(hours=-5)))

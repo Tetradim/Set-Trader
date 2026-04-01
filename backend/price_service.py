@@ -129,7 +129,7 @@ class PriceService:
         from markets import MARKETS
         pairs: Dict[str, str] = {}
         for m in MARKETS.values():
-            if m.yf_fx_pair and m.currency not in self._fx_cache:
+            if m.yf_fx_pair:
                 pairs[m.currency] = m.yf_fx_pair
 
         for currency, pair in pairs.items():

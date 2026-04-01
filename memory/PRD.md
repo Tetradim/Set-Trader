@@ -158,6 +158,8 @@ Build a sophisticated trading bot with bracket-based trading rules, multi-broker
 - [ ] "Sell All Positions" emergency liquidation button
 - [ ] Volatility-adaptive brackets
 - [ ] Multi-bracket laddering
+- [ ] Currency-aware buy-power input (convert USD buy-power to native currency for international tickers)
+- [ ] DST-aware market hours (proper timezone library for AU, UK, US seasonal shifts)
 
 ### P3 (Low Priority)
 - [ ] Real SMTP credentials for email delivery
