@@ -13,6 +13,9 @@ from typing import Dict, Optional, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 import time
 
 from aiolimiter import AsyncLimiter
@@ -421,8 +424,8 @@ class BrokerResilience:
         return [self.get_status(bid) for bid in set(list(self._configs.keys()) + list(self._circuits.keys()))]
     
     def is_opening_window(self) -> bool:
-        """Check if we're in the market opening window (first 15 minutes)."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        """Check if we're in the US market opening window (first 15 minutes). DST-aware."""
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)

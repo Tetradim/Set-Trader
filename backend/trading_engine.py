@@ -1,10 +1,13 @@
 """Core trading engine — evaluates tickers, places orders, manages positions."""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict
+from zoneinfo import ZoneInfo
 
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
+
+_ET = ZoneInfo("America/New_York")   # US Eastern — DST-aware (EDT/EST auto)
 
 
 class TradingEngine:
@@ -90,8 +93,8 @@ class TradingEngine:
         return mode_changed
 
     def _is_actual_market_hours(self) -> bool:
-        """Check if we're in actual US market hours (ignoring simulate_24_7)."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        """Check if we're in actual US market hours (ignoring simulate_24_7). DST-aware."""
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         hour, minute = now.hour, now.minute
@@ -112,20 +115,33 @@ class TradingEngine:
         return MARKETS.get(market_code, MARKETS["US"])
 
     def _is_ticker_market_open(self, ticker_doc: dict) -> bool:
-        """Check if the market for this specific ticker is currently open."""
+        """Check if the market for this specific ticker is currently open.
+
+        simulate_24_7 bypasses the "market closed" gate (paper trading runs 24/7)
+        but still blocks structured lunch breaks for markets that have them
+        (CN_SS, CN_SZ, HK). No broker would fill an order during Shanghai/HK
+        lunch regardless of mode, so we guard against those misfires.
+        """
+        market = self._get_market(ticker_doc)
+
         if self.simulate_24_7:
+            # Respect lunch breaks even in simulate mode
+            if market.lunch_break and market.is_in_lunch_break():
+                return False
             return True
+
         if not self.market_hours_only:
             return True
-        return self._get_market(ticker_doc).is_open_now()
+
+        return market.is_open_now()
 
     def _is_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
-        """True during the first `minutes` after market open.
-        Uses ticker's specific market when ticker_doc is provided."""
+        """True during the first `minutes` after market open (DST-aware).
+        Uses the ticker's specific market when ticker_doc is provided."""
         if ticker_doc is not None:
             return self._get_market(ticker_doc).is_opening_window(minutes)
-        # Legacy fallback: US ET
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        # Legacy fallback: US ET (DST-aware)
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
@@ -133,11 +149,11 @@ class TradingEngine:
         return 0 <= elapsed <= minutes * 60
 
     def _is_past_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
-        """True when past the opening window but still within market hours."""
+        """True when past the opening window but still within market hours (DST-aware)."""
         if ticker_doc is not None:
             return self._get_market(ticker_doc).is_past_opening_window(minutes)
-        # Legacy fallback: US ET
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        # Legacy fallback: US ET (DST-aware)
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         market_open  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
@@ -258,8 +274,8 @@ class TradingEngine:
         # In live mode, respect market_hours_only setting
         if not self.market_hours_only:
             return True
-        # Check actual market hours (9:30 AM - 4:00 PM ET, weekdays)
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        # Check actual US market hours (9:30 AM - 4:00 PM ET, weekdays) — DST-aware
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         hour, minute = now.hour, now.minute
@@ -270,9 +286,8 @@ class TradingEngine:
         return True
 
     def _get_today_str(self) -> str:
-        """Get today's date string in Eastern Time for tracking daily operations."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        return now.strftime("%Y-%m-%d")
+        """Get today's date string in US Eastern Time for tracking daily operations."""
+        return datetime.now(_ET).strftime("%Y-%m-%d")
 
     # ------------------------------------------------------------------
     # evaluate_ticker — the heart of the trading logic
