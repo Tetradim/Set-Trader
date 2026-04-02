@@ -1,7 +1,7 @@
 """Pydantic schemas for Sentinel Pulse."""
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -57,6 +57,8 @@ class TickerConfig(BaseModel):
     opening_bell_trail_is_percent: bool = True
     # Market / exchange (determines trading hours, currency, opening bell time)
     market: str = "US"
+    # Pluggable strategy system
+    strategy_config: Dict[str, Any] = {}   # per-ticker params for signal strategies
 
 
 class TickerCreate(BaseModel):
@@ -104,6 +106,7 @@ class TickerUpdate(BaseModel):
     opening_bell_trail_value: Optional[float] = None
     opening_bell_trail_is_percent: Optional[bool] = None
     market: Optional[str] = None
+    strategy_config: Optional[Dict[str, Any]] = None
 
 
 class TradeRecord(BaseModel):

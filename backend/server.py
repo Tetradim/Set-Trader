@@ -148,6 +148,11 @@ async def lifespan(application: FastAPI):
     broker_resilience.set_ws_manager(deps.ws_manager)
     await broker_resilience.load_config()
 
+    # Load pluggable strategy system
+    from strategies.loader import load_all_strategies, start_strategy_watcher
+    await load_all_strategies()
+    start_strategy_watcher()
+
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)
     deps.broker_mgr.set_ws_manager(deps.ws_manager)
@@ -204,6 +209,7 @@ from routes.bot import router as bot_router
 from routes.ws import router as ws_router
 from routes.system import router as system_router
 from routes.markets import router as markets_router
+from routes.strategies import router as strategies_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -213,6 +219,7 @@ api.include_router(bot_router)
 api.include_router(ws_router)
 api.include_router(system_router)
 api.include_router(markets_router)
+api.include_router(strategies_router)
 
 app.include_router(api)
 

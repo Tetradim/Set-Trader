@@ -156,3 +156,59 @@ class PriceService:
         except Exception:
             pass
         return 0.0
+
+    # ------------------------------------------------------------------
+    # OHLCV history — used by signal-based strategies
+    # ------------------------------------------------------------------
+
+    async def get_ohlcv(self, symbol: str, period: str = "3mo"):
+        """Fetch OHLCV history for a symbol via yfinance.
+        Returns a pandas DataFrame (columns: open, high, low, close, volume)
+        or None if unavailable."""
+        if not deps.YF_AVAILABLE:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self._fetch_ohlcv_yf, symbol, period)
+        except Exception as e:
+            deps.logger.warning(f"get_ohlcv failed for {symbol}: {e}")
+            return None
+
+    def _fetch_ohlcv_yf(self, symbol: str, period: str):
+        try:
+            import yfinance as yf
+            import pandas as pd
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period=period)
+            if not hist.empty:
+                hist.columns = [c.lower() for c in hist.columns]
+                return hist
+        except Exception:
+            pass
+        return None
+
+    async def get_enriched_market_data(self, ticker_doc: dict) -> dict:
+        """Build the market_data dict passed to BaseStrategy.generate_signals().
+        Returns: {history: DataFrame|None, current_price: float, fx_rate: float}
+        """
+        symbol      = ticker_doc.get("symbol", "")
+        market_code = ticker_doc.get("market", "US")
+        avg_days    = ticker_doc.get("avg_days", 30)
+
+        # Choose yfinance period based on lookback requirement
+        period = "6mo" if avg_days > 90 else "3mo"
+        history = await self.get_ohlcv(symbol, period=period)
+
+        current_price = await self.get_price(symbol)
+
+        # FX rate (native currency → USD)
+        from markets import MARKETS
+        market_cfg = MARKETS.get(market_code, MARKETS["US"])
+        fx_rates   = await self.get_fx_rates()
+        fx_rate    = fx_rates.get(market_cfg.currency, 1.0)
+
+        return {
+            "history":       history,       # pd.DataFrame | None
+            "current_price": current_price,
+            "fx_rate":       fx_rate,
+        }

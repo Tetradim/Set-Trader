@@ -51,6 +51,8 @@ export interface TickerConfig {
   opening_bell_trail_is_percent: boolean;
   // Market / exchange
   market: string;
+  // Pluggable strategy params (stored per-ticker for signal strategies)
+  strategy_config: Record<string, number | boolean | string>;
 }
 
 export interface TradeLog {
