@@ -58,15 +58,6 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
             "Thinkorswim uses the Schwab API. App registration required. Moderate risk for high-frequency patterns."),
         docs_url="https://developer.schwab.com/", color="#ff6600",
     ),
-    "fidelity": BrokerInfo(
-        id="fidelity", name="Fidelity",
-        description="Major US brokerage. No public trading API — experimental support only.",
-        supported=False,
-        auth_fields=["username", "password"],
-        risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
-            "Fidelity does not offer a public trading API. Automated access requires third-party tools and may violate terms of service."),
-        docs_url="https://www.fidelity.com/", color="#4ade80",
-    ),
     # --- HIGH RISK ---
     "robinhood": BrokerInfo(
         id="robinhood", name="Robinhood",
@@ -131,7 +122,4 @@ def get_broker_adapter(broker_id: str, credentials: dict) -> BrokerAdapter | Non
     if broker_id == "wealthsimple":
         from .wealthsimple_adapter import WealthsimpleAdapter
         return WealthsimpleAdapter(credentials)
-    if broker_id == "fidelity":
-        from .fidelity_adapter import FidelityAdapter
-        return FidelityAdapter(credentials)
     return None

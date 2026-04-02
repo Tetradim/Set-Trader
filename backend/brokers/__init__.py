@@ -12,7 +12,6 @@ Architecture:
      ├── ThinkorswimAdapter   (Schwab OAuth)
      ├── WebullAdapter        (unofficial)
      ├── WealthsimpleAdapter  (unofficial)
-     └── FidelityAdapter      (placeholder)
 """
 from .base import BrokerAdapter, BrokerOrder, BrokerPosition, BrokerAccountInfo, BrokerRiskWarning, BrokerInfo
 from .registry import BROKER_REGISTRY, get_broker_adapter, get_broker_info
