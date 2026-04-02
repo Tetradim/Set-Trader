@@ -1,5 +1,5 @@
 """Audit log, resilience monitoring, and system routes."""
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Query
 
 import deps
@@ -15,16 +15,16 @@ router = APIRouter(tags=["System"])
 
 @router.get("/audit-logs")
 async def get_audit_logs(
-    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    event_type: Optional[List[str]] = Query(None, description="Filter by one or more event types"),
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
     broker_id: Optional[str] = Query(None, description="Filter by broker"),
     success: Optional[bool] = Query(None, description="Filter by success status"),
     limit: int = Query(100, ge=1, le=1000),
     skip: int = Query(0, ge=0),
 ):
-    """Get audit logs with optional filters."""
+    """Get audit logs with optional filters. event_type may be repeated for OR matching."""
     logs = await audit_service.get_logs(
-        event_type=event_type,
+        event_types=event_type,   # list or None
         symbol=symbol,
         broker_id=broker_id,
         success=success,

@@ -246,7 +246,8 @@ class AuditService:
     
     async def get_logs(
         self,
-        event_type: Optional[str] = None,
+        event_types: Optional[list] = None,   # list → $in query; single-item list works too
+        event_type: Optional[str] = None,      # legacy single-type param (kept for back-compat)
         symbol: Optional[str] = None,
         broker_id: Optional[str] = None,
         success: Optional[bool] = None,
@@ -255,20 +256,25 @@ class AuditService:
     ) -> list:
         """Query audit logs with filters."""
         query = {}
-        if event_type:
-            query["event_type"] = event_type
+        # event_types (list) takes precedence over legacy single event_type
+        effective_types = event_types or ([event_type] if event_type else None)
+        if effective_types:
+            if len(effective_types) == 1:
+                query["event_type"] = effective_types[0]
+            else:
+                query["event_type"] = {"$in": effective_types}
         if symbol:
             query["symbol"] = symbol
         if broker_id:
             query["broker_id"] = broker_id
         if success is not None:
             query["success"] = success
-        
+
         cursor = deps.db[self.collection_name].find(
             query,
             {"_id": 0},
         ).sort("timestamp", -1).skip(skip).limit(limit)
-        
+
         return await cursor.to_list(limit)
 
 
