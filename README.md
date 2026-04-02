@@ -2,7 +2,7 @@
 
 **Automated bracket-trading bot — multi-broker, multi-market, production-grade dark-mode dashboard.**
 
-Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), structured audit logs, Telegram alerts, OpenTelemetry tracing, and a Windows `.exe` installer.
+Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, and a Windows `.exe` installer.
 
 ---
 
@@ -11,14 +11,15 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 1. [Architecture](#architecture)
 2. [Quick Start](#quick-start)
 3. [Feature Overview](#feature-overview)
-4. [File Map — Backend](#file-map--backend)
-5. [File Map — Frontend](#file-map--frontend)
-6. [API Reference](#api-reference)
-7. [Database Schema](#database-schema)
-8. [Environment Variables](#environment-variables)
-9. [Broker Catalogue](#broker-catalogue)
-10. [International Markets](#international-markets)
-11. [Resilience Architecture](#resilience-architecture)
+4. [Pluggable Strategy System](#pluggable-strategy-system)
+5. [File Map — Backend](#file-map--backend)
+6. [File Map — Frontend](#file-map--frontend)
+7. [API Reference](#api-reference)
+8. [Database Schema](#database-schema)
+9. [Environment Variables](#environment-variables)
+10. [Broker Catalogue](#broker-catalogue)
+11. [International Markets](#international-markets)
+12. [Resilience Architecture](#resilience-architecture)
 
 ---
 
@@ -132,6 +133,258 @@ Every significant action is recorded: setting changes, ticker CRUD, broker API c
 - Rebracket events
 - Circuit breaker open/close events
 
+### Pluggable Signal Strategies
+Drop-in Python files that generate BUY / SELL / HOLD signals. Strategies run before bracket logic and can override it completely. Hot-reload from disk without restarting the server. Full details in the [Pluggable Strategy System](#pluggable-strategy-system) section.
+
+---
+
+## Pluggable Strategy System
+
+Sentinel Pulse ships with a bracket-based engine (the default) **and** a pluggable signal-strategy layer that sits on top of it. You write a plain Python class, drop the file in one folder, click Reload — it immediately appears in the ConfigModal and can be activated per-ticker.
+
+### How it fits into the engine
+
+```
+evaluate_ticker()
+    │
+    ├─ Market hours gate  (DST-aware per exchange)
+    ├─ Cooldown check     (30s between trades)
+    ├─ Price fetch        (broker feed or yfinance)
+    │
+    ├─ SIGNAL STRATEGY? ──── strategy registered AND ticker.strategy == name
+    │       │
+    │       ├─ generate_signals() → Signal(action="BUY")  → execute buy  → return
+    │       ├─ generate_signals() → Signal(action="SELL") → execute sell → return
+    │       ├─ generate_signals() → Signal(action="HOLD") → skip cycle  → return
+    │       └─ generate_signals() → None                  → fall through ↓
+    │
+    └─ BRACKET LOGIC  (buy_offset / sell_offset / stop / trailing / partial fills)
+```
+
+A strategy that returns `None` cleanly defers to the normal bracket rules — useful when your signal has no conviction on a given bar.
+
+---
+
+### Language
+
+**Python 3.9+** (same as the rest of the backend). No build step. No restart required after saving a file.
+
+Third-party libraries your strategy may freely use:
+- `pandas` — history DataFrames (already installed)
+- `ta` — pure-Python technical indicators (already installed): RSI, MACD, Bollinger, ATR, and 30+ more
+- `numpy` — numerical operations (already installed via pandas)
+- Any other pure-Python library you `pip install` into the backend environment
+
+The only constraint: `generate_signals()` must be an `async` function and must return either a `Signal` instance or `None`.
+
+---
+
+### File locations
+
+```
+backend/
+└── strategies/
+    ├── base.py              ← BaseStrategy, Signal, StrategyMetadata, StrategyConfigModel
+    ├── loader.py            ← registry, load_all_strategies(), reload_strategies()
+    ├── presets/
+    │   └── __init__.py      ← conservative_1y, aggressive_monthly, swing_trader (bracket templates)
+    └── custom/              ← ← ← YOUR FILES GO HERE
+        ├── __init__.py
+        ├── multi_indicator.py   (built-in example)
+        └── my_strategy.py       (anything you create)
+```
+
+**Rule:** put your `.py` file anywhere inside `backend/strategies/custom/`. The loader scans that directory automatically. Subdirectories are ignored — flat files only.
+
+---
+
+### Minimal working example
+
+Create `backend/strategies/custom/my_strategy.py`:
+
+```python
+from strategies.base import BaseStrategy, Signal, StrategyMetadata
+
+class MyStrategy(BaseStrategy):
+
+    metadata = StrategyMetadata(
+        name="My Strategy",          # display name in the UI
+        version="1.0.0",
+        description="Buy when price crosses above its 20-day SMA.",
+        author="Your Name",
+        tags=["trend", "sma"],
+        risk_level="LOW",            # LOW | MEDIUM | HIGH
+    )
+
+    async def generate_signals(
+        self,
+        ticker_doc,       # full MongoDB ticker document
+        current_price,    # latest price in native market currency
+        market_data,      # {"history": pd.DataFrame|None, "fx_rate": float, "current_price": float}
+        market_status,    # from markets.MarketConfig.to_dict()
+        broker_allocations,  # {broker_id: float}
+        params,           # merged default_params + per-ticker strategy_config overrides
+    ):
+        df = market_data.get("history")
+        if df is None or len(df) < 20:
+            return None   # not enough data — fall through to bracket logic
+
+        sma20 = df["close"].rolling(20).mean().iloc[-1]
+        prev  = df["close"].iloc[-2]
+
+        if prev < sma20 and current_price >= sma20:
+            return Signal(action="BUY", confidence=0.75, reason=f"Price crossed above SMA20 ({sma20:.2f})")
+
+        if current_price < sma20 * 0.98:   # 2% below SMA — exit
+            return Signal(action="SELL", confidence=0.80, reason="Price fell 2% below SMA20")
+
+        return None   # no signal this bar
+```
+
+That is the complete file. Save it, click **Reload** in the Advanced tab (or `POST /api/strategies/reload`), and `"My Strategy"` appears in the Signal Strategies section ready to activate.
+
+---
+
+### Adding tuneable parameters
+
+Parameters are defined as a **Pydantic model** that subclasses `StrategyConfigModel`. Every field automatically becomes a number/boolean input in the ConfigModal — labels come from the `title=` annotation, constraints from `ge=`/`le=`.
+
+```python
+from pydantic import Field
+from strategies.base import BaseStrategy, Signal, StrategyMetadata, StrategyConfigModel
+
+class MyParams(StrategyConfigModel):
+    sma_period:   int   = Field(20,   ge=5,  le=200, title="SMA Period")
+    exit_pct:     float = Field(2.0,  ge=0.5, le=10, title="Exit % below SMA")
+    min_confidence: float = Field(0.70, ge=0.5, le=1.0, title="Min Confidence")
+
+class MySMAStrategy(BaseStrategy):
+
+    metadata = StrategyMetadata(
+        name="SMA Crossover",
+        version="1.1.0",
+        description="Buys on SMA crossover, exits when price falls below SMA by exit_pct.",
+        author="Your Name",
+        tags=["trend"],
+        risk_level="LOW",
+    )
+
+    params_model   = MyParams
+    default_params = MyParams().model_dump()
+
+    async def generate_signals(self, ticker_doc, current_price, market_data,
+                               market_status, broker_allocations, params):
+        df = market_data.get("history")
+        if df is None or len(df) < params["sma_period"]:
+            return None
+
+        sma  = df["close"].rolling(params["sma_period"]).mean().iloc[-1]
+        prev = df["close"].iloc[-2]
+
+        if prev < sma and current_price >= sma:
+            return Signal(action="BUY", confidence=params["min_confidence"],
+                          reason=f"Crossed above SMA{params['sma_period']} ({sma:.2f})")
+
+        exit_level = sma * (1 - params["exit_pct"] / 100)
+        if current_price < exit_level:
+            return Signal(action="SELL", confidence=0.85,
+                          reason=f"Below SMA exit level ({exit_level:.2f})")
+
+        return None
+```
+
+The `params` dict passed to `generate_signals` merges `default_params` with any per-ticker overrides the user set in the ConfigModal form — so two tickers can run the same strategy with different `sma_period` values.
+
+---
+
+### Signal reference
+
+| `action` | When to use | Engine behaviour |
+|----------|------------|-----------------|
+| `"BUY"` | Open a long position | Executes a MARKET BUY at current price with `base_power` allocation |
+| `"SELL"` | Close the current position | Executes a MARKET SELL for the full held quantity |
+| `"STOP_LOSS"` | Emergency exit | Same execution as SELL; recorded as `STOP` side in trade history |
+| `"HOLD"` | You have a view but don't want any action | Skips the entire bracket logic for this cycle |
+| `None` (return) | No conviction this bar | Falls through to the normal bracket/trailing/stop rules |
+
+`confidence` (0.0 – 1.0) is stored in the trade record's `reason` string for audit and history review. It does not currently filter execution — use it in your own logic if you want a minimum threshold.
+
+---
+
+### Using technical indicators (`ta` library)
+
+```python
+# RSI
+from ta.momentum import RSIIndicator
+rsi = RSIIndicator(close=df["close"], window=14).rsi().iloc[-1]
+
+# MACD
+from ta.trend import MACD
+macd = MACD(close=df["close"], window_fast=12, window_slow=26, window_sign=9)
+crossover = macd.macd_diff().iloc[-1]   # positive = bull, negative = bear
+
+# Bollinger Bands
+from ta.volatility import BollingerBands
+bb = BollingerBands(close=df["close"], window=20, window_dev=2)
+upper = bb.bollinger_hband().iloc[-1]
+lower = bb.bollinger_lband().iloc[-1]
+
+# ATR (average true range)
+from ta.volatility import AverageTrueRange
+atr = AverageTrueRange(high=df["high"], low=df["low"], close=df["close"], window=14)
+atr_val = atr.average_true_range().iloc[-1]
+```
+
+The `market_data["history"]` DataFrame has columns: `open`, `high`, `low`, `close`, `volume` (all lowercase). Index is a `DatetimeTzAware` series from yfinance.
+
+---
+
+### Optional lifecycle hooks
+
+```python
+class MyStrategy(BaseStrategy):
+
+    async def on_load(self) -> None:
+        """Called once when the strategy is registered at startup or reload."""
+        # Pre-compute anything expensive here, or load a model from disk.
+        pass
+
+    async def validate_ticker(self, ticker_doc: dict) -> bool:
+        """Return False to skip this strategy for a specific ticker.
+        E.g., reject tickers with less than $500 buy power."""
+        return ticker_doc.get("base_power", 0) >= 500
+```
+
+---
+
+### Reload workflow
+
+1. **Drop the file** → `backend/strategies/custom/my_strategy.py`
+2. The **file watcher** (watchdog) detects the change and reloads automatically within a few seconds.
+3. Or trigger manually:
+   - **UI**: ConfigModal → Advanced tab → Signal Strategies → **Reload** button
+   - **API**: `POST /api/strategies/reload`
+   - **Telegram**: (if configured) `/reload_strategies` command
+4. The WebSocket broadcasts `{"type": "STRATEGIES_RELOADED", "strategies": [...]}` to all connected clients.
+5. The strategy is available immediately — no server restart needed.
+
+If your file has a Python syntax error, the loader catches and logs it without crashing. Fix the file and reload again.
+
+---
+
+### Strategy file checklist
+
+```
+✅  File location:    backend/strategies/custom/your_name.py
+✅  Language:         Python 3.9+
+✅  Class inherits:   BaseStrategy (from strategies.base)
+✅  metadata defined: StrategyMetadata(name=...) as a class variable
+✅  Method defined:   async def generate_signals(...) -> Optional[Signal]
+✅  Returns:          Signal(...) or None  — never raises unhandled exceptions
+✅  Params (optional): subclass StrategyConfigModel, set params_model + default_params
+✅  No __init__ needed unless you want custom setup (use on_load() instead)
+```
+
 ---
 
 ## File Map — Backend
@@ -150,8 +403,12 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `trading_engine.py` | `TradingEngine` class — the heart of the bot. Key methods: `evaluate_ticker()` (buy/sell/stop/trailing logic), `_evaluate_partial_fills()` (scale in/out), `_auto_rebracket()`, `_is_opening_window()` / `_is_past_opening_window()` (market-aware, accepts `ticker_doc`), `_is_ticker_market_open()` (per-ticker market hours), `_get_market()` (market config lookup), `check_auto_mode_switch()` (Live@Open / Paper@Close), `manual_sell()`, `cancel_pending_sell()`, `_record_trade()`, `_check_auto_stop()`, `_update_profit()` |
-| `strategies.py` | Preset strategy configs: `conservative_1y`, `aggressive_monthly`, `swing_trader`. Each is a `PresetStrategy` with pre-filled bracket parameters. |
+| `trading_engine.py` | `TradingEngine` class — the heart of the bot. Key methods: `evaluate_ticker()` (signal-strategy routing first, then buy/sell/stop/trailing bracket logic), `_run_strategy_signal()` (calls registered strategy, maps BUY/SELL/HOLD to execution code), `_evaluate_partial_fills()` (scale in/out), `_auto_rebracket()`, `_is_opening_window()` / `_is_past_opening_window()` (DST-aware per market), `_is_ticker_market_open()` (per-ticker market hours + lunch-break guard in simulate mode), `_get_market()`, `check_auto_mode_switch()` (Live@Open / Paper@Close), `manual_sell()`, `cancel_pending_sell()`, `_record_trade()`, `_check_auto_stop()`, `_update_profit()` |
+| `strategies/__init__.py` | Package root — re-exports `PRESET_STRATEGIES`, `STRATEGY_REGISTRY`, `BaseStrategy`, `Signal`, `StrategyMetadata`, `StrategyConfigModel`, `load_all_strategies`, `reload_strategies`. All existing `from strategies import PRESET_STRATEGIES` imports work unchanged. |
+| `strategies/base.py` | Core abstractions: `BaseStrategy` (ABC), `Signal` (dataclass: action, confidence, reason, params), `StrategyMetadata` (name, version, description, risk_level, supported_markets), `StrategyConfigModel` (Pydantic v2 base — subclass to define typed params whose JSON schema drives the UI form) |
+| `strategies/loader.py` | `STRATEGY_REGISTRY` singleton dict, `load_all_strategies()` (scans presets/ and custom/), `reload_strategies()` (hot-reload + WebSocket broadcast), `start_strategy_watcher()` (watchdog file watcher — thread-safe asyncio dispatch), `_load_from_dir()` |
+| `strategies/presets/__init__.py` | `PRESET_STRATEGIES` dict: `conservative_1y`, `aggressive_monthly`, `swing_trader` — bracket config templates used by `APPLY_STRATEGY` |
+| `strategies/custom/` | **Drop your custom strategy files here.** `multi_indicator.py` is the built-in example (RSI + MACD + Volume, using `ta`). Any `.py` file in this directory that contains a `BaseStrategy` subclass is auto-loaded. |
 
 ### Broker Layer
 
@@ -176,7 +433,7 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `price_service.py` | `PriceService` singleton. `get_price()` — tries broker feed first, falls back to yfinance, then cache drift. `get_avg_price()` — moving average. `get_fx_rates()` — fetches all foreign currency→USD rates via yfinance pairs (5-min cache, `AUDUSD=X`, `HKDUSD=X`, etc.). `update_broker_price()` — accepts live price from broker WebSocket feeds. |
+| `price_service.py` | `PriceService` singleton. `get_price()` — tries broker feed first, falls back to yfinance, then cache drift. `get_avg_price()` — moving average. `get_ohlcv()` — full OHLCV DataFrame for strategy history. `get_enriched_market_data()` — builds the `market_data` dict injected into `generate_signals()`. `get_fx_rates()` — all foreign currency→USD rates (5-min cache). `update_broker_price()` — live broker WebSocket price update. |
 | `markets.py` | `MarketConfig` dataclass with `is_open_now()`, `is_opening_window()`, `is_past_opening_window()`, `status()`, `hours_display()`, `to_dict()`. `MARKETS` dict: `US`, `HK`, `AU`, `UK`, `CA`, `CN_SS`, `CN_SZ`. `detect_market_from_symbol()` — auto-detects market from suffix (`.HK`, `.AX`, `.L`, `.TO`, `.SS`, `.SZ`). `SUFFIX_TO_MARKET` lookup. |
 
 ### Services
@@ -201,6 +458,7 @@ Use this map to quickly locate the code behind any feature.
 | `routes/bot.py` | `/api/bot` | `POST /start`, `POST /stop`, `POST /pause`, `POST /resume`, `GET /status`, Telegram config endpoints |
 | `routes/system.py` | `/api` | `GET /audit-logs` (filterable), `GET /audit-logs/event-types`, `GET /rate-limits` (all broker resilience statuses), `GET /rate-limits/{id}`, `POST /rate-limits/{id}` (update config), `POST /circuit/{id}/reset`, `GET /price-sources`, `POST /price-sources/toggle` |
 | `routes/markets.py` | `/api` | `GET /markets` (all 7 markets with live status), `GET /markets/{code}`, `GET /fx-rates`, `GET /settings/currency-display`, `POST /settings/currency-display` |
+| `routes/strategies.py` | `/api/strategies` | `GET /registry` (all signal strategies with metadata + JSON schema), `GET /registry/{name}`, `GET /presets` (bracket templates), `POST /reload` (hot-reload from disk) |
 
 ### Tests
 
@@ -247,7 +505,7 @@ All tests live in `backend/tests/`. Each file maps to a specific feature:
 | `components/Dashboard.tsx` | Main layout shell: tab bar (Watchlist/Positions/History/Logs/Brokers/Foreign/Traces/Settings), tab content switcher, **FX rate pre-load on mount** (`GET /api/fx-rates` + `GET /api/settings/currency-display`, refreshes every 5 min) |
 | `components/Header.tsx` | Top bar: bot name, connection status badge, market-open badge, trading mode badge, account balance / allocated / available / total P&L / cash reserve chips, Add Stock button, Feedback button, Start/Stop bot |
 | `components/TickerCard.tsx` | Individual ticker card. Includes: market flag (🇦🇺 🇬🇧 etc.) + symbol, **dual-currency price display** (primary + secondary in muted text), Net P&L with sign, buy/sell targets formatted in the selected currency, buy-power chip in native currency symbol, broker multi-select chips (with failure flash animation), position indicator, live price chart (`LineChart`), drag handle (dnd-kit `useSortable`), enable/disable toggle, configure / take profit / remove actions |
-| `components/ConfigModal.tsx` | Full ticker configuration modal with 5 tabs: **Rules** (buy/sell offsets, **currency-aware buy power label** + FX hint), **Partial Fills** (leg editor for scale in/out), **Risk** (opening bell mode, halve stop, lock trailing, stop-loss, trailing stop, risk controls), **Rebracket** (auto-rebracket params), **Advanced** (preset strategies) |
+| `components/ConfigModal.tsx` | Full ticker configuration modal with 5 tabs: **Rules** (buy/sell offsets, currency-aware buy power label + FX hint), **Partial Fills** (leg editor for scale in/out), **Risk** (opening bell mode, halve stop, lock trailing, stop-loss, trailing stop, risk controls), **Rebracket** (auto-rebracket params), **Advanced** (preset bracket strategy pills + **signal strategy cards** with Switch toggle, expandable dynamic param forms auto-generated from Pydantic JSON schema, Reload button) |
 | `components/AddTickerDialog.tsx` | Add ticker form: symbol input with **auto-detect market from suffix**, market dropdown (7 options), buy-power input with budget context, over-allocation warning |
 | `components/TradeLogSidebar.tsx` | Right-side live trade activity feed — shows last N trades in real-time as WebSocket `TRADE` messages arrive |
 | `components/CommandPalette.tsx` | Cmd+K (or Ctrl+K) command palette — jump to any tab, quick actions |
@@ -297,6 +555,14 @@ All tests live in `backend/tests/`. Each file maps to a specific feature:
 | POST | `/api/bot/pause` | Pause (stops evaluation, keeps engine running) |
 | POST | `/api/bot/resume` | Resume after pause |
 | GET | `/api/bot/status` | Running, paused, mode, simulate_24_7 |
+
+### Strategies
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/strategies/registry` | All registered signal strategies with metadata + Pydantic JSON schema |
+| GET | `/api/strategies/registry/{name}` | Single strategy detail |
+| GET | `/api/strategies/presets` | Bracket-template preset list (backward-compat) |
+| POST | `/api/strategies/reload` | Hot-reload all strategies from disk |
 
 ### Tickers
 | Method | Endpoint | Description |
@@ -441,7 +707,8 @@ wait_day_after_buy   bool
 broker_ids           array    — ["alpaca", "robinhood"]
 broker_allocations   object   — {"alpaca": 100, "robinhood": 50}
 sort_order           int
-strategy             string   — "custom" | preset name
+strategy             string   — "custom" | preset name | signal strategy name
+strategy_config      object   — per-ticker param overrides for signal strategies (e.g. {"rsi_period": 21})
 ```
 
 ### `trades` collection
