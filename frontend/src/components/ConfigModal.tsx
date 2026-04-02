@@ -552,7 +552,7 @@ function AdvancedTab({ ticker, onChange, send, incStep, decStep }: AdvancedTabPr
                         </span>
                         <span className="text-[9px] text-muted-foreground/60">v{entry.version}</span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{entry.description}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-0.5">{entry.description}</p>
                     </div>
                     {isExpanded ? <ChevronUp size={12} className="text-muted-foreground mt-0.5 shrink-0" /> : <ChevronDown size={12} className="text-muted-foreground mt-0.5 shrink-0" />}
                   </button>
