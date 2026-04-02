@@ -1,0 +1,237 @@
+name: Build Sentinel Pulse — macOS
+
+on:
+  workflow_dispatch:          # run manually from GitHub Actions tab
+  push:
+    tags:
+      - 'v*'                  # also runs automatically on version tags
+
+# Build both Apple Silicon (M1/M2/M3) and Intel in parallel.
+# Each job produces its own .dmg that users download based on their Mac.
+
+jobs:
+  build-mac:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner:     macos-14        # Apple Silicon (M1/M2/M3)
+            arch:       arm64
+            mongo_arch: aarch64
+            label:      "Apple Silicon (M1 / M2 / M3)"
+          - runner:     macos-13        # Intel
+            arch:       x86_64
+            mongo_arch: x86_64
+            label:      "Intel"
+
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    name: macOS ${{ matrix.label }}
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Source
+      # ------------------------------------------------------------------ #
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      # 2. Toolchain
+      # ------------------------------------------------------------------ #
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Yarn
+        run: npm install -g yarn
+
+      # ------------------------------------------------------------------ #
+      # 3. Python dependencies
+      # ------------------------------------------------------------------ #
+      - name: Install Python deps + PyInstaller
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ \
+            -r requirements.txt
+          pip install pyinstaller pillow
+
+      # ------------------------------------------------------------------ #
+      # 4. Build React frontend → backend/static
+      # ------------------------------------------------------------------ #
+      - name: Install frontend deps
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          REACT_APP_BACKEND_URL: ""    # empty = use relative URLs (served by FastAPI)
+        run: yarn build
+
+      - name: Copy built frontend into backend/static
+        run: |
+          rm -rf backend/static
+          cp -r frontend/dist backend/static
+
+      # ------------------------------------------------------------------ #
+      # 5. Download MongoDB Community (portable binary, no install needed)
+      # ------------------------------------------------------------------ #
+      - name: Download MongoDB 7.0 for macOS (${{ matrix.arch }})
+        run: |
+          MONGO_VERSION="7.0.14"
+          URL="https://fastdl.mongodb.org/osx/mongodb-macos-${{ matrix.mongo_arch }}-${MONGO_VERSION}.tgz"
+          echo "Downloading: $URL"
+          curl -fsSL "$URL" -o mongodb.tgz
+          tar -xzf mongodb.tgz
+          # copy only the mongod binary — we don't need the rest
+          cp mongodb-*/bin/mongod backend/mongod
+          chmod +x backend/mongod
+          echo "mongod size: $(du -sh backend/mongod | cut -f1)"
+
+      # ------------------------------------------------------------------ #
+      # 6. Build .app with PyInstaller
+      # ------------------------------------------------------------------ #
+      - name: Build SentinelPulse.app
+        working-directory: backend
+        run: |
+          pyinstaller sentinel_mac.spec --clean --noconfirm
+          echo "App size: $(du -sh dist/SentinelPulse.app | cut -f1)"
+
+      # ------------------------------------------------------------------ #
+      # 7. Write the DMG README (shown to users before they open the app)
+      # ------------------------------------------------------------------ #
+      - name: Create first-run README
+        run: |
+          cat > "FIRST TIME SETUP.txt" << 'EOF'
+          ┌────────────────────────────────────────────────┐
+          │          Sentinel Pulse — Quick Start          │
+          └────────────────────────────────────────────────┘
+
+          INSTALLATION
+          ────────────
+          Drag  SentinelPulse  →  Applications  (just like any Mac app)
+
+          FIRST LAUNCH (one-time step)
+          ─────────────────────────────
+          Because Sentinel Pulse is not distributed through the App Store,
+          macOS will warn you the first time.
+
+          Option A — Right-click method (easiest):
+            1. Right-click SentinelPulse in your Applications folder
+            2. Choose "Open"
+            3. Click "Open" in the dialog that appears
+            You only need to do this ONCE.
+
+          Option B — System Settings:
+            1. Double-click the app (you'll see a warning)
+            2. Open  System Settings → Privacy & Security
+            3. Scroll down and click "Open Anyway"
+
+          RUNNING
+          ───────
+          • Double-click Sentinel Pulse from Applications or your Dock
+          • A small window shows startup progress
+          • Your browser opens automatically to the trading dashboard
+          • Click "Quit Sentinel Pulse" in the status window to stop cleanly
+
+          YOUR DATA
+          ─────────
+          All settings and trade history are stored here:
+            ~/Library/Application Support/SentinelPulse/
+
+          SUPPORT
+          ───────
+          github.com/your-org/sentinel-pulse
+          EOF
+
+      # ------------------------------------------------------------------ #
+      # 8. Create .dmg  (drag-to-Applications layout)
+      # ------------------------------------------------------------------ #
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create .dmg
+        run: |
+          DMG_NAME="SentinelPulse-${{ matrix.arch }}.dmg"
+
+          # create-dmg needs the source folder to contain only what goes in the DMG
+          mkdir -p dmg_staging
+          cp -r backend/dist/SentinelPulse.app dmg_staging/
+          cp "FIRST TIME SETUP.txt" dmg_staging/
+
+          create-dmg \
+            --volname "Sentinel Pulse" \
+            --window-pos  200 120 \
+            --window-size 620 420 \
+            --icon-size   120 \
+            --icon        "SentinelPulse.app"   160 200 \
+            --app-drop-link                     460 200 \
+            --hide-extension "SentinelPulse.app" \
+            --no-internet-enable \
+            "$DMG_NAME" \
+            "dmg_staging/"
+
+          echo "DMG size: $(du -sh $DMG_NAME | cut -f1)"
+
+      # ------------------------------------------------------------------ #
+      # 9. Upload artifact
+      # ------------------------------------------------------------------ #
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelPulse-mac-${{ matrix.arch }}
+          path: SentinelPulse-${{ matrix.arch }}.dmg
+          retention-days: 90
+
+      # ------------------------------------------------------------------ #
+      # 10. Attach to GitHub Release (only on version tags)
+      # ------------------------------------------------------------------ #
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SentinelPulse-${{ matrix.arch }}.dmg
+          generate_release_notes: false
+          body: |
+            ## Sentinel Pulse — macOS
+
+            | File | For |
+            |------|-----|
+            | `SentinelPulse-arm64.dmg` | M1 / M2 / M3 Macs (2020 and newer) |
+            | `SentinelPulse-x86_64.dmg` | Intel Macs (pre-2020) |
+
+            ### Installing
+
+            1. Download the correct `.dmg` for your Mac chip
+               *(Apple menu → About This Mac to check)*
+            2. Double-click the `.dmg` to mount it
+            3. Drag **Sentinel Pulse** to the **Applications** folder shown in the window
+            4. Eject the `.dmg`
+
+            ### First Launch (one-time Gatekeeper step)
+
+            Because the app is not App Store distributed, macOS asks you to confirm
+            the first time:
+
+            > **Right-click → Open → Open**
+
+            After that, just double-click normally forever.
+
+            ### What opens automatically
+
+            A small status window shows "Database ready" → "Web server ready",
+            then your browser opens to `http://localhost:8001` — the full dashboard.
+
+            ### Requirements
+
+            - macOS 12 Monterey or later
+            - ~400 MB disk space
+            - Internet connection for live market data
