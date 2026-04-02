@@ -1,5 +1,6 @@
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useEffect } from 'react';
 import { Header } from './Header';
 import { WatchlistTab } from './tabs/WatchlistTab';
 import { PositionsTab } from './tabs/PositionsTab';
@@ -10,10 +11,8 @@ import { BrokersTab } from './tabs/BrokersTab';
 import { TracesTab } from './tabs/TracesTab';
 import { ForeignTab } from './tabs/ForeignTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
-import { CommandPalette } from './CommandPalette';
 import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 
 const TABS = [
@@ -52,7 +51,6 @@ export function Dashboard() {
   return (
     <div className="min-h-screen flex flex-col" data-testid="dashboard-container">
       <Header />
-      <CommandPalette />
 
       <div className="flex-1 flex">
         {/* Main content area */}

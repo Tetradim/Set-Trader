@@ -11,7 +11,6 @@ import {
   TrendingUp,
   TrendingDown,
   Zap,
-  Command,
   Banknote,
   Wallet,
   PiggyBank,
@@ -148,10 +147,6 @@ export function Header() {
 
         {/* Right: Controls */}
         <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-1 text-[10px] text-muted-foreground border border-border rounded px-2 py-1">
-            <Command size={10} /> K
-          </div>
-
           <AddTickerDialog />
 
           <FeedbackDialog />
