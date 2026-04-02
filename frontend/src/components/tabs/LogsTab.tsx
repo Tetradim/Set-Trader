@@ -164,42 +164,20 @@ function AuditLogViewer() {
   const [hasMore, setHasMore] = useState(false);
   const PAGE = 100;
 
-  const buildParams = useCallback((pageSkip = 0) => {
-    const p = new URLSearchParams({ limit: String(PAGE), skip: String(pageSkip) });
-    if (category !== 'all') {
-      // Send each event type in the category as separate params
-      for (const et of CATEGORY_EVENTS[category]) p.append('event_type', et);
-    }
-    if (symbolFilter.trim()) p.set('symbol', symbolFilter.trim().toUpperCase());
-    if (brokerFilter.trim()) p.set('broker_id', brokerFilter.trim().toLowerCase());
-    if (statusFilter === 'ok')   p.set('success', 'true');
-    if (statusFilter === 'fail') p.set('success', 'false');
-    return p.toString();
-  }, [category, symbolFilter, brokerFilter, statusFilter]);
-
   const fetch = useCallback(async (pageSkip = 0, append = false) => {
     setLoading(true);
     try {
-      const params = buildParams(pageSkip);
-      // For category filtering we send multiple event_type params —
-      // backend /api/audit-logs supports a single event_type param,
-      // so for category we pass the first event type as a filter grouping.
-      // We'll do client-side filtering for category since the backend
-      // supports one event_type at a time.
       let url = `/api/audit-logs?limit=${PAGE}&skip=${pageSkip}`;
+      if (category !== 'all') {
+        for (const et of CATEGORY_EVENTS[category]) url += `&event_type=${encodeURIComponent(et)}`;
+      }
       if (symbolFilter.trim()) url += `&symbol=${encodeURIComponent(symbolFilter.trim().toUpperCase())}`;
       if (brokerFilter.trim()) url += `&broker_id=${encodeURIComponent(brokerFilter.trim().toLowerCase())}`;
       if (statusFilter === 'ok')   url += '&success=true';
       if (statusFilter === 'fail') url += '&success=false';
 
       const data = await apiFetch(url);
-      let rows: AuditEntry[] = data.logs ?? [];
-
-      // Client-side category filter (backend supports single event_type only)
-      if (category !== 'all') {
-        const allowed = new Set(CATEGORY_EVENTS[category]);
-        rows = rows.filter((e) => allowed.has(e.event_type));
-      }
+      const rows: AuditEntry[] = data.logs ?? [];
 
       setHasMore(data.logs?.length === PAGE);
       setEntries(append ? (prev) => [...prev, ...rows] : rows);
@@ -209,7 +187,7 @@ function AuditLogViewer() {
     } finally {
       setLoading(false);
     }
-  }, [buildParams, category, symbolFilter, brokerFilter, statusFilter]);
+  }, [category, symbolFilter, brokerFilter, statusFilter]);
 
   // Reset to page 0 when filters change
   useEffect(() => {
@@ -433,12 +411,12 @@ function LossLogViewer() {
   return (
     <div className="glass rounded-xl border border-border overflow-hidden" data-testid="loss-logs-section">
       {/* Collapsible header */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/20 transition-colors"
-        data-testid="loss-logs-toggle"
-      >
-        <div className="flex items-center gap-2">
+      <div className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/20 transition-colors">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 flex-1 text-left"
+          data-testid="loss-logs-toggle"
+        >
           <AlertTriangle size={13} className="text-amber-400" />
           <span className="text-sm font-semibold text-foreground">Loss Trade Files</span>
           {totalLosses > 0 && open && (
@@ -447,20 +425,22 @@ function LossLogViewer() {
             </span>
           )}
           <span className="text-[10px] text-muted-foreground/50">— per-trade .txt loss reports</span>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           {open && (
             <button
               onClick={(e) => { e.stopPropagation(); fetchDates(); }}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+              className="text-muted-foreground hover:text-foreground transition-colors p-1"
               data-testid="refresh-loss-logs-btn"
             >
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
             </button>
           )}
-          {open ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+          <button onClick={() => setOpen((o) => !o)} className="text-muted-foreground">
+            {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
         </div>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t border-border px-4 pb-4 pt-3 space-y-2">

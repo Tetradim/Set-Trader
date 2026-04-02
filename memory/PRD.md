@@ -67,8 +67,10 @@ Build a sophisticated trading bot with bracket-based trading rules, multi-broker
 - Trade notifications with detailed metadata
 
 ### Audit Logging
-- Structured audit logs for all significant actions (trades, settings, broker API calls, circuit breaker events)
-- Filterable via `GET /api/audit-logs`
+- Structured audit logs with 26 event types (Trading, Broker, Config, Engine, System)
+- **Audit Log Viewer** in Logs tab: category pills, symbol/broker search, OK/FAIL filter, expandable JSON detail rows, auto-refresh, pagination
+- Backend `GET /api/audit-logs` supports multi-event_type `$in` filtering
+- Loss log files in collapsible secondary section within the same tab
 
 ### Windows Installer
 - Inno Setup script for `.exe` installer
