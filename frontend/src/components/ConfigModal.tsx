@@ -4,6 +4,7 @@ import { useWebSocket } from '@/hooks/useWebSocket';
 import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { getMarketMeta } from '@/lib/market-utils';
 import { apiFetch } from '@/lib/api';
 
@@ -528,9 +529,19 @@ function AdvancedTab({ ticker, onChange, send, incStep, decStep }: AdvancedTabPr
                 className={`rounded-xl border transition-all ${isActive ? 'border-primary/40 bg-primary/5' : 'border-border'}`}
               >
                 {/* Header row */}
-                <div className="flex items-center gap-2 px-3 py-2.5">
+                <div className="flex items-center gap-3 px-3 py-2.5">
+                  <Switch
+                    checked={isActive}
+                    onCheckedChange={(checked) =>
+                      checked
+                        ? applySignalStrategy(name, entry)
+                        : send('UPDATE_TICKER', { symbol: ticker.symbol, strategy: 'custom', strategy_config: {} })
+                    }
+                    data-testid={`strategy-toggle-${name.replace(/\s+/g, '-')}`}
+                    className="shrink-0"
+                  />
                   <button
-                    className="flex-1 flex items-start gap-2 text-left"
+                    className="flex-1 flex items-start gap-2 text-left min-w-0"
                     onClick={() => setExpandedStrategy(isExpanded ? null : name)}
                   >
                     <div className="flex-1 min-w-0">
@@ -544,19 +555,6 @@ function AdvancedTab({ ticker, onChange, send, incStep, decStep }: AdvancedTabPr
                       <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{entry.description}</p>
                     </div>
                     {isExpanded ? <ChevronUp size={12} className="text-muted-foreground mt-0.5 shrink-0" /> : <ChevronDown size={12} className="text-muted-foreground mt-0.5 shrink-0" />}
-                  </button>
-                  <button
-                    onClick={() => isActive
-                      ? send('UPDATE_TICKER', { symbol: ticker.symbol, strategy: 'custom', strategy_config: {} })
-                      : applySignalStrategy(name, entry)
-                    }
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all shrink-0 ${
-                      isActive
-                        ? 'bg-red-500/15 text-red-400 border-red-500/30 hover:bg-red-500/25'
-                        : 'bg-primary/15 text-primary border-primary/30 hover:bg-primary/25'
-                    }`}
-                  >
-                    {isActive ? 'Deactivate' : 'Activate'}
                   </button>
                 </div>
 
