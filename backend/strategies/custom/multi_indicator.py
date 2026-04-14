@@ -1,9 +1,11 @@
 """
 strategies/custom/multi_indicator.py
-Example signal-based strategy using RSI + MACD + Volume confirmation.
-Drop-in ready — uses `ta` (pure Python TA, no C build required).
+Example signal-based strategy showing how to combine multiple indicators.
 
-To add your own strategy:
+This strategy demonstrates combining RSI and MACD for entry signals.
+Use this as a reference for building your own custom strategies.
+
+To create your own strategy:
   1. Copy this file to strategies/custom/my_strategy.py
   2. Subclass BaseStrategy, define metadata and generate_signals()
   3. The engine hot-reloads the file automatically (or call POST /api/strategies/reload)
@@ -31,7 +33,6 @@ class MultiIndicatorParams(StrategyConfigModel):
     macd_signal: int     = Field(9,   ge=3,  le=30,  title="MACD Signal Period")
     rsi_oversold: float  = Field(35.0, ge=10, le=50, title="RSI Oversold Threshold")
     rsi_overbought: float = Field(65.0, ge=50, le=90, title="RSI Overbought Threshold")
-    volume_multiplier: float = Field(1.5, ge=1.0, le=5.0, title="Volume Surge Multiplier")
     min_confidence: float    = Field(0.70, ge=0.50, le=1.0, title="Min Confidence to Trade")
     min_bars: int            = Field(50, ge=20, le=500, title="Min History Bars Required")
 
@@ -43,14 +44,14 @@ class MultiIndicatorParams(StrategyConfigModel):
 class MultiIndicatorStrategy(BaseStrategy):
 
     metadata = StrategyMetadata(
-        name="Multi-Indicator (RSI + MACD + Volume)",
+        name="Example: RSI + MACD",
         version="1.0.0",
         description=(
-            "RSI oversold/overbought signals confirmed by MACD crossover and "
-            "volume surge. Works across all supported markets."
+            "Example strategy showing how to combine RSI and MACD. "
+            "Use as a template to build your own multi-indicator strategies."
         ),
         author="Signal Forge Lab",
-        tags=["momentum", "mean-reversion", "volume", "multi-timeframe"],
+        tags=["momentum", "mean-reversion", "example"],
         risk_level="MEDIUM",
         requires_history_bars=50,
         supported_markets=["US", "HK", "AU", "UK", "CA", "CN_SS", "CN_SZ"],
@@ -77,8 +78,7 @@ class MultiIndicatorStrategy(BaseStrategy):
             )
             return None  # fall through to bracket logic
 
-        close  = df["close"]
-        volume = df.get("volume")
+        close = df["close"]
 
         # --- RSI ---
         try:
@@ -101,39 +101,25 @@ class MultiIndicatorStrategy(BaseStrategy):
         except Exception:
             return None
 
-        # --- Volume surge ---
-        volume_ratio = 1.0
-        if volume is not None and len(volume) >= 20:
-            vol_sma = volume.rolling(20).mean().iloc[-1]
-            if vol_sma and vol_sma > 0:
-                volume_ratio = float(volume.iloc[-1]) / float(vol_sma)
-
         logger.debug(
-            f"[{ticker_doc['symbol']}] RSI={rsi_val:.1f} "
-            f"MACD_diff={macd_diff_now:.4f} vol_ratio={volume_ratio:.2f}"
+            f"[{ticker_doc['symbol']}] RSI={rsi_val:.1f} MACD_diff={macd_diff_now:.4f}"
         )
 
-        # --- BUY signal: RSI oversold + MACD crossing up + volume surge ---
+        # --- BUY signal: RSI oversold + MACD crossing up ---
         if (
             rsi_val < params["rsi_oversold"]
             and macd_diff_now > 0
             and macd_diff_prev <= 0        # fresh crossover
-            and volume_ratio >= params["volume_multiplier"]
         ):
             confidence = min(
-                0.50
-                + (params["rsi_oversold"] - rsi_val) / 100
-                + min(volume_ratio - 1.0, 0.3),
+                0.50 + (params["rsi_oversold"] - rsi_val) / 100,
                 0.98,
             )
             if confidence >= params["min_confidence"]:
                 return Signal(
                     action="BUY",
                     confidence=round(confidence, 3),
-                    reason=(
-                        f"RSI {rsi_val:.1f} oversold + bullish MACD crossover "
-                        f"+ volume {volume_ratio:.1f}x surge"
-                    ),
+                    reason=f"RSI {rsi_val:.1f} oversold + bullish MACD crossover",
                 )
 
         # --- SELL signal: RSI overbought + MACD crossing down ---

@@ -12,14 +12,16 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 2. [Quick Start](#quick-start)
 3. [Feature Overview](#feature-overview)
 4. [Pluggable Strategy System](#pluggable-strategy-system)
-5. [File Map — Backend](#file-map--backend)
-6. [File Map — Frontend](#file-map--frontend)
-7. [API Reference](#api-reference)
-8. [Database Schema](#database-schema)
-9. [Environment Variables](#environment-variables)
-10. [Broker Catalogue](#broker-catalogue)
-11. [International Markets](#international-markets)
-12. [Resilience Architecture](#resilience-architecture)
+5. [Edge Integration](#edge-integration)
+6. [MACD-V Strategy](#macd-v-strategy)
+7. [File Map — Backend](#file-map--backend)
+8. [File Map — Frontend](#file-map--frontend)
+9. [API Reference](#api-reference)
+10. [Database Schema](#database-schema)
+11. [Environment Variables](#environment-variables)
+12. [Broker Catalogue](#broker-catalogue)
+13. [International Markets](#international-markets)
+14. [Resilience Architecture](#resilience-architecture)
 
 ---
 
@@ -190,8 +192,13 @@ backend/
     │   └── __init__.py      ← conservative_1y, aggressive_monthly, swing_trader (bracket templates)
     └── custom/              ← ← ← YOUR FILES GO HERE
         ├── __init__.py
-        ├── multi_indicator.py   (built-in example)
-        └── my_strategy.py       (anything you create)
+        ├── macd.py            (MACD crossover)
+        ├── rsi.py             (RSI mean reversion)
+        ├── bollinger.py       (Bollinger Bands)
+        ├── sma_crossover.py   (SMA golden/death cross)
+        ├── macdv.py           (MACD-V ATR-normalized)
+        ├── multi_indicator.py (RSI+MACD example template)
+        └── my_strategy.py     (your custom strategy)
 ```
 
 **Rule:** put your `.py` file anywhere inside `backend/strategies/custom/`. The loader scans that directory automatically. Subdirectories are ignored — flat files only.
@@ -387,6 +394,172 @@ If your file has a Python syntax error, the loader catches and logs it without c
 
 ---
 
+## Edge Integration
+
+Sentinel Pulse integrates with **sentinel-edge** for bidirectional communication. Edge can poll Pulse for decisions, and Pulse sends real-time trade and position updates to Edge.
+
+### How It Works
+
+```
+Edge (Trading Bot)                          Pulse (Signal Engine)
+     │                                            │
+     │──── GET /api/tickers ────►                 │ (returns ticker list)
+     │                                            │
+     │──── GET /api/positions/{symbol} ───►        │ (returns position + P&L)
+     │                                            │
+     │──── POST /api/tickers/{symbol}/decision ──► │ (buy/sell/stop/emergency)
+     │                                            │
+     │◄─── 200 OK ─────────────────────────────────│ (signal accepted)
+     │                                            │
+     │                                            │ (after fill)
+     │◄─── ORDER_FILLED command ───────────────────│ (MongoDB insert)
+     │                                            │
+     │                                            │ (heartbeat)
+     │◄─── PULSE_STATUS command ────────────────────│ (paper/live mode)
+```
+
+### MongoDB Commands (Pulse → Edge)
+
+Pulse inserts commands to the `commands` collection in MongoDB:
+
+| Command | Description |
+|---------|-------------|
+| `ORDER_FILLED` | Trade executed notification |
+| `POSITION_UPDATE` | Real-time P&L update |
+| `ACCOUNT_UPDATE` | Account metrics |
+| `PULSE_STATUS` | Heartbeat (trading mode, market state) |
+| `BROKER_STATUS` | Broker connectivity |
+| `AUTO_STOP_TRIGGERED` | Auto-stop fired |
+
+### REST Endpoints (Edge → Pulse)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/tickers` | GET | List all configured tickers |
+| `/api/tickers/{symbol}/decision` | POST | Submit buy/sell/stop decision |
+| `/api/tickers/{symbol}/trailing` | POST | Enable trailing stop |
+| `/api/positions/{symbol}` | GET | Get position with P&L & drawdown |
+| `/api/account/status` | GET | Account balance and positions |
+| `/api/signals/evaluate` | POST | Signal strength scoring |
+| `/api/health` | GET | Pulse health status |
+
+### Signal Evaluation Endpoint
+
+The `/api/signals/evaluate` endpoint calculates Edge-style signal strength:
+
+```json
+POST /api/signals/evaluate
+{
+  "symbol": "TSLA",
+  "price": 250.00,
+  "orb_high": 252.00,
+  "orb_low": 248.00,
+  "volume": 15000000,
+  "atr": 5.50,
+  "price_change_pct": 1.2
+}
+
+Response:
+{
+  "symbol": "TSLA",
+  "direction": "bullish",
+  "strength": 4.5,
+  "volume_ratio": 1.8,
+  "volume_zscore": 2.3
+}
+```
+
+### Configuration
+
+Enable Edge integration in `.env`:
+
+```bash
+EDGE_ENABLED=true
+EDGE_API_KEY=your_api_key  # optional
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=sentinel_pulse
+```
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `shared/commands.py` | Command schemas (ORDER_FILLED, POSITION_UPDATE, etc.) |
+| `shared/mongo_client.py` | EdgeMongoClient for sending commands to Edge |
+| `shared/commands_utils.py` | Command builders and serializers |
+| `shared/edge_integration.py` | Edge integration helpers |
+| `routes/edge.py` | REST endpoints for Edge communication |
+
+---
+
+## MACD-V Strategy
+
+Sentinel Pulse includes a built-in **MACD-V** signal strategy based on the StockCharts.com formula.
+
+### What is MACD-V?
+
+MACD-V normalizes the standard MACD by dividing by ATR (Average True Range), creating universal momentum readings that work consistently across all price levels. This solves the problem where traditional MACD values vary significantly between high-priced and low-priced stocks.
+
+### Formula
+
+```
+MACD-V = [(12-period EMA - 26-period EMA) / ATR(26)] × 100
+Signal Line = 9-period EMA of MACD-V
+```
+
+### Trading Signals
+
+Based on StockCharts ChartSchool interpretation:
+
+| MACD-V Value | Signal Line | Market State |
+|-------------|-------------|--------------|
+| < -150 | Either | **Risk** (Oversold) |
+| -150 to 50 | Above | **Rebounding** |
+| 50 to 150 | Above | **Rallying** |
+| > 150 | Above | **Risk** (Overbought) |
+| > -50 | Below | **Retracing** |
+| -150 to -50 | Below | **Reversing** |
+
+### Configuration Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `macd_fast` | 12 | 5-50 | Fast EMA period |
+| `macd_slow` | 26 | 10-100 | Slow EMA period |
+| `macd_signal` | 9 | 3-30 | Signal line EMA period |
+| `atr_period` | 26 | 5-50 | ATR period for normalization |
+| `oversold_threshold` | -150 | -300-0 | Oversold level |
+| `rebounding_threshold` | 50 | -100-100 | Rebounding level |
+| `rallying_threshold` | 150 | 50-300 | Rallying level |
+| `overbought_threshold` | 150 | 50-500 | Overbought level |
+| `min_confidence` | 0.65 | 0.50-1.0 | Minimum confidence to trade |
+| `enable_reversals` | true | - | Enable reversal signals |
+| `enable_retraces` | true | - | Enable retracement signals |
+
+### Usage
+
+1. Add a ticker in the dashboard
+2. Open the ticker config modal
+3. Go to the **Advanced** tab
+4. Enable **MACD-V (Volume-Weighted MACD)** signal strategy
+5. Configure parameters as needed
+6. The strategy will generate BUY/SELL/HOLD signals based on MACD-V interpretation
+
+### Available Indicators
+
+The strategy system supports these technical indicators (via `ta` library):
+
+- **RSI** - Relative Strength Index
+- **MACD** - Moving Average Convergence Divergence  
+- **Bollinger Bands** - Volatility bands
+- **ATR** - Average True Range
+- **Stochastic** - Stochastic oscillator
+- **Williams %R** - Williams Percent Range
+- **CCI** - Commodity Channel Index
+- **And 30+ more** - See `ta` library documentation
+
+---
+
 ## File Map — Backend
 
 Use this map to quickly locate the code behind any feature.
@@ -403,12 +576,12 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `trading_engine.py` | `TradingEngine` class — the heart of the bot. Key methods: `evaluate_ticker()` (signal-strategy routing first, then buy/sell/stop/trailing bracket logic), `_run_strategy_signal()` (calls registered strategy, maps BUY/SELL/HOLD to execution code), `_evaluate_partial_fills()` (scale in/out), `_auto_rebracket()`, `_is_opening_window()` / `_is_past_opening_window()` (DST-aware per market), `_is_ticker_market_open()` (per-ticker market hours + lunch-break guard in simulate mode), `_get_market()`, `check_auto_mode_switch()` (Live@Open / Paper@Close), `manual_sell()`, `cancel_pending_sell()`, `_record_trade()`, `_check_auto_stop()`, `_update_profit()` |
+| `trading_engine.py` | `TradingEngine` class — the heart of the bot. Key methods: `evaluate_ticker()` (signal-strategy routing first, then buy/sell/stop/trailing bracket logic), `_run_strategy_signal()` (calls registered strategy, maps BUY/SELL/HOLD to execution code), `_evaluate_partial_fills()` (scale in/out), `_auto_rebracket()`, `_is_opening_window()` / `_is_past_opening_window()` (DST-aware per market), `_is_ticker_market_open()` (per-ticker market hours + lunch-break guard in simulate mode), `_get_market()`, `check_auto_mode_switch()` (Live@Open / Paper@Close), `manual_sell()`, `cancel_pending_sell()`, `_record_trade()`, `_check_auto_stop()`, `_update_profit()`, `update_high_water_mark()` (tracks position highs), `get_drawdown_pct()` (calculates drawdown from high water mark) |
 | `strategies/__init__.py` | Package root — re-exports `PRESET_STRATEGIES`, `STRATEGY_REGISTRY`, `BaseStrategy`, `Signal`, `StrategyMetadata`, `StrategyConfigModel`, `load_all_strategies`, `reload_strategies`. All existing `from strategies import PRESET_STRATEGIES` imports work unchanged. |
 | `strategies/base.py` | Core abstractions: `BaseStrategy` (ABC), `Signal` (dataclass: action, confidence, reason, params), `StrategyMetadata` (name, version, description, risk_level, supported_markets), `StrategyConfigModel` (Pydantic v2 base — subclass to define typed params whose JSON schema drives the UI form) |
 | `strategies/loader.py` | `STRATEGY_REGISTRY` singleton dict, `load_all_strategies()` (scans presets/ and custom/), `reload_strategies()` (hot-reload + WebSocket broadcast), `start_strategy_watcher()` (watchdog file watcher — thread-safe asyncio dispatch), `_load_from_dir()` |
 | `strategies/presets/__init__.py` | `PRESET_STRATEGIES` dict: `conservative_1y`, `aggressive_monthly`, `swing_trader` — bracket config templates used by `APPLY_STRATEGY` |
-| `strategies/custom/` | **Drop your custom strategy files here.** `multi_indicator.py` is the built-in example (RSI + MACD + Volume, using `ta`). Any `.py` file in this directory that contains a `BaseStrategy` subclass is auto-loaded. |
+| `strategies/custom/` | **Drop your custom strategy files here.** Built-in strategies: `macd.py` (MACD crossover), `rsi.py` (RSI mean reversion), `bollinger.py` (Bollinger Bands), `sma_crossover.py` (SMA golden/death cross), `macdv.py` (ATR-normalized), `multi_indicator.py` (RSI+MACD example). Any `.py` file with a `BaseStrategy` subclass is auto-loaded. |
 
 ### Broker Layer
 
@@ -433,8 +606,17 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `price_service.py` | `PriceService` singleton. `get_price()` — tries broker feed first, falls back to yfinance, then cache drift. `get_avg_price()` — moving average. `get_ohlcv()` — full OHLCV DataFrame for strategy history. `get_enriched_market_data()` — builds the `market_data` dict injected into `generate_signals()`. `get_fx_rates()` — all foreign currency→USD rates (5-min cache). `update_broker_price()` — live broker WebSocket price update. |
+| `price_service.py` | `PriceService` singleton. `get_price()` — tries broker feed first, falls back to yfinance, then cache drift. `get_avg_price()` — moving average. `get_ohlcv()` — full OHLCV DataFrame for strategy history. `get_enriched_market_data()` — builds the `market_data` dict injected into `generate_signals()`. `get_fx_rates()` — all foreign currency→USD rates (5-min cache). `update_broker_price()` — live broker WebSocket price update. Also provides volume z-score analysis: `get_volume_zscore()`, `get_volume_ratio()`, `get_signal_strength()` for Edge-style signal scoring. |
 | `markets.py` | `MarketConfig` dataclass with `is_open_now()`, `is_opening_window()`, `is_past_opening_window()`, `status()`, `hours_display()`, `to_dict()`. `MARKETS` dict: `US`, `HK`, `AU`, `UK`, `CA`, `CN_SS`, `CN_SZ`. `detect_market_from_symbol()` — auto-detects market from suffix (`.HK`, `.AX`, `.L`, `.TO`, `.SS`, `.SZ`). `SUFFIX_TO_MARKET` lookup. |
+
+### Edge Integration
+
+| File | What lives here |
+|------|----------------|
+| `shared/commands.py` | Command schemas for Edge communication: `ORDER_FILLED`, `POSITION_UPDATE`, `ACCOUNT_UPDATE`, `PULSE_STATUS`, `BROKER_STATUS`, `AUTO_STOP_TRIGGERED` |
+| `shared/mongo_client.py` | `EdgeMongoClient` — MongoDB client for sending commands to Edge's `commands` collection |
+| `shared/commands_utils.py` | Command builders and serializers for structured command payloads |
+| `shared/edge_integration.py` | Edge integration helpers: heartbeat (PULSE_STATUS), position updates, account sync |
 
 ### Services
 
@@ -459,6 +641,7 @@ Use this map to quickly locate the code behind any feature.
 | `routes/system.py` | `/api` | `GET /audit-logs` (filterable), `GET /audit-logs/event-types`, `GET /rate-limits` (all broker resilience statuses), `GET /rate-limits/{id}`, `POST /rate-limits/{id}` (update config), `POST /circuit/{id}/reset`, `GET /price-sources`, `POST /price-sources/toggle` |
 | `routes/markets.py` | `/api` | `GET /markets` (all 7 markets with live status), `GET /markets/{code}`, `GET /fx-rates`, `GET /settings/currency-display`, `POST /settings/currency-display` |
 | `routes/strategies.py` | `/api/strategies` | `GET /registry` (all signal strategies with metadata + JSON schema), `GET /registry/{name}`, `GET /presets` (bracket templates), `POST /reload` (hot-reload from disk) |
+| `routes/edge.py` | `/api` | Edge integration endpoints: `GET /tickers`, `GET /positions/{symbol}`, `POST /tickers/{symbol}/decision`, `POST /tickers/{symbol}/trailing`, `GET /account/status`, `POST /signals/evaluate` |
 
 ### Tests
 

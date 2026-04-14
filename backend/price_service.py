@@ -1,10 +1,21 @@
-"""Price service — fetches live prices with broker feeds preferred, yfinance fallback."""
+"""Price service — fetches live prices with broker feeds preferred, yfinance fallback.
+Also provides volume tracking and z-score calculations for signal analysis.
+"""
 import asyncio
+import math
 import random
+from collections import deque
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import deps
+
+
+# Volue z-score settings
+_ZSCORE_WINDOW = 60          # 60-second rolling window
+_ZSCORE_MIN_SAMPLES = 15     # min samples before z-score is meaningful
+_ANOMALY_THRESHOLD = 2.5     # z-score above which volume is anomalous
+_EXTREME_THRESHOLD = 3.5     # z-score above which volume is extreme
 
 
 class PriceService:
@@ -16,6 +27,10 @@ class PriceService:
         self._price_source: Dict[str, str] = {}  # Track which source was used
         self._fx_cache: Dict[str, float] = {"USD": 1.0}
         self._fx_last_fetch: Optional[datetime] = None
+        
+        # Volume tracking for z-score
+        self._volume_history: Dict[str, deque] = {}  # symbol -> deque of volumes
+        self._avg_volume: Dict[str, float] = {}   # symbol -> EMA average volume
     
     def set_prefer_broker_feeds(self, prefer: bool):
         """Toggle preference for broker market data feeds."""
@@ -212,3 +227,155 @@ class PriceService:
             "current_price": current_price,
             "fx_rate":       fx_rate,
         }
+
+    # ------------------------------------------------------------------
+    # Volume Tracking for Z-Score Analysis
+    # ------------------------------------------------------------------
+
+    def update_volume(self, symbol: str, volume: float) -> None:
+        """Update volume history for z-score calculation."""
+        if symbol not in self._volume_history:
+            self._volume_history[symbol] = deque(maxlen=_ZSCORE_WINDOW)
+        self._volume_history[symbol].append(volume)
+        
+        # Update EMA
+        if symbol not in self._avg_volume:
+            self._avg_volume[symbol] = volume
+        else:
+            self._avg_volume[symbol] = self._avg_volume[symbol] * 0.9 + volume * 0.1
+
+    def get_volume_ratio(self, symbol: str, current_volume: float) -> float:
+        """Current volume ÷ EMA average."""
+        if symbol not in self._avg_volume or self._avg_volume[symbol] == 0:
+            return 1.0
+        return current_volume / self._avg_volume[symbol]
+
+    def get_volume_zscore(self, symbol: str, current_volume: float) -> float:
+        """Calculate z-score for volume anomaly detection.
+        
+        Returns:
+            0.0 until at least _ZSCORE_MIN_SAMPLES readings available
+            Positive z-score = unusually heavy volume
+            Negative z-score = unusually light volume
+        """
+        history = self._volume_history.get(symbol)
+        if not history or len(history) < _ZSCORE_MIN_SAMPLES:
+            return 0.0
+        
+        values = list(history)
+        n = len(values)
+        mean = sum(values) / n
+        variance = sum((v - mean) ** 2 for v in values) / n
+        std = math.sqrt(variance)
+        
+        if std < 1.0:
+            return 0.0
+        
+        return (current_volume - mean) / std
+
+    def get_signal_strength(
+        self,
+        symbol: str,
+        price: float,
+        orb_high: Optional[float] = None,
+        orb_low: Optional[float] = None,
+        volume: float = 0,
+        atr: float = 0,
+        price_change_pct: float = 0,
+        observation: Optional[Dict[str, Any]] = None,
+    ) -> tuple:
+        """Calculate signal strength using Edge-style scoring.
+        
+        6 Scoring Layers:
+        1. ORB (Opening Range Breakout)
+        2. Volume Ratio
+        3. Volume Z-Score
+        4. Price Momentum
+        5. Volatility (ATR)
+        6. [NEW] Pattern Observation (from Pulse)
+        
+        Returns:
+            (direction, strength)
+            direction: "bullish", "bearish", or "neutral"
+            strength: -10 to +10
+        """
+        score = 0.0
+        volume_zscore = self.get_volume_zscore(symbol, volume)
+        volume_ratio = self.get_volume_ratio(symbol, volume)
+        
+        # Layer 1: ORB analysis
+        if orb_high is not None and orb_low is not None:
+            if price > orb_high:
+                score += 3.0
+            elif price < orb_low:
+                score -= 3.0
+        
+        # Layer 2: Volume confirmation
+        if volume_ratio > 1.5:
+            boost = min(2.0, (volume_ratio - 1.0) * 1.5)
+            score += boost if score > 0 else -boost
+        elif volume_ratio < 0.5:
+            score *= 0.5
+        
+        # Layer 3: Volume z-score
+        if volume_zscore != 0.0:
+            if volume_zscore >= _EXTREME_THRESHOLD:
+                boost = min(2.0, volume_zscore * 0.5)
+                score += boost if score >= 0 else -boost
+            elif volume_zscore >= _ANOMALY_THRESHOLD:
+                boost = min(1.5, volume_zscore * 0.4)
+                score += boost if score >= 0 else -boost
+            elif volume_zscore <= -1.5:
+                score *= 0.75
+        
+        # Layer 4: Price momentum
+        if price_change_pct > 2.0:
+            score += 2.0
+        elif price_change_pct < -2.0:
+            score -= 2.0
+        elif price_change_pct > 1.0:
+            score += 1.0
+        elif price_change_pct < -1.0:
+            score -= 1.0
+        
+        # Layer 5: Volatility adjustment
+        if atr > 0 and price > 0:
+            vol_pct = (atr / price) * 100
+            if vol_pct > 4.0:
+                score *= 0.7
+            elif vol_pct < 1.0 and abs(score) > 2:
+                score *= 1.2
+        
+        # Layer 6: Pattern Observation (from Pulse)
+        if observation:
+            pattern = observation.get("pattern", "")
+            confidence = observation.get("confidence", 0.0)
+            direction = observation.get("direction", "neutral")
+            
+            if pattern and confidence > 0:
+                # Get pattern weight (default 0.10)
+                from shared.observation_service import CHART_PATTERNS
+                pattern_info = CHART_PATTERNS.get(pattern, {"weight": 0.10})
+                weight = pattern_info.get("weight", 0.10)
+                
+                # Apply confidence-scaled pattern weight
+                pattern_boost = weight * confidence * 10  # Scale to match other layers
+                
+                if direction == "bullish":
+                    score += pattern_boost
+                elif direction == "bearish":
+                    score -= pattern_boost
+                # neutral patterns don't affect direction, just confidence
+        
+        # Clamp to [-10, 10]
+        score = max(-10.0, min(10.0, score))
+        
+        # Direction
+        if score >= 2.0:
+            direction = "bullish"
+        elif score <= -2.0:
+            direction = "bearish"
+        else:
+            direction = "neutral"
+        
+        return direction, round(score, 2)

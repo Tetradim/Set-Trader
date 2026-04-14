@@ -161,6 +161,11 @@ async def lifespan(application: FastAPI):
     except Exception as e:
         deps.logger.warning(f"Broker auto-connect failed: {e}")
 
+    # Initialize Edge MongoDB client (for Edge ↔ Pulse integration)
+    from shared import init_edge_client, start_edge_heartbeat
+    await init_edge_client()
+    await start_edge_heartbeat()
+    
     # Start background tasks
     asyncio.create_task(price_broadcast_loop())
     asyncio.create_task(trading_loop())
@@ -210,6 +215,7 @@ from routes.ws import router as ws_router
 from routes.system import router as system_router
 from routes.markets import router as markets_router
 from routes.strategies import router as strategies_router
+from routes.edge import router as edge_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -220,6 +226,7 @@ api.include_router(ws_router)
 api.include_router(system_router)
 api.include_router(markets_router)
 api.include_router(strategies_router)
+api.include_router(edge_router)
 
 app.include_router(api)
 

@@ -16,6 +16,18 @@ async def start_bot():
     return {"running": True}
 
 
+@router.post("/tickers/{symbol}/rebracket/revert")
+async def revert_ticker_bracket(symbol: str):
+    """Revert a ticker's bracket to the previous one.
+    
+    Returns:
+        dict with success status and reverted bracket info
+    """
+    sym = symbol.upper()
+    result = await deps.engine.revert_bracket(sym)
+    return result
+
+
 @router.post("/bot/stop")
 async def stop_bot():
     deps.engine.running = False
@@ -39,6 +51,25 @@ async def update_settings(body: SettingsUpdate):
     if body.paper_after_hours is not None:
         deps.engine.paper_after_hours = body.paper_after_hours
         await deps.engine.save_state()
+    # Pattern detection settings
+    if body.pattern_detection_enabled is not None:
+        await deps.db.settings.update_one(
+            {"key": "pattern_detection_enabled"},
+            {"$set": {"value": body.pattern_detection_enabled}},
+            upsert=True
+        )
+    if body.pattern_min_confidence is not None:
+        await deps.db.settings.update_one(
+            {"key": "pattern_min_confidence"},
+            {"$set": {"value": body.pattern_min_confidence}},
+            upsert=True
+        )
+    if body.pattern_send_to_edge is not None:
+        await deps.db.settings.update_one(
+            {"key": "pattern_send_to_edge"},
+            {"$set": {"value": body.pattern_send_to_edge}},
+            upsert=True
+        )
     if body.increment_step is not None:
         await deps.db.settings.update_one({"key": "increment_step"}, {"$set": {"value": body.increment_step}}, upsert=True)
     if body.decrement_step is not None:
@@ -75,6 +106,12 @@ async def get_settings():
     dec_doc = await deps.db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
     cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
     balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    
+    # Pattern detection settings
+    pattern_enabled_doc = await deps.db.settings.find_one({"key": "pattern_detection_enabled"}, {"_id": 0})
+    pattern_min_conf_doc = await deps.db.settings.find_one({"key": "pattern_min_confidence"}, {"_id": 0})
+    pattern_edge_doc = await deps.db.settings.find_one({"key": "pattern_send_to_edge"}, {"_id": 0})
+    
     tickers = await deps.db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
     allocated = sum(t.get("base_power", 0) for t in tickers)
     account_balance = balance_doc.get("value", 0) if balance_doc else 0
@@ -93,6 +130,10 @@ async def get_settings():
         "account_balance": round(account_balance, 2),
         "allocated": round(allocated, 2),
         "available": round(account_balance - allocated, 2),
+        # Pattern detection settings
+        "pattern_detection_enabled": pattern_enabled_doc.get("value", True) if pattern_enabled_doc else True,
+        "pattern_min_confidence": pattern_min_conf_doc.get("value", 0.65) if pattern_min_conf_doc else 0.65,
+        "pattern_send_to_edge": pattern_edge_doc.get("value", True) if pattern_edge_doc else True,
     }
 
 

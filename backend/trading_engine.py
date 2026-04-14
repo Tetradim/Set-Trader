@@ -135,6 +135,92 @@ class TradingEngine:
 
         return market.is_open_now()
 
+    # ------------------------------------------------------------------
+    # Paper/Live Mode Edge Case Handling
+    # ------------------------------------------------------------------
+
+    def get_trading_mode(self) -> str:
+        """Get current trading mode as string: 'paper' or 'live'."""
+        if self.simulate_24_7:
+            return "paper"
+        # Live mode: trading with real broker
+        return "live"
+
+    def is_live_trading(self) -> bool:
+        """Check if we're currently in live trading mode."""
+        return not self.simulate_24_7
+
+    def is_paper_trading(self) -> bool:
+        """Check if we're currently in paper trading mode."""
+        return self.simulate_24_7
+
+    async def _validate_order_mode(self, broker_ids: list, ticker_doc: dict) -> tuple[bool, str]:
+        """Validate that order mode is appropriate for the configuration.
+        
+        Returns (is_valid, error_message).
+        """
+        # No brokers = always paper
+        if not broker_ids:
+            return True, ""
+        
+        # Have brokers - check mode
+        if self.simulate_24_7:
+            # Paper mode with brokers - this is valid for simulation
+            return True, ""
+        
+        # Live mode with brokers - verify brokers are connected
+        from deps import broker_mgr
+        for bid in broker_ids:
+            if bid not in broker_mgr._adapters:
+                return False, f"Broker {bid} not connected for live trading"
+        
+        return True, ""
+
+    def validate_broker_config(self, ticker_doc: dict) -> list[str]:
+        """Validate broker configuration for a ticker.
+        
+        Returns list of warnings/errors.
+        """
+        issues = []
+        broker_ids = ticker_doc.get("broker_ids", [])
+        
+        if not broker_ids:
+            return issues
+            
+        # Check if we have live brokers but are in paper mode
+        if self.simulate_24_7 and broker_ids:
+            issues.append("Tickers configured with brokers but running in paper mode")
+        
+        # Check for broker connection issues
+        for bid in broker_ids:
+            if bid in self._failed:
+                issues.append(f"Broker {bid} in failed state: {self._failed.get(bid, 'unknown error')}")
+        
+        return issues
+
+    # ------------------------------------------------------------------
+    # High Water Mark for Drawdown Tracking
+    # ------------------------------------------------------------------
+
+    def update_high_water_mark(self, symbol: str, current_price: float) -> None:
+        """Update high water mark if current price is higher."""
+        pos = self._positions.get(symbol)
+        if not pos or pos.get("qty", 0) <= 0:
+            return
+        high = pos.get("high", 0)
+        if current_price > high:
+            self._positions[symbol]["high"] = current_price
+
+    def get_drawdown_pct(self, symbol: str, current_price: float) -> float:
+        """Calculate drawdown percentage from high water mark."""
+        pos = self._positions.get(symbol)
+        if not pos or pos.get("qty", 0) <= 0:
+            return 0.0
+        high = pos.get("high", 0)
+        if high <= 0:
+            return 0.0
+        return round(((high - current_price) / high) * 100, 2)
+
     def _is_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
         """True during the first `minutes` after market open (DST-aware).
         Uses the ticker's specific market when ticker_doc is provided."""
@@ -251,7 +337,7 @@ class TradingEngine:
             broker_results=broker_results,
         )
         await self._record_trade(trade)
-        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
         self._trailing_highs.pop(sym, None)
         compound = ticker_doc.get("compound_profits", True) if ticker_doc else True
         await self._update_profit(sym, pnl, compound)
@@ -267,14 +353,32 @@ class TradingEngine:
             "trading_mode": trade.trading_mode,
         }
 
-    def is_market_open(self) -> bool:
+    def is_market_open(self, market: str = None) -> bool:
+        """Check if market is open for trading.
+        
+        Args:
+            market: Market code (US, HK, AU, UK, CA). If None, checks all configured markets.
+        
+        In paper mode (simulate_24_7), always returns True.
+        """
         # In paper mode, always allow trading (24/7 simulation)
         if self.simulate_24_7:
             return True
+        
         # In live mode, respect market_hours_only setting
         if not self.market_hours_only:
             return True
-        # Check actual US market hours (9:30 AM - 4:00 PM ET, weekdays) — DST-aware
+        
+        if market:
+            # Check specific market using MarketConfig
+            from markets import MARKETS
+            config = MARKETS.get(market)
+            if config:
+                return config.is_open()
+            # Fallback to US check
+            market = "US"
+        
+        # Default: Check US market hours (9:30 AM - 4:00 PM ET, weekdays) — DST-aware
         now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
@@ -284,6 +388,19 @@ class TradingEngine:
         if hour >= 16:
             return False
         return True
+    
+    def get_open_markets(self) -> list[str]:
+        """Get list of currently open markets."""
+        from markets import MARKETS
+        
+        if self.simulate_24_7 or not self.market_hours_only:
+            return list(MARKETS.keys())  # All markets
+        
+        open_markets = []
+        for code, config in MARKETS.items():
+            if config.is_open():
+                open_markets.append(code)
+        return open_markets
 
     def _get_today_str(self) -> str:
         """Get today's date string in US Eastern Time for tracking daily operations."""
@@ -402,7 +519,7 @@ class TradingEngine:
                             deps.logger.warning(f"All broker orders failed for {sym} BUY — skipping position tracking")
                             return
 
-                    self._positions[sym] = {"qty": qty, "avg_entry": exec_price}
+                    self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
                     order_label = "MKT" if buy_otype == "market" else "LMT"
                     trade = TradeRecord(
                         symbol=sym, side="BUY", price=exec_price, quantity=qty,
@@ -481,7 +598,7 @@ class TradingEngine:
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
-                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                         self._opening_bell_highs.pop(sym, None)
                         self._trailing_highs.pop(sym, None)
                         await self._update_profit(sym, pnl, compound)
@@ -550,7 +667,7 @@ class TradingEngine:
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
-                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                         self._trailing_highs.pop(sym, None)
                         await self._update_profit(sym, pnl, compound)
                         return
@@ -584,7 +701,7 @@ class TradingEngine:
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl, compound)
 
@@ -626,7 +743,7 @@ class TradingEngine:
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)
-                    self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                    self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                     self._trailing_highs.pop(sym, None)
                     await self._update_profit(sym, pnl, compound)
 
@@ -741,7 +858,7 @@ class TradingEngine:
                 broker_results=broker_results,
             )
             await self._record_trade(trade)
-            self._positions[sym] = {"qty": 0, "avg_entry": 0}
+            self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
             self._trailing_highs.pop(sym, None)
             await self._update_profit(sym, pnl, compound)
             return True
@@ -753,66 +870,187 @@ class TradingEngine:
 
     # ------------------------------------------------------------------
     async def _auto_rebracket(self, sym, ticker_doc, price, buy_target, sell_target):
+        """Auto-rebracket to current price when price drifts beyond threshold.
+        
+        Args:
+            sym: Symbol
+            ticker_doc: Full ticker config from DB
+            price: Current market price
+            buy_target: Current buy target (computed from offsets)
+            sell_target: Current sell target (computed from offsets)
+        
+        Bugs fixed:
+        - Now handles both percentage and absolute offsets correctly
+        - Added minimum drift check to prevent micro-rebracketing
+        - Added revert to previous bracket feature
+        """
         threshold = ticker_doc.get("rebracket_threshold", 2.0)
         spread = ticker_doc.get("rebracket_spread", 0.80)
         cooldown = ticker_doc.get("rebracket_cooldown", 0)
         lookback = max(2, ticker_doc.get("rebracket_lookback", 10))
         buffer = ticker_doc.get("rebracket_buffer", 0.10)
-
+        
+        # Minimum price movement to trigger rebracket (prevent micro-rebracketing)
+        min_drift = ticker_doc.get("rebracket_min_drift", 0.50)
+        
         now = datetime.now(timezone.utc)
+        
+        # Cooldown check - since last rebracket
         if cooldown > 0:
             last_rb = self._last_rebracket_ts.get(sym)
             if last_rb and (now - last_rb).total_seconds() < cooldown:
                 return
-
+        
+        # Get history for drift detection
         hist = self._recent_prices.get(sym, [])
         hist.append(price)
         if len(hist) > lookback:
             hist = hist[-lookback:]
         self._recent_prices[sym] = hist
-
-        drifted_up = price > sell_target + threshold
-        drifted_down = price < buy_target - threshold
-        if drifted_up or drifted_down:
-            recent_low = min(hist)
-            new_buy = round(recent_low - buffer, 2)
+        
+        # Calculate drift from current bracket
+        # Buy drift: how far price has moved UP from buy target
+        # Sell drift: how far price has moved DOWN from sell target
+        buy_drift = price - buy_target
+        sell_drift = sell_target - price
+        
+        # Check if price has drifted enough (in either direction)
+        # AND meets minimum drift requirement
+        drifted_up = False
+        drifted_down = False
+        
+        if buy_drift > threshold and buy_drift > min_drift:
+            # Price moved up past buy target + threshold
+            drifted_up = True
+        elif sell_drift > threshold and sell_drift > min_drift:
+            # Price moved down past sell target + threshold
+            drifted_down = True
+        
+        if not (drifted_up or drifted_down):
+            return
+        
+        # Save previous bracket for potential revert
+        prev_bracket = {
+            "buy_target": buy_target,
+            "sell_target": sell_target,
+            "timestamp": now.isoformat(),
+        }
+        
+        # Calculate new bracket based on recent low/high
+        old_buy = buy_target
+        old_sell = sell_target
+        
+        if drifted_up:
+            # Price moved UP - new bracket should be higher
+            new_buy = round(min(hist) - buffer, 2)
             new_sell = round(new_buy + spread, 2)
-            old_buy = buy_target
-            old_sell = sell_target
+            direction = "UP"
+        else:
+            # Price moved DOWN - new bracket should be lower  
+            new_buy = round(max(hist) - buffer, 2)
+            new_sell = round(new_buy + spread, 2)
+            direction = "DOWN"
+        
+        # Handle offset mode (percentage vs absolute)
+        is_pct = ticker_doc.get("sell_percent", True)
+        
+        if is_pct:
+            # Store as percentage offsets relative to current price
+            new_buy_pct = round((new_buy / price - 1) * 100, 2)
+            new_sell_pct = round((new_sell / price - 1) * 100, 2)
+            updates = {
+                "buy_offset": new_buy_pct,
+                "buy_percent": True,
+                "sell_offset": new_sell_pct,
+                "sell_percent": True,
+            }
+        else:
+            # Store as absolute prices
+            updates = {
+                "buy_offset": new_buy,
+                "buy_percent": False,
+                "sell_offset": new_sell,
+                "sell_percent": False,
+            }
+        
+        # Also add previous bracket for revert capability
+        updates["prev_bracket"] = prev_bracket
+        
+        await deps.db.tickers.update_one(
+            {"symbol": sym},
+            {"$set": updates}
+        )
+        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if doc:
+            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+        
+        self._last_rebracket_ts[sym] = now
+        deps.logger.info(
+            f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} "
+            f"(was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, min_drift=${min_drift}]"
+        )
 
-            await deps.db.tickers.update_one(
-                {"symbol": sym},
-                {"$set": {"buy_offset": new_buy, "buy_percent": False, "sell_offset": new_sell, "sell_percent": False}}
+        with deps.tracer.start_as_current_span("ticker.rebracket", attributes={
+            "rebracket.symbol": sym, "rebracket.direction": direction,
+            "rebracket.old_buy": old_buy, "rebracket.old_sell": old_sell,
+            "rebracket.new_buy": new_buy, "rebracket.new_sell": new_sell,
+            "rebracket.price": price,
+        }):
+            pass
+
+        try:
+            await deps.telegram_service._broadcast_alert(
+                f"REBRACKET {sym}\nPrice drifted {direction}: ${price:.2f}\n"
+                f"Old bracket: ${old_buy:.2f} / ${old_sell:.2f}\n"
+                f"New bracket: ${new_buy:.2f} / ${new_sell:.2f}\nSpread: ${spread:.2f}"
             )
+        except Exception:
+            pass
+
+        self._recent_prices[sym] = []
+
+    # ------------------------------------------------------------------
+    async def revert_bracket(self, sym: str) -> dict:
+        """Revert to previous bracket if available.
+        
+        Returns:
+            dict with success status and message
+        """
+        ticker = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if not ticker:
+            return {"success": False, "error": "Ticker not found"}
+        
+        prev = ticker.get("prev_bracket")
+        if not prev:
+            return {"success": False, "error": "No previous bracket to revert to"}
+        
+        # Restore previous bracket
+        old_buy = prev.get("buy_target")
+        old_sell = prev.get("sell_target")
+        
+        if old_buy and old_sell:
+            price = await deps.price_service.get_price(sym)
+            is_pct = ticker.get("sell_percent", True)
+            
+            if is_pct:
+                buy_pct = round((old_buy / price - 1) * 100, 2)
+                sell_pct = round((old_sell / price - 1) * 100, 2)
+                updates = {"buy_offset": buy_pct, "sell_offset": sell_pct}
+            else:
+                updates = {"buy_offset": old_buy, "sell_offset": old_sell}
+            
+            # Clear prev_bracket
+            updates.pop("prev_bracket", None)
+            
+            await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
             doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
             if doc:
                 await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
-
-            self._last_rebracket_ts[sym] = now
-            direction = "UP" if drifted_up else "DOWN"
-            deps.logger.info(
-                f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} "
-                f"(was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, cooldown={cooldown}s]"
-            )
-
-            with deps.tracer.start_as_current_span("ticker.rebracket", attributes={
-                "rebracket.symbol": sym, "rebracket.direction": direction,
-                "rebracket.old_buy": old_buy, "rebracket.old_sell": old_sell,
-                "rebracket.new_buy": new_buy, "rebracket.new_sell": new_sell,
-                "rebracket.price": price,
-            }):
-                pass
-
-            try:
-                await deps.telegram_service._broadcast_alert(
-                    f"REBRACKET {sym}\nPrice drifted {direction}: ${price:.2f}\n"
-                    f"Old bracket: ${old_buy:.2f} / ${old_sell:.2f}\n"
-                    f"New bracket: ${new_buy:.2f} / ${new_sell:.2f}\nSpread: ${spread:.2f}"
-                )
-            except Exception:
-                pass
-
-            self._recent_prices[sym] = []
+            
+            deps.logger.info(f"REVERT: {sym} reverted to ${old_buy} / ${old_sell}")
+            return {"success": True, "reverted_to": {"buy": old_buy, "sell": old_sell}}
+        
+        return {"success": False, "error": "Could not restore previous bracket"}
 
     # ------------------------------------------------------------------
     # Partial Fills — scale in/out with multiple legs
@@ -912,7 +1150,7 @@ class TradingEngine:
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl, compound)
                 return
@@ -974,7 +1212,7 @@ class TradingEngine:
 
             # If all sell legs filled and no position remains, clear
             if pos.get("qty", 0) <= 0.0001:
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
 
         # --- AUTO REBRACKET for partial fills ---
         # Rebracket should still work when no position is held
@@ -1001,6 +1239,14 @@ class TradingEngine:
             doc = trade.model_dump()
             await deps.db.trades.insert_one(doc)
             self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
+            
+            # Send ORDER_FILLED command to Edge if enabled
+            try:
+                from shared.edge_integration import on_trade_executed
+                await on_trade_executed(doc)
+            except ImportError:
+                pass  # Edge integration not available
+            
             pnl_str = f" P&L: ${trade.pnl:+.2f}" if trade.pnl != 0 else ""
             entry_str = f" entry=${trade.entry_price:.2f}" if trade.entry_price > 0 else ""
             deps.logger.info(
