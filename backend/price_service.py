@@ -6,7 +6,7 @@ import math
 import random
 from collections import deque
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import deps
 

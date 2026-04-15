@@ -58,28 +58,38 @@ New-Item -ItemType Directory -Force -Path $STAGING | Out-Null
 # Copy files
 Copy-Item -Path "$DIST\*" -Destination $STAGING -Recurse -Force
 
-# Create uninstaller script
-$uninstallScript = @"
+# Create uninstaller script (silent, no prompt)
+$uninstallScriptSilent = @"
+@echo off
+echo Uninstalling BracketBot...
+timeout /t 1 /nobreak >nul
+del /q "$env:PUBLIC\Desktop\BracketBot.lnk" 2>nul
+del /q "$env:PUBLIC\Desktop\Uninstall BracketBot.lnk" 2>nul
+del /q "$env:PUBLIC\Desktop\BracketBot.url" 2>nul
+del /q "$env:PUBLIC\Desktop\Uninstall BracketBot.url" 2>nul
+del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\*.lnk" 2>nul
+del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\*.url" 2>nul
+rmdir /s /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot" 2>nul
+rmdir /s /q "$InstallDir" 2>nul
+echo Done.
+"@
+
+# Create uninstaller script (with confirmation prompt)
+$uninstallScriptConfirm = @"
 @echo off
 echo Uninstalling BracketBot...
 echo.
-timeout /t 2 /nobreak >nul
 echo Press any key to confirm uninstallation, or Ctrl+C to cancel...
 pause >nul
 echo.
-echo Removing shortcuts...
-del /q "$env:PUBLIC\Desktop\BracketBot.lnk" 2>nul
-del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\*.lnk" 2>nul
-rmdir /s /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot" 2>nul
-echo Removing application files...
-rmdir /s /q "$InstallDir" 2>nul
-echo.
+call "$InstallDir\Uninstall-Silent.bat"
 echo BracketBot has been uninstalled.
-echo.
 pause
 "@
 
-$uninstallScript | Out-File -FilePath "$STAGING\Uninstall.bat" -Encoding ASCII
+# Write both versions
+$uninstallScriptSilent | Out-File -FilePath "$STAGING\Uninstall-Silent.bat" -Encoding ASCII
+$uninstallScriptConfirm | Out-File -FilePath "$STAGING\Uninstall.bat" -Encoding ASCII
 
 # Create Start Menu shortcuts
 $startMenuFolder = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot"
@@ -99,17 +109,17 @@ URL=file:///$InstallDir/backend/api/config
 "@
 $configShortcut | Out-File -FilePath "$startMenuFolder\Configure.url" -Encoding ASCII
 
-# Uninstall shortcut
+# Uninstall shortcut (with confirmation)
 $uninstallShortcut = @"
 [InternetShortcut]
 URL=file:///$InstallDir/Uninstall.bat
 "@
 $uninstallShortcut | Out-File -FilePath "$startMenuFolder\Uninstall.url" -Encoding ASCII
 
-# Desktop Uninstall shortcut (runs uninstall when clicked)
+# Desktop Uninstall shortcut (runs silent uninstall when clicked)
 $desktopUninstallShortcut = @"
 [InternetShortcut]
-URL=file:///$InstallDir/Uninstall-Shortcut.bat
+URL=file:///$InstallDir/Uninstall-Silent.bat
 "@
 $desktopUninstallShortcut | Out-File -FilePath "$env:PUBLIC\Desktop\Uninstall BracketBot.url" -Encoding ASCII
 
