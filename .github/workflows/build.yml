@@ -40,7 +40,7 @@ jobs:
       - name: Build with PyInstaller
         run: |
           cd backend
-          python -m PyInstaller --clean --onefile --windowed --name SentinelPulse --icon=assets/icon.ico main.py
+          python -m PyInstaller --clean --onefile --windowed --name SentinelPulse --icon=assets/icon.ico server.py
         shell: pwsh
 
       - name: Install Inno Setup
