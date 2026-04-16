@@ -40,7 +40,15 @@ jobs:
       - name: Build with PyInstaller
         run: |
           cd backend
-          python -m PyInstaller --clean --onefile --windowed --name SentinelPulse server.py
+          # Create default .env if not exists
+          if (-not (Test-Path .env)) {
+            @"
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=sentinelpulse
+CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+"@ | Out-File -Encoding UTF8 .env
+          }
+          python -m PyInstaller --clean --onefile --windowed --name SentinelPulse --add-data ".env;." server.py
         shell: pwsh
 
       - name: Install Inno Setup
