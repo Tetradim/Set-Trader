@@ -1,260 +1,193 @@
-name: Build Sentinel Pulse
+param(
+    [switch]$Clean,
+    [string]$InstallDir = "$env:ProgramFiles\BracketBot",
+    [switch]$CreateDesktopShortcut,
+    [switch]$NoDesktopShortcut
+)
 
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+$ErrorActionPreference = "Stop"
+$ROOT = $PSScriptRoot
+$BACKEND = Join-Path $ROOT "backend"
+$DIST = Join-Path $BACKEND "dist"
 
-jobs:
-  build-windows:
-    runs-on: windows-latest
-    timeout-minutes: 60
+Write-Host ""
+Write-Host "  ===========================================" -ForegroundColor Cyan
+Write-Host "    BracketBot Windows Installer Builder" -ForegroundColor Cyan
+Write-Host "  ===========================================" -ForegroundColor Cyan
+Write-Host ""
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+# Check for 7-Zip
+$sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+if (-not $sevenZip) {
+    Write-Host "[WARN] 7-Zip not found. Installing without compression." -ForegroundColor Yellow
+}
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+# Build steps
+$step = 1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+# 1. Build the application (if not exists)
+if (-not (Test-Path "$DIST\BracketBot.exe")) {
+    Write-Host "[$step/4] Building BracketBot..." -ForegroundColor Green
+    & "$ROOT\build-windows.ps1" -SkipFrontend
+    $step++
+} else {
+    Write-Host "[SKIP] BracketBot.exe already exists." -ForegroundColor Gray
+}
 
-      - name: Install Python dependencies
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
-          pip install pyinstaller pillow
+# 2. Create installer package
+Write-Host "[$step/4] Creating installer package..." -ForegroundColor Green
+$STAGING = Join-Path $ROOT ".installer-staging"
+if ($Clean -and (Test-Path $STAGING)) { Remove-Item -Recurse -Force $STAGING }
+New-Item -ItemType Directory -Force -Path $STAGING | Out-Null
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
+# Copy files
+Copy-Item -Path "$DIST\*" -Destination $STAGING -Recurse -Force
 
-      - name: Build frontend
-        working-directory: frontend
-        env:
-          REACT_APP_BACKEND_URL: ''
-        run: npm run build
+# Create uninstaller script (silent, no prompt)
+$uninstallScriptSilent = @"
+@echo off
+echo Uninstalling BracketBot...
+timeout /t 1 /nobreak >nul
+del /q "$env:PUBLIC\Desktop\BracketBot.lnk" 2>nul
+del /q "$env:PUBLIC\Desktop\Uninstall BracketBot.lnk" 2>nul
+del /q "$env:PUBLIC\Desktop\BracketBot.url" 2>nul
+del /q "$env:PUBLIC\Desktop\Uninstall BracketBot.url" 2>nul
+del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\*.lnk" 2>nul
+del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\*.url" 2>nul
+rmdir /s /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot" 2>nul
+rmdir /s /q "$InstallDir" 2>nul
+echo Done.
+"@
 
-      - name: Copy frontend to backend/static
-        run: |
-          if (Test-Path backend\static) { Remove-Item -Recurse -Force backend\static }
-          Copy-Item -Recurse frontend\dist backend\static
-        shell: pwsh
+# Create uninstaller script (with confirmation prompt)
+$uninstallScriptConfirm = @"
+@echo off
+echo Uninstalling BracketBot...
+echo.
+echo Press any key to confirm uninstallation, or Ctrl+C to cancel...
+pause >nul
+echo.
+call "$InstallDir\Uninstall-Silent.bat"
+echo BracketBot has been uninstalled.
+pause
+"@
 
-      - name: Create app icon
-        run: |
-          python -c "
-          from PIL import Image, ImageDraw
-          # Create a simple icon - purple/blue gradient circle with 'SP' text
-          sizes = [16, 32, 48, 64, 128, 256]
-          images = []
-          for size in sizes:
-              img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-              draw = ImageDraw.Draw(img)
-              # Purple gradient circle
-              draw.ellipse([0, 0, size-1, size-1], fill=(139, 92, 246, 255))
-              draw.ellipse([2, 2, size-3, size-3], fill=(124, 58, 237, 255))
-              images.append(img)
-          images[0].save('app.ico', format='ICO', sizes=[(s, s) for s in sizes])
-          "
-          Copy-Item app.ico backend\app.ico
-        shell: pwsh
+# Write both versions
+$uninstallScriptSilent | Out-File -FilePath "$STAGING\Uninstall-Silent.bat" -Encoding ASCII
+$uninstallScriptConfirm | Out-File -FilePath "$STAGING\Uninstall.bat" -Encoding ASCII
 
-      - name: Create default .env
-        working-directory: backend
-        run: |
-          @"
-          MONGO_URL=mongodb://localhost:27017
-          DB_NAME=sentinelpulse
-          CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
-          "@ | Out-File -Encoding UTF8 .env
-        shell: pwsh
+# Create Start Menu shortcuts
+$startMenuFolder = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot"
+New-Item -ItemType Directory -Force -Path $startMenuFolder | Out-Null
 
-      - name: Build executable with PyInstaller
-        working-directory: backend
-        run: |
-          pyinstaller `
-            --name "SentinelPulse" `
-            --onedir `
-            --console `
-            --icon "app.ico" `
-            --add-data "static;static" `
-            --add-data ".env;." `
-            --hidden-import "uvicorn.logging" `
-            --hidden-import "uvicorn.loops" `
-            --hidden-import "uvicorn.loops.auto" `
-            --hidden-import "uvicorn.protocols" `
-            --hidden-import "uvicorn.protocols.http" `
-            --hidden-import "uvicorn.protocols.http.auto" `
-            --hidden-import "uvicorn.protocols.websockets" `
-            --hidden-import "uvicorn.protocols.websockets.auto" `
-            --hidden-import "uvicorn.lifespan" `
-            --hidden-import "uvicorn.lifespan.on" `
-            --hidden-import "motor" `
-            --hidden-import "motor.motor_asyncio" `
-            --hidden-import "pymongo" `
-            --hidden-import "dns.resolver" `
-            --hidden-import "yfinance" `
-            --hidden-import "telegram" `
-            --hidden-import "telegram.ext" `
-            --hidden-import "opentelemetry" `
-            --hidden-import "opentelemetry.trace" `
-            --hidden-import "opentelemetry.sdk" `
-            --hidden-import "opentelemetry.sdk.trace" `
-            --hidden-import "email.mime.text" `
-            --hidden-import "email.mime.multipart" `
-            --collect-all "yfinance" `
-            --collect-all "certifi" `
-            --collect-all "motor" `
-            --collect-all "pymongo" `
-            --noconfirm `
-            server.py
-        shell: pwsh
+# Main app shortcut
+$appShortcut = @"
+[InternetShortcut]
+URL=file:///$InstallDir/BracketBot.exe
+"@
+$appShortcut | Out-File -FilePath "$startMenuFolder\Run BracketBot.url" -Encoding ASCII
 
-      - name: Download MongoDB
-        run: |
-          # Download MongoDB Community Server 7.0 (zip version - easier to extract)
-          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip"
-          Write-Host "Downloading MongoDB..."
-          Invoke-WebRequest -Uri $mongoUrl -OutFile mongodb.zip
-          Write-Host "Extracting MongoDB..."
-          Expand-Archive -Path mongodb.zip -DestinationPath mongodb_temp -Force
-          # Find and copy mongod.exe
-          New-Item -ItemType Directory -Force -Path "mongodb"
-          $mongodPath = Get-ChildItem -Path "mongodb_temp" -Recurse -Filter "mongod.exe" | Select-Object -First 1
-          Write-Host "Found mongod at: $($mongodPath.FullName)"
-          Copy-Item $mongodPath.FullName "mongodb\"
-          Write-Host "MongoDB ready"
-          dir mongodb
-        shell: pwsh
+# Config shortcut
+$configShortcut = @"
+[InternetShortcut]
+URL=file:///$InstallDir/backend/api/config
+"@
+$configShortcut | Out-File -FilePath "$startMenuFolder\Configure.url" -Encoding ASCII
 
-      - name: Download VC++ Redistributable
-        run: |
-          # Download Visual C++ Redistributable 2015-2022 (required for Python/PyInstaller apps)
-          $vcUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-          Write-Host "Downloading VC++ Redistributable..."
-          Invoke-WebRequest -Uri $vcUrl -OutFile vc_redist.x64.exe
-          Write-Host "VC++ Redistributable downloaded"
-        shell: pwsh
+# Uninstall shortcut (with confirmation)
+$uninstallShortcut = @"
+[InternetShortcut]
+URL=file:///$InstallDir/Uninstall.bat
+"@
+$uninstallShortcut | Out-File -FilePath "$startMenuFolder\Uninstall.url" -Encoding ASCII
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y
+# Desktop Uninstall shortcut (runs silent uninstall when clicked)
+$desktopUninstallShortcut = @"
+[InternetShortcut]
+URL=file:///$InstallDir/Uninstall-Silent.bat
+"@
+$desktopUninstallShortcut | Out-File -FilePath "$env:PUBLIC\Desktop\Uninstall BracketBot.url" -Encoding ASCII
 
-      - name: Create Inno Setup script
-        run: |
-          $script = @'
-          [Setup]
-          AppName=Sentinel Pulse
-          AppVersion=1.0.0
-          AppPublisher=Signal Forge Laboratory
-          DefaultDirName={autopf}\SentinelPulse
-          DefaultGroupName=Sentinel Pulse
-          OutputDir=.
-          OutputBaseFilename=SentinelPulse-Setup
-          Compression=lzma2
-          SolidCompression=yes
-          PrivilegesRequired=admin
-          WizardStyle=modern
-          DisableProgramGroupPage=yes
+# Desktop shortcut (optional)
+if ($CreateDesktopShortcut -or (-not $NoDesktopShortcut)) {
+    $desktopShortcut = @"
+[InternetShortcut]
+URL=file:///$InstallDir/BracketBot.exe
+"@
+    $desktopShortcut | Out-File -FilePath "$env:PUBLIC\Desktop\BracketBot.url" -Encoding ASCII
+}
 
-          [Files]
-          Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-          Source: "mongodb\*"; DestDir: "{app}\mongodb"; Flags: ignoreversion
-          Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+# 3. Create installer batch (self-extracting)
+Write-Host "[$step/4] Creating self-extracting installer..." -ForegroundColor Green
 
-          [Dirs]
-          Name: "{app}\data"; Permissions: users-full
+$installerBatch = @"
+@echo off
+setlocal enabledelayedexpansion
 
-          [Icons]
-          Name: "{group}\Sentinel Pulse"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"
-          Name: "{group}\Uninstall Sentinel Pulse"; Filename: "{uninstallexe}"
-          Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+echo ============================================
+echo   BracketBot Installer
+echo ============================================
+echo.
+echo Installing to: $InstallDir
+echo.
+echo Creating directory...
+mkdir "$InstallDir" 2>nul
+echo Copying files...
+xcopy /E /Y /Q "$~dp0*.*" "$InstallDir\" >nul
+echo.
+echo Creating Start Menu shortcuts...
+powershell -Command "New-Item -ItemType Directory -Force -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot' | Out-Null"
+powershell -Command "Set-Content -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\Run BracketBot.url' -Value '[InternetShortcut]'" -Append
+powershell -Command "Add-Content -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\BracketBot\Run BracketBot.url' -Value 'URL=file:///$InstallDir/BracketBot.exe'"
+if (-not $NoDesktopShortcut) (
+    echo Creating Desktop shortcuts...
+    powershell -Command "Set-Content -Path '$env:PUBLIC\Desktop\BracketBot.url' -Value '[InternetShortcut]'" -Append
+    powershell -Command "Add-Content -Path '$env:PUBLIC\Desktop\BracketBot.url' -Value 'URL=file:///$InstallDir\BracketBot.exe'"
+    powershell -Command "Set-Content -Path '$env:PUBLIC\Desktop\Uninstall BracketBot.url' -Value '[InternetShortcut]'" -Append
+    powershell -Command "Add-Content -Path '$env:PUBLIC\Desktop\Uninstall BracketBot.url' -Value 'URL=file:///$InstallDir/Uninstall.bat'"
+)
+echo.
+echo ============================================
+echo   Installation Complete!
+echo ============================================
+echo.
+echo   Run: BracketBot
+echo   Uninstall: Double-click "Uninstall BracketBot" on desktop
+echo   Configure: Start Menu > BracketBot > Configure
+echo.
+echo   Press any key to launch BracketBot, or close window.
+pause >nul
+start "" "$InstallDir\BracketBot.exe"
+exit
+"@
 
-          [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+$installerBatch | Out-File -FilePath "$STAGING\Install.bat" -Encoding ASCII
 
-          [Run]
-          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated
-          Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent shellexec
-          '@
-          $script | Out-File -FilePath setup.iss -Encoding ASCII
-          
-          # Create the batch file
-          $batch = @'
-          @echo off
-          title Sentinel Pulse
-          cd /d "%~dp0"
-          echo.
-          echo  ==================================================
-          echo    Sentinel Pulse - Trading Bot
-          echo  ==================================================
-          echo.
-          echo  [1/2] Starting MongoDB database...
-          if not exist "data" mkdir "data"
-          start "" /min "mongodb\mongod.exe" --dbpath "data" --port 27017
-          echo        MongoDB started on port 27017
-          echo.
-          echo  [2/2] Starting Sentinel Pulse server...
-          timeout /t 3 /nobreak > nul
-          echo        Browser will open automatically...
-          echo.
-          echo  --------------------------------------------------
-          echo  Press Ctrl+C to stop the server when done.
-          echo  --------------------------------------------------
-          echo.
-          SentinelPulse.exe
-          echo.
-          echo  Server stopped.
-          pause
-          '@
-          $batch | Out-File -FilePath "backend\dist\SentinelPulse\Start Sentinel Pulse.bat" -Encoding ASCII
-        shell: pwsh
+# 4. Package it
+if ($sevenZip) {
+    Write-Host "[$step/4] Compressing installer..." -ForegroundColor Green
+    $output = "$ROOT\BracketBot-Setup.exe"
+    Push-Location $STAGING
+    7z a -mx=9 "$output" *.* -r | Out-Null
+    Pop-Location
+    
+    # Create self-extracting archive
+    # This is a simple approach - for production use NSIS
+    Write-Host "[OK] Installer created: $output" -ForegroundColor Green
+    Write-Host "     Run Install.bat in the staging folder to install." -ForegroundColor Cyan
+} else {
+    Write-Host "[OK] Staging complete. Run Install.bat in .installer-staging to install." -ForegroundColor Green
+}
 
-      - name: Build installer with Inno Setup
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
-        shell: pwsh
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: SentinelPulse-Installer
-          path: SentinelPulse-Setup.exe
-          retention-days: 90
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: SentinelPulse-Setup.exe
-          generate_release_notes: true
-          body: |
-            ## Sentinel Pulse - Windows Installer
-            
-            ### Installation
-            1. Download `SentinelPulse-Setup.exe`
-            2. Run the installer (may need to click "More info" → "Run anyway")
-            3. Follow the installation wizard
-            4. Launch from Desktop shortcut
-            
-            ### What's Included
-            - Sentinel Pulse trading bot
-            - MongoDB database (bundled, no separate install needed)
-            - Auto-starts MongoDB when you launch the app
-            
-            ### Requirements
-            - Windows 10/11 (64-bit)
-            - Internet connection for live price data
-            
-            ### First Run
-            Click the desktop shortcut. A terminal window opens showing:
-            1. MongoDB starting
-            2. Sentinel Pulse starting
-            3. Browser opens to http://localhost:8001
+Write-Host ""
+Write-Host "  ===========================================" -ForegroundColor Cyan
+Write-Host "    Installer Ready!" -ForegroundColor Cyan
+Write-Host "  ===========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Shortcuts created:" -ForegroundColor White
+Write-Host "  - Desktop: BracketBot (launches app)" -ForegroundColor Gray
+Write-Host "  - Desktop: Uninstall BracketBot (removes app)" -ForegroundColor Gray
+Write-Host "  - Start Menu > BracketBot > Run BracketBot" -ForegroundColor Gray
+Write-Host "  - Start Menu > BracketBot > Configure" -ForegroundColor Gray  
+Write-Host "  - Start Menu > BracketBot > Uninstall" -ForegroundColor Gray
+Write-Host ""
