@@ -25,6 +25,24 @@ from shared import (
 router = APIRouter()
 
 
+# --- Signal/Decision models (for Edge compatibility) ---
+class SignalRequest(BaseModel):
+    """Signal request from Edge."""
+    action: str  # buy, sell, stop
+    confidence: float = 1.0
+    bracket: Optional[dict] = None
+    decision: str = "hold"  # Legacy field
+
+
+class SignalResponse(BaseModel):
+    """Signal response to Edge."""
+    status: str
+    symbol: str
+    decision: str
+    confidence: float = 1.0
+    message: str = ""
+
+
 # --- Simple in-memory rate limiter ---
 _rate_limits: dict = {}  # ip -> [(timestamp, count), ...]
 _RATE_LIMIT = 60        # requests per minute
