@@ -55,11 +55,3 @@ jobs:
           name: SentinelPulse-Installer
           path: Output/SentinelPulse-Setup.exe
           if-no-files-found: error
-
-      - name: Upload Artifacts (for debugging)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Build-Artifacts
-          path: |
-            backend/dist/
-            Output/
