@@ -4,14 +4,28 @@ Every module that needs access to global state imports this module
 and reads deps.db, deps.engine, etc.  This breaks circular imports.
 """
 import os
+import sys
 import logging
+import tempfile
 from pathlib import Path
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+# Find .env in bundled app or development
+if getattr(sys, 'frozen', False):
+    # Running as bundled PyInstaller app
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).parent
+
+# Try multiple possible .env locations
+for env_path in [BASE_DIR / ".env", Path(".env")]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
+
+ROOT_DIR = BASE_DIR
 
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
