@@ -1,0 +1,275 @@
+name: Build Sentinel Edge
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          REACT_APP_BACKEND_URL: ''
+          REACT_APP_PULSE_URL: ''
+        run: npm run build
+
+      - name: Copy frontend to backend/static
+        run: |
+          if (Test-Path backend\static) { Remove-Item -Recurse -Force backend\static }
+          Copy-Item -Recurse frontend\dist backend\static
+        shell: pwsh
+
+      - name: Create app icon
+        run: |
+          python -c "
+          from PIL import Image, ImageDraw
+          # Create a simple icon - emerald green circle with 'SE' text
+          sizes = [16, 32, 48, 64, 128, 256]
+          images = []
+          for size in sizes:
+              img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+              draw = ImageDraw.Draw(img)
+              # Emerald green gradient circle
+              draw.ellipse([0, 0, size-1, size-1], fill=(16, 185, 129, 255))
+              draw.ellipse([2, 2, size-3, size-3], fill=(34, 197, 94, 255))
+              images.append(img)
+          images[0].save('app.ico', format='ICO', sizes=[(s, s) for s in sizes])
+          "
+          Copy-Item app.ico backend\app.ico
+        shell: pwsh
+
+      - name: Create default .env
+        working-directory: backend
+        run: |
+          @"
+          MONGO_URL=mongodb://localhost:27017
+          DB_NAME=sentinel_edge
+          CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+          PULSE_API_URL=http://pulse:8001
+          DRY_RUN=true
+          "@ | Out-File -Encoding UTF8 .env
+        shell: pwsh
+
+      - name: Build executable with PyInstaller
+        working-directory: backend
+        run: |
+          pyinstaller `
+            --name "SentinelEdge" `
+            --onedir `
+            --console `
+            --icon "app.ico" `
+            --add-data "static;static" `
+            --add-data ".env;." `
+            --hidden-import "uvicorn.logging" `
+            --hidden-import "uvicorn.loops" `
+            --hidden-import "uvicorn.loops.auto" `
+            --hidden-import "uvicorn.protocols" `
+            --hidden-import "uvicorn.protocols.http" `
+            --hidden-import "uvicorn.protocols.http.auto" `
+            --hidden-import "uvicorn.protocols.websockets" `
+            --hidden-import "uvicorn.protocols.websockets.auto" `
+            --hidden-import "uvicorn.lifespan" `
+            --hidden-import "uvicorn.lifespan.on" `
+            --hidden-import "motor" `
+            --hidden-import "motor.motor_asyncio" `
+            --hidden-import "pymongo" `
+            --hidden-import "dns.resolver" `
+            --hidden-import "yfinance" `
+            --hidden-import "prometheus_client" `
+            --hidden-import "talib" `
+            --hidden-import "numpy" `
+            --hidden-import "pandas" `
+            --collect-all "yfinance" `
+            --collect-all "certifi" `
+            --collect-all "motor" `
+            --collect-all "pymongo" `
+            --collect-all "talib" `
+            --noconfirm `
+            server.py
+        shell: pwsh
+
+      - name: Download MongoDB
+        run: |
+          # Download MongoDB Community Server 7.0 (zip version - easier to extract)
+          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip"
+          Write-Host "Downloading MongoDB..."
+          Invoke-WebRequest -Uri $mongoUrl -OutFile mongodb.zip
+          Write-Host "Extracting MongoDB..."
+          Expand-Archive -Path mongodb.zip -DestinationPath mongodb_temp -Force
+          # Find and copy mongod.exe
+          New-Item -ItemType Directory -Force -Path "mongodb"
+          $mongodPath = Get-ChildItem -Path "mongodb_temp" -Recurse -Filter "mongod.exe" | Select-Object -First 1
+          Write-Host "Found mongod at: $($mongodPath.FullName)"
+          Copy-Item $mongodPath.FullName "mongodb\"
+          Write-Host "MongoDB ready"
+          dir mongodb
+        shell: pwsh
+
+      - name: Download VC++ Redistributable
+        run: |
+          # Download Visual C++ Redistributable 2015-2022 (required for Python/PyInstaller apps)
+          $vcUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+          Write-Host "Downloading VC++ Redistributable..."
+          Invoke-WebRequest -Uri $vcUrl -OutFile vc_redist.x64.exe
+          Write-Host "VC++ Redistributable downloaded"
+        shell: pwsh
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Create Inno Setup script
+        run: |
+          $script = @'
+          [Setup]
+          AppName=Sentinel Edge
+          AppVersion=1.0.0
+          AppPublisher=Signal Forge Laboratory
+          DefaultDirName={autopf}\SentinelEdge
+          DefaultGroupName=Sentinel Edge
+          OutputDir=.
+          OutputBaseFilename=SentinelEdge-Setup
+          Compression=lzma2
+          SolidCompression=yes
+          PrivilegesRequired=admin
+          WizardStyle=modern
+          DisableProgramGroupPage=yes
+          ; Required so {commondesktop} uninstall shortcut resolves correctly
+          UninstallDisplayName=Sentinel Edge
+          UninstallDisplayIcon={app}\SentinelEdge.exe
+
+          [Files]
+          Source: "backend\dist\SentinelEdge\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+          Source: "mongodb\*"; DestDir: "{app}\mongodb"; Flags: ignoreversion
+          Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
+          [Dirs]
+          Name: "{app}\data"; Permissions: users-full
+
+          [Icons]
+          ; ── Start Menu shortcuts ──────────────────────────────────────────────
+          Name: "{group}\Sentinel Edge";           Filename: "{app}\Start Sentinel Edge.bat"; WorkingDir: "{app}"
+          Name: "{group}\Uninstall Sentinel Edge"; Filename: "{uninstallexe}"
+
+          ; ── Desktop shortcuts (both created unconditionally) ──────────────────
+          Name: "{commondesktop}\Sentinel Edge";           Filename: "{app}\Start Sentinel Edge.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+          Name: "{commondesktop}\Uninstall Sentinel Edge"; Filename: "{uninstallexe}";                WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create desktop shortcuts (Launch + Uninstall)"; GroupDescription: "Additional icons:"
+
+          [Run]
+          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated
+          Filename: "{app}\Start Sentinel Edge.bat"; Description: "Launch Sentinel Edge"; Flags: nowait postinstall skipifsilent shellexec
+          '@
+          $script | Out-File -FilePath setup.iss -Encoding ASCII
+
+          # Create the batch file
+          $batch = @'
+          @echo off
+          title Sentinel Edge
+          cd /d "%~dp0"
+          echo.
+          echo  ==================================================
+          echo    Sentinel Edge - Trading Brain
+          echo  ==================================================
+          echo.
+          echo  [1/2] Starting MongoDB database...
+          if not exist "data" mkdir "data"
+          start "" /min "mongodb\mongod.exe" --dbpath "data" --port 27017
+          echo        MongoDB started on port 27017
+          echo.
+          echo  [2/2] Starting Sentinel Edge server...
+          timeout /t 3 /nobreak > nul
+          echo        Browser will open automatically...
+          echo.
+          echo  --------------------------------------------------
+          echo  Press Ctrl+C to stop the server when done.
+          echo  --------------------------------------------------
+          echo.
+          SentinelEdge.exe
+          echo.
+          echo  Server stopped.
+          pause
+          '@
+          $batch | Out-File -FilePath "backend\dist\SentinelEdge\Start Sentinel Edge.bat" -Encoding ASCII
+        shell: pwsh
+
+      - name: Build installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
+        shell: pwsh
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelEdge-Installer
+          path: SentinelEdge-Setup.exe
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SentinelEdge-Setup.exe
+          generate_release_notes: true
+          body: |
+            ## Sentinel Edge - Windows Installer
+
+            ### Installation
+            1. Download `SentinelEdge-Setup.exe`
+            2. Run the installer (may need to click "More info" → "Run anyway")
+            3. Follow the installation wizard
+            4. Launch from Desktop shortcut
+
+            ### What's Included
+            - Sentinel Edge trading brain
+            - MongoDB database (bundled, no separate install needed)
+            - Auto-starts MongoDB when you launch the app
+            - Frontend UI
+
+            ### Features
+            - Paper Trading (no API keys needed)
+            - Portfolio Analytics
+            - Pattern Recognition
+            - Strategy Backtesting
+            - Live signal generation
+
+            ### Requirements
+            - Windows 10/11 (64-bit)
+            - Internet connection for live price data
+
+            ### First Run
+            Click the desktop shortcut. A terminal window opens showing:
+            1. MongoDB starting
+            2. Sentinel Edge starting
+            3. Browser opens to http://localhost:8000
