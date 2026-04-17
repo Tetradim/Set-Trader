@@ -119,20 +119,26 @@ async def trading_loop():
 # --- App lifecycle ---
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    await deps.db.tickers.create_index("symbol", unique=True)
-    await deps.db.trades.create_index("timestamp")
-    await deps.db.profits.create_index("symbol", unique=True)
-    await deps.db.audit_logs.create_index("timestamp")
-    await deps.db.audit_logs.create_index("event_type")
+    try:
+        await deps.db.tickers.create_index("symbol", unique=True)
+        await deps.db.trades.create_index("timestamp")
+        await deps.db.profits.create_index("symbol", unique=True)
+        await deps.db.audit_logs.create_index("timestamp")
+        await deps.db.audit_logs.create_index("event_type")
+    except Exception as e:
+        deps.logger.warning(f"Failed to create indexes: {e}")
 
     # Seed defaults if empty
-    count = await deps.db.tickers.count_documents({})
-    if count == 0:
-        for sym in ["TSLA", "AAPL", "NVDA"]:
-            t = TickerConfig(symbol=sym, base_power=100.0)
-            await deps.db.tickers.update_one(
-                {"symbol": sym}, {"$setOnInsert": t.model_dump()}, upsert=True
-            )
+    try:
+        count = await deps.db.tickers.count_documents({})
+        if count == 0:
+            for sym in ["TSLA", "AAPL", "NVDA"]:
+                t = TickerConfig(symbol=sym, base_power=100.0)
+                await deps.db.tickers.update_one(
+                    {"symbol": sym}, {"$setOnInsert": t.model_dump()}, upsert=True
+                )
+    except Exception as e:
+        deps.logger.warning(f"Failed to seed defaults: {e}")
 
     # Restore engine state
     await deps.engine.load_state()
