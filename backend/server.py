@@ -155,21 +155,27 @@ async def lifespan(application: FastAPI):
         deps.logger.warning(f"Failed to load settings: {e}")
     
     # Initialize resilience (token-bucket rate limiter + circuit breakers)
-    from resilience import broker_resilience
-    broker_resilience.set_telegram(deps.telegram_service)
-    broker_resilience.set_ws_manager(deps.ws_manager)
-    await broker_resilience.load_config()
+    try:
+        from resilience import broker_resilience
+        broker_resilience.set_telegram(deps.telegram_service)
+        broker_resilience.set_ws_manager(deps.ws_manager)
+        await asyncio.wait_for(broker_resilience.load_config(), timeout=3.0)
+    except Exception as e:
+        deps.logger.warning(f"Failed to init resilience: {e}")
 
     # Load pluggable strategy system
-    from strategies.loader import load_all_strategies, start_strategy_watcher
-    await load_all_strategies()
-    start_strategy_watcher()
+    try:
+        from strategies.loader import load_all_strategies, start_strategy_watcher
+        await asyncio.wait_for(load_all_strategies(), timeout=3.0)
+        start_strategy_watcher()
+    except Exception as e:
+        deps.logger.warning(f"Failed to load strategies: {e}")
 
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)
     deps.broker_mgr.set_ws_manager(deps.ws_manager)
     try:
-        await deps.broker_mgr.auto_connect_all()
+        await asyncio.wait_for(deps.broker_mgr.auto_connect_all(), timeout=3.0)
     except Exception as e:
         deps.logger.warning(f"Broker auto-connect failed: {e}")
 
