@@ -141,12 +141,18 @@ async def lifespan(application: FastAPI):
         deps.logger.warning(f"Failed to seed defaults: {e}")
 
     # Restore engine state
-    await deps.engine.load_state()
+    try:
+        await asyncio.wait_for(deps.engine.load_state(), timeout=3.0)
+    except Exception as e:
+        deps.logger.warning(f"Failed to load engine state: {e}")
     
     # Load price service preference
-    pref_doc = await deps.db.settings.find_one({"key": "prefer_broker_feeds"})
-    if pref_doc:
-        deps.price_service.set_prefer_broker_feeds(pref_doc.get("value", True))
+    try:
+        pref_doc = await asyncio.wait_for(deps.db.settings.find_one({"key": "prefer_broker_feeds"}), timeout=3.0)
+        if pref_doc:
+            deps.price_service.set_prefer_broker_feeds(pref_doc.get("value", True))
+    except Exception as e:
+        deps.logger.warning(f"Failed to load settings: {e}")
     
     # Initialize resilience (token-bucket rate limiter + circuit breakers)
     from resilience import broker_resilience
