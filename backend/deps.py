@@ -31,10 +31,14 @@ ROOT_DIR = BASE_DIR
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("SentinelPulse")
 
-# MongoDB - use getenv with defaults
+# MongoDB - use getenv with defaults with timeout
 mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 db_name = os.environ.get("DB_NAME", "sentinelpulse")
-mongo_client = AsyncIOMotorClient(mongo_url)
+mongo_client = AsyncIOMotorClient(
+    mongo_url,
+    serverSelectionTimeoutMS=2000,  # 2 second timeout
+    connectTimeoutMS=2000,
+)
 db = mongo_client[db_name]
 
 # yfinance
