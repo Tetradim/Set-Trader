@@ -189,10 +189,11 @@ async def lifespan(application: FastAPI):
     # Load pluggable strategy system
     try:
         from strategies.loader import load_all_strategies, start_strategy_watcher
-        await asyncio.wait_for(load_all_strategies(), timeout=3.0)
+        strategies = await asyncio.wait_for(load_all_strategies(), timeout=3.0)
         start_strategy_watcher()
+        deps.logger.info(f"Loaded {len(strategies)} strategy plugins")
     except Exception as e:
-        deps.logger.warning(f"Failed to load strategies: {e}")
+        deps.logger.warning(f"Failed to load strategies: {e}", exc_info=True)
 
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)

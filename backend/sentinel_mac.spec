@@ -85,6 +85,11 @@ a = Analysis(
         "starlette.responses",
         "fastapi",
         "fastapi.middleware.cors",
+        # pydantic (required by strategies)
+        "pydantic",
+        "pydantic._internal",
+        "pydantic.main",
+        "pydantic.fields",
         # motor / pymongo
         *pymongo_h,
         *bson_h,
