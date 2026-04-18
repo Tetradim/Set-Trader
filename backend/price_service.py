@@ -18,6 +18,17 @@ _ANOMALY_THRESHOLD = 2.5     # z-score above which volume is anomalous
 _EXTREME_THRESHOLD = 3.5     # z-score above which volume is extreme
 
 
+# Demo tickers for testing without real data
+DEMO_TICKERS = {
+    "AAPL": {"price": 178.50, "change": 2.35, "volume": 52340000},
+    "GOOGL": {"price": 141.20, "change": -0.85, "volume": 21500000},
+    "MSFT": {"price": 378.90, "change": 4.12, "volume": 18900000},
+    "TSLA": {"price": 248.75, "change": -3.25, "volume": 98700000},
+    "NVDA": {"price": 875.30, "change": 12.50, "volume": 45600000},
+    "SPY": {"price": 502.15, "change": 1.80, "volume": 78500000},
+    "QQQ": {"price": 438.60, "change": 2.25, "volume": 42100000},
+}
+
 class PriceService:
     def __init__(self):
         self._cache: Dict[str, dict] = {}

@@ -117,8 +117,31 @@ async def trading_loop():
 
 
 # --- App lifecycle ---
+# Demo mode flag - set to True when MongoDB unavailable
+DEMO_MODE_ACTIVE = False
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    global DEMO_MODE_ACTIVE
+    
+    # Check demo mode - use mock data if no MongoDB
+    demo_forced = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
+    
+    # Try to connect to MongoDB
+    mongo_works = True
+    try:
+        await deps.db.command("ping")
+    except Exception:
+        mongo_works = False
+    
+    DEMO_MODE_ACTIVE = demo_forced or not mongo_works
+    
+    if DEMO_MODE_ACTIVE:
+        deps.logger.info("Demo mode enabled - using in-memory data")
+        yield
+        return
+    
+    # Normal mode: create indexes
     try:
         await deps.db.tickers.create_index("symbol", unique=True)
         await deps.db.trades.create_index("timestamp")

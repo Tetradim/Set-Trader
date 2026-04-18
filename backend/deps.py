@@ -27,6 +27,9 @@ for env_path in [BASE_DIR / ".env", Path(".env")]:
 
 ROOT_DIR = BASE_DIR
 
+# Demo mode - enables mock data when MongoDB is unavailable
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+
 # Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("SentinelPulse")
