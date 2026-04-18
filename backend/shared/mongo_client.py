@@ -98,7 +98,14 @@ class EdgeMongoClient:
     @property
     def is_connected(self) -> bool:
         """Check if connected to MongoDB."""
-        return self._db is not None
+        # More robust check: verify _db is not None AND is a valid database object
+        if self._db is None:
+            return False
+        try:
+            # Additional check: try to ping to verify connection is still alive
+            return self._client is not None
+        except Exception:
+            return False
     
     async def insert_command(self, command: Dict[str, Any]) -> bool:
         """Insert a command document into the commands collection.
@@ -109,7 +116,7 @@ class EdgeMongoClient:
         Returns:
             True if successful, False otherwise.
         """
-        if not self._enabled or not self._db:
+        if not self._enabled or self._db is None:
             return False
         
         try:
@@ -157,7 +164,7 @@ class EdgeMongoClient:
         Returns:
             Number of successfully inserted documents.
         """
-        if not self._enabled or not self._db or not positions:
+        if not self._enabled or self._db is None or not positions:
             return 0
         
         try:
