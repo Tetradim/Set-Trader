@@ -299,16 +299,18 @@ if __name__ == "__main__":
     def open_browser():
         import time
         time.sleep(2)
-        webbrowser.open("http://localhost:8001")
+        webbrowser.open(f"http://localhost:{port}")
     
     # Check if running as frozen executable (PyInstaller)
+    port = int(os.getenv("PORT", "8002"))
+    
     if getattr(sys, 'frozen', False):
         threading.Thread(target=open_browser, daemon=True).start()
         print("\n" + "="*50)
         print("  Sentinel Pulse - Trading Bot")
         print("="*50)
-        print("\n  Server starting on http://localhost:8001")
+        print(f"\n  Server starting on http://localhost:{port}")
         print("  Browser will open automatically...")
         print("\n  Press Ctrl+C to stop the server.\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
