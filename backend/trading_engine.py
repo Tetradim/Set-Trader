@@ -374,7 +374,7 @@ class TradingEngine:
             from markets import MARKETS
             config = MARKETS.get(market)
             if config:
-                return config.is_open()
+                return config.is_open_now()
             # Fallback to US check
             market = "US"
         
@@ -398,7 +398,7 @@ class TradingEngine:
         
         open_markets = []
         for code, config in MARKETS.items():
-            if config.is_open():
+            if config.is_open_now():
                 open_markets.append(code)
         return open_markets
 
