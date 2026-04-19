@@ -84,7 +84,7 @@ jobs:
       - name: Build exe
         working-directory: backend
         run: |
-          python -m PyInstaller --clean sentinel_mac.spec
+          python -m PyInstaller --clean sentinel_win.spec
 
       # ---------------------------------------------------------------------
       # 8. Verify exe exists
