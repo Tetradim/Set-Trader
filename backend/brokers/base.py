@@ -38,6 +38,10 @@ class BrokerOrder:
     filled_price: float = 0.0
     filled_quantity: float = 0.0
     error: str = ""
+    # Idempotency tracking
+    idempotency_key: str = ""  # Unique key to prevent duplicate orders
+    client_order_id: str = ""  # Client-provided order ID for tracking
+    submitted_at: str = ""     # Timestamp when order was submitted
 
 
 @dataclass

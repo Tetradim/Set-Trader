@@ -37,7 +37,9 @@ async def add_ticker(body: TickerCreate):
         raise HTTPException(400, f"{sym} already exists")
     max_order = await deps.db.tickers.find_one(sort=[("sort_order", -1)], projection={"sort_order": 1})
     next_order = (max_order.get("sort_order", 0) + 1) if max_order else 0
-    t = TickerConfig(symbol=sym, base_power=body.base_power, sort_order=next_order)
+    from markets import detect_market_from_symbol
+    market = body.market or detect_market_from_symbol(sym)
+    t = TickerConfig(symbol=sym, base_power=body.base_power, sort_order=next_order, market=market)
     doc = t.model_dump()
     await deps.db.tickers.insert_one(doc)
     doc.pop("_id", None)

@@ -1,0 +1,63 @@
+{
+  "summary": "Tested multi-region stock market feature (HK, AU, UK, CA, CN_SS, CN_SZ). Backend: 32/36 tests pass. All 7 market endpoints work, FX rates return correctly, currency-display settings persist. Two critical/medium bugs found. Frontend: All tests pass — Foreign tab, 6 market sub-tabs, currency toggle, Add Stock dialog with 7-option market selector, and symbol auto-detection all work correctly.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "trading_engine.py",
+        "issue": "DUPLICATE METHOD DEFINITIONS: _is_opening_window defined at lines 122 (market-aware, accepts ticker_doc) AND 272 (legacy US-only). _is_past_opening_window defined at lines 135 AND 281. In Python the LAST definition wins — legacy US-only versions override the market-aware ones. Calls to self._is_opening_window(30, ticker_doc) in evaluate_ticker (lines 431, 500, 582) will raise TypeError at runtime when opening_bell_enabled=True or lock_trailing_at_open=True. Fix: Remove the duplicate legacy definitions at lines 272-290.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/tickers",
+        "issue": "routes/tickers.py line 40: TickerConfig is created without passing market from body OR applying detect_market_from_symbol(). Symbols like BHP.AX, 0700.HK, BARC.L get market='US' (default) instead of AU/HK/UK. WS path (used by AddTickerDialog) correctly applies auto-detection. Fix: change line 40 to: from markets import detect_market_from_symbol; market = body.market or detect_market_from_symbol(sym); t = TickerConfig(symbol=sym, base_power=body.base_power, sort_order=next_order, market=market)"
+      },
+      {
+        "endpoint": "GET /api/fx-rates (price_service.py get_fx_rates)",
+        "issue": "FX rates never refresh for already-cached currencies. Condition `m.currency not in self._fx_cache` prevents re-fetching currencies already in cache, even after 5-minute expiry. Only new uncached currencies get fresh rates. Fix: Remove the `not in self._fx_cache` condition so all currencies get refreshed on expiry."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_markets_feature.py",
+    "/app/test_reports/pytest/pytest_markets.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix duplicate method definitions in trading_engine.py — remove legacy _is_opening_window (line 272) and _is_past_opening_window (line 281) that override the market-aware versions. Without this fix, any ticker with opening_bell_enabled=True or lock_trailing_at_open=True will crash the trading loop.",
+    "MEDIUM: Fix POST /api/tickers in routes/tickers.py to pass market field and apply detect_market_from_symbol() auto-detection (same logic as WS path). This is backward-compatible.",
+    "MINOR: Fix FX rate stale refresh bug in price_service.py get_fx_rates() — remove `m.currency not in self._fx_cache` condition so rates refresh after 5-min cache expiry."
+  ],
+  "critical_code_review_comments": [
+    "trading_engine.py has TWO duplicate method definitions: _is_opening_window at lines 122 AND 272, and _is_past_opening_window at lines 135 AND 281. The new market-aware versions (lines 122-146) are silently overridden by the old US-only versions (lines 272-290). All calls to _is_opening_window(30, ticker_doc) in evaluate_ticker will raise TypeError since the effective method signature only takes (self, minutes). This is a runtime crash waiting to happen for any enabled ticker with opening bell mode.",
+    "routes/tickers.py line 40 ignores the market field from TickerCreate body AND doesn't apply detect_market_from_symbol(). The WS ADD_TICKER handler does both correctly. Result: REST API consumers get wrong market assignments.",
+    "price_service.py get_fx_rates() cache refresh logic is broken: after initial population, `m.currency not in self._fx_cache` is always False for cached currencies, so no refresh ever happens despite the 5-minute TTL check. Effectively FX rates are only fetched once per server restart."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_markets_feature.py"
+  ],
+  "success_rate": {
+    "backend": "89% (32/36) - 4 failures: 3 market auto-detect via REST API, 1 intentional bug-detection test",
+    "frontend": "100% — all Foreign tab, currency toggle, market sub-tabs, Add Stock dialog tests pass"
+  },
+  "seed_data_creation": "Test tickers TEST_BHP.AX, TEST_0700.HK, TEST_BARC.L were created during backend tests (due to test failures, cleanup assertions ran after failures). All cleaned up via DELETE /api/tickers/{sym}.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Multi-region market feature is largely complete. Backend API endpoints (/api/markets, /api/markets/{code}, /api/fx-rates, /api/settings/currency-display) all work. Frontend Foreign tab, sub-tabs, currency toggle, and Add Stock dialog all work. Two bugs need fixing before retesting: (1) duplicate _is_opening_window/_is_past_opening_window in trading_engine.py — CRITICAL runtime crash for opening bell mode; (2) REST API POST /api/tickers ignores market auto-detection (WS path works). FX rates: yfinance returns live rates — HKD=0.1276, AUD=0.6926, GBP rates visible, CAD=0.7209, CNY=0.1455. After main agent fixes the duplicate method bug, verify that _is_opening_window(30, ticker_doc) calls don't throw TypeError.",
+  "rca_of_issues": {
+    "duplicate_method_bug": {
+      "root_cause": "During refactoring to add market-aware methods, the new implementations (lines 122-146) were added BEFORE the existing legacy implementations (lines 272-290). Python class method resolution uses the last definition, so the legacy versions win. The market-aware versions are dead code.",
+      "reproduction": "Enable opening_bell_enabled on any ticker and trigger the trading loop. evaluate_ticker() calls self._is_opening_window(30, ticker_doc) but the effective method only accepts (self, minutes). TypeError is raised.",
+      "mitigation": "Remove the legacy _is_opening_window and _is_past_opening_window methods at lines 272-290. The new market-aware versions at lines 122-146 have backward-compatible signatures (ticker_doc defaults to None, falls back to US ET when None)."
+    },
+    "rest_api_market_detection": {
+      "root_cause": "routes/tickers.py line 40 creates TickerConfig without market field. TickerConfig defaults market='US'. The fix was only applied to ws.py ADD_TICKER handler but missed the REST route.",
+      "mitigation": "Add market detection to routes/tickers.py: from markets import detect_market_from_symbol; market = body.market or detect_market_from_symbol(sym); then pass market=market to TickerConfig constructor."
+    }
+  }
+}

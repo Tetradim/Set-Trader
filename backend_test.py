@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 
 class BracketBotAPITester:
-    def __init__(self, base_url="https://time-based-trading.preview.emergentagent.com"):
+    def __init__(self, base_url="https://pulse-api-shield.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0

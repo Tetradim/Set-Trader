@@ -12,6 +12,9 @@ This is the slim orchestrator that wires together all modules:
 """
 import asyncio
 import os
+import sys
+import webbrowser
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -26,6 +29,7 @@ from price_service import PriceService
 from trading_engine import TradingEngine
 from telegram_service import TelegramService
 from broker_manager import BrokerConnectionManager
+from resilience import CircuitOpenError
 
 # --- Instantiate singletons and register in deps ---
 deps.ws_manager = ConnectionManager()
@@ -93,11 +97,15 @@ async def trading_loop():
                     "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
                 })
             
-            if deps.engine.running and not deps.engine.paused and deps.engine.is_market_open():
+            if deps.engine.running and not deps.engine.paused:
+                # Market hours checked per-ticker inside evaluate_ticker
+                # to support multiple international exchanges simultaneously
                 tickers = await deps.db.tickers.find({"enabled": True}, {"_id": 0}).to_list(100)
                 for t in tickers:
                     try:
                         await deps.engine.evaluate_ticker(t)
+                    except CircuitOpenError as ce:
+                        deps.logger.warning(f"Skipping {t.get('symbol','?')} — {ce}")
                     except Exception as te:
                         deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
             # Always check pending limit sells (even when paused — user explicitly requested)
@@ -109,32 +117,97 @@ async def trading_loop():
 
 
 # --- App lifecycle ---
+# Demo mode flag - set to True when MongoDB unavailable
+DEMO_MODE_ACTIVE = False
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    await deps.db.tickers.create_index("symbol", unique=True)
-    await deps.db.trades.create_index("timestamp")
-    await deps.db.profits.create_index("symbol", unique=True)
+    global DEMO_MODE_ACTIVE
+    
+    # Check demo mode - use mock data if no MongoDB
+    demo_forced = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
+    
+    # Try to connect to MongoDB
+    mongo_works = True
+    try:
+        await deps.db.command("ping")
+    except Exception:
+        mongo_works = False
+    
+    DEMO_MODE_ACTIVE = demo_forced or not mongo_works
+    
+    if DEMO_MODE_ACTIVE:
+        deps.logger.info("Demo mode enabled - using in-memory data")
+        yield
+        return
+    
+    # Normal mode: create indexes
+    try:
+        await deps.db.tickers.create_index("symbol", unique=True)
+        await deps.db.trades.create_index("timestamp")
+        await deps.db.profits.create_index("symbol", unique=True)
+        await deps.db.audit_logs.create_index("timestamp")
+        await deps.db.audit_logs.create_index("event_type")
+    except Exception as e:
+        deps.logger.warning(f"Failed to create indexes: {e}")
 
     # Seed defaults if empty
-    count = await deps.db.tickers.count_documents({})
-    if count == 0:
-        for sym in ["TSLA", "AAPL", "NVDA"]:
-            t = TickerConfig(symbol=sym, base_power=100.0)
-            await deps.db.tickers.update_one(
-                {"symbol": sym}, {"$setOnInsert": t.model_dump()}, upsert=True
-            )
+    try:
+        count = await deps.db.tickers.count_documents({})
+        if count == 0:
+            for sym in ["TSLA", "AAPL", "NVDA"]:
+                t = TickerConfig(symbol=sym, base_power=100.0)
+                await deps.db.tickers.update_one(
+                    {"symbol": sym}, {"$setOnInsert": t.model_dump()}, upsert=True
+                )
+    except Exception as e:
+        deps.logger.warning(f"Failed to seed defaults: {e}")
 
     # Restore engine state
-    await deps.engine.load_state()
+    try:
+        await asyncio.wait_for(deps.engine.load_state(), timeout=3.0)
+    except Exception as e:
+        deps.logger.warning(f"Failed to load engine state: {e}")
+    
+    # Load price service preference
+    try:
+        pref_doc = await asyncio.wait_for(deps.db.settings.find_one({"key": "prefer_broker_feeds"}), timeout=3.0)
+        if pref_doc:
+            deps.price_service.set_prefer_broker_feeds(pref_doc.get("value", True))
+    except Exception as e:
+        deps.logger.warning(f"Failed to load settings: {e}")
+    
+    # Initialize resilience (token-bucket rate limiter + circuit breakers)
+    try:
+        from resilience import broker_resilience
+        broker_resilience.set_telegram(deps.telegram_service)
+        broker_resilience.set_ws_manager(deps.ws_manager)
+        await asyncio.wait_for(broker_resilience.load_config(), timeout=3.0)
+    except Exception as e:
+        deps.logger.warning(f"Failed to init resilience: {e}")
+
+    # Load pluggable strategy system
+    try:
+        from strategies.loader import load_all_strategies, start_strategy_watcher
+        strategies = await asyncio.wait_for(load_all_strategies(), timeout=3.0)
+        start_strategy_watcher()
+        deps.logger.info(f"Loaded {len(strategies)} strategy plugins")
+    except Exception as e:
+        deps.logger.warning(f"Failed to load strategies: {e}", exc_info=True)
 
     # Initialize broker manager dependencies
     deps.broker_mgr.set_telegram(deps.telegram_service)
     deps.broker_mgr.set_ws_manager(deps.ws_manager)
     try:
-        await deps.broker_mgr.auto_connect_all()
+        await asyncio.wait_for(deps.broker_mgr.auto_connect_all(), timeout=3.0)
     except Exception as e:
         deps.logger.warning(f"Broker auto-connect failed: {e}")
 
+    # Initialize Edge MongoDB client (for Edge ↔ Pulse integration)
+    from shared import init_edge_client, start_edge_heartbeat
+    await init_edge_client()
+    await start_edge_heartbeat()
+    
     # Start background tasks
     asyncio.create_task(price_broadcast_loop())
     asyncio.create_task(trading_loop())
@@ -181,6 +254,10 @@ from routes.tickers import router as tickers_router
 from routes.trades import router as trades_router
 from routes.bot import router as bot_router
 from routes.ws import router as ws_router
+from routes.system import router as system_router
+from routes.markets import router as markets_router
+from routes.strategies import router as strategies_router
+from routes.edge import router as edge_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -188,6 +265,10 @@ api.include_router(tickers_router)
 api.include_router(trades_router)
 api.include_router(bot_router)
 api.include_router(ws_router)
+api.include_router(system_router)
+api.include_router(markets_router)
+api.include_router(strategies_router)
+api.include_router(edge_router)
 
 app.include_router(api)
 
@@ -209,3 +290,28 @@ if _static_dir.is_dir():
         if file.is_file():
             return FileResponse(file)
         return FileResponse(_static_dir / "index.html")
+
+
+# --- Run as standalone executable ---
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Open browser after a short delay
+    def open_browser():
+        import time
+        time.sleep(2)
+        webbrowser.open(f"http://localhost:{port}")
+    
+    # Check if running as frozen executable (PyInstaller)
+    port = int(os.getenv("PORT", "8002"))
+    
+    if getattr(sys, 'frozen', False):
+        threading.Thread(target=open_browser, daemon=True).start()
+        print("\n" + "="*50)
+        print("  Sentinel Pulse - Trading Bot")
+        print("="*50)
+        print(f"\n  Server starting on http://localhost:{port}")
+        print("  Browser will open automatically...")
+        print("\n  Press Ctrl+C to stop the server.\n")
+    
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

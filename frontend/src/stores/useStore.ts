@@ -49,6 +49,10 @@ export interface TickerConfig {
   opening_bell_enabled: boolean;
   opening_bell_trail_value: number;
   opening_bell_trail_is_percent: boolean;
+  // Market / exchange
+  market: string;
+  // Pluggable strategy params (stored per-ticker for signal strategies)
+  strategy_config: Record<string, number | boolean | string>;
 }
 
 export interface TradeLog {
@@ -172,6 +176,12 @@ interface BotState {
   tradingMode: string;
   setTradingMode: (mode: string) => void;
 
+  // Currency display & FX rates
+  currencyDisplay: 'usd' | 'native';
+  setCurrencyDisplay: (mode: 'usd' | 'native') => void;
+  fxRates: Record<string, number>;
+  setFxRates: (rates: Record<string, number>) => void;
+
   // Failed brokers (for flashing chip animation)
   failedBrokers: Record<string, { reason: string; symbol: string; timestamp: number }>;
   setBrokerFailed: (brokerId: string, reason: string, symbol: string) => void;
@@ -267,6 +277,11 @@ export const useStore = create<BotState>((set) => ({
 
   tradingMode: 'paper',
   setTradingMode: (tradingMode) => set({ tradingMode }),
+
+  currencyDisplay: 'usd',
+  setCurrencyDisplay: (currencyDisplay) => set({ currencyDisplay }),
+  fxRates: { USD: 1.0 },
+  setFxRates: (fxRates) => set({ fxRates }),
 
   failedBrokers: {},
   setBrokerFailed: (brokerId, reason, symbol) => set((state) => ({

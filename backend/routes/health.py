@@ -100,6 +100,18 @@ async def prometheus_metrics():
     lines.append("# TYPE sentinel_pulse_up gauge")
     lines.append(f"sentinel_pulse_up {1 if deps.engine.running else 0}")
 
+    lines.append("# HELP sentinel_pulse_running Whether the bot engine is running (alias).")
+    lines.append("# TYPE sentinel_pulse_running gauge")
+    lines.append(f"sentinel_pulse_running {1 if deps.engine.running else 0}")
+
+    lines.append("# HELP sentinel_pulse_demo_mode Whether running in demo mode (no MongoDB).")
+    lines.append("# TYPE sentinel_pulse_demo_mode gauge")
+    lines.append(f"sentinel_pulse_demo_mode {1 if deps.DEMO_MODE else 0}")
+
+    lines.append("# HELP sentinel_pulse_simulate_24_7 Whether in paper/simulation mode.")
+    lines.append("# TYPE sentinel_pulse_simulate_24_7 gauge")
+    lines.append(f"sentinel_pulse_simulate_24_7 {1 if deps.engine.simulate_24_7 else 0}")
+
     lines.append("# HELP sentinel_pulse_paused Whether the bot engine is paused.")
     lines.append("# TYPE sentinel_pulse_paused gauge")
     lines.append(f"sentinel_pulse_paused {1 if deps.engine.paused else 0}")
@@ -184,5 +196,35 @@ async def prometheus_metrics():
         upnl = pos.get("unrealized_pnl", 0)
         lines.append(f'sentinel_pulse_position_quantity{{symbol="{sym}"}} {qty}')
         lines.append(f'sentinel_pulse_position_unrealized_pnl_usd{{symbol="{sym}"}} {round(upnl, 2)}')
+
+    # Today's trading stats
+    from datetime import datetime, timezone
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_trades = await deps.db.trades.find({"timestamp": {"$gte": today_start.isoformat()}}).to_list(100)
+    trades_today = len(today_trades)
+    wins_today = sum(1 for t in today_trades if t.get("pnl", 0) > 0)
+    losses_today = sum(1 for t in today_trades if t.get("pnl", 0) < 0)
+    win_rate = wins_today / trades_today if trades_today > 0 else 0
+    pnl_today = sum(t.get("pnl", 0) for t in today_trades)
+
+    lines.append("# HELP sentinel_pulse_trades_today Trades executed today.")
+    lines.append("# TYPE sentinel_pulse_trades_today gauge")
+    lines.append(f"sentinel_pulse_trades_today {trades_today}")
+
+    lines.append("# HELP sentinel_pulse_wins_today Winning trades today.")
+    lines.append("# TYPE sentinel_pulse_wins_today gauge")
+    lines.append(f"sentinel_pulse_wins_today {wins_today}")
+
+    lines.append("# HELP sentinel_pulse_losses_today Losing trades today.")
+    lines.append("# TYPE sentinel_pulse_losses_today gauge")
+    lines.append(f"sentinel_pulse_losses_today {losses_today}")
+
+    lines.append("# HELP sentinel_pulse_win_rate_today Today's win rate.")
+    lines.append("# TYPE sentinel_pulse_win_rate_today gauge")
+    lines.append(f"sentinel_pulse_win_rate_today {round(win_rate, 3)}")
+
+    lines.append("# HELP sentinel_pulse_pnl_today_usd Today's P&L.")
+    lines.append("# TYPE sentinel_pulse_pnl_today_usd gauge")
+    lines.append(f"sentinel_pulse_pnl_today_usd {round(pnl_today, 2)}")
 
     return "\n".join(lines) + "\n"

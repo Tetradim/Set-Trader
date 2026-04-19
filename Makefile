@@ -1,6 +1,26 @@
-.PHONY: up down logs prod dev test clean
+.PHONY: up down logs prod dev test clean install uninstall reinstall test-install test-uninstall
 
-# Development
+# Installation (local pip)
+install:
+	cd backend && pip install -r requirements.txt
+	@echo "Sentinel Pulse installed. Run 'make dev' to start."
+
+uninstall:
+	cd backend && pip uninstall -y sentinel-pulse bracket-bot 2>/dev/null || pip uninstall -y -r <(pip freeze | grep -E "^(sentinel|bracket)") 2>/dev/null || true
+	@echo "Sentinel Pulse uninstalled."
+
+reinstall: uninstall install
+
+# Quick bug testing cycle
+test-install:
+	cd backend && pip install -r requirements.txt
+	@echo "Installed dependencies for testing."
+
+test-uninstall:
+	@echo "For clean test, manually uninstall packages or use: pip freeze | grep -v sentinel | pip uninstall -y -"
+	@echo "Quick reinstall: make test-install"
+
+# Docker Development
 up:
 	docker compose up --build
 
@@ -42,3 +62,10 @@ restart-frontend:
 
 mongo-shell:
 	docker compose exec mongodb mongosh bracket_bot
+
+# Windows Installer
+installer:
+	powershell -ExecutionPolicy Bypass -File build-installer.ps1
+
+installer-clean:
+	powershell -ExecutionPolicy Bypass -File build-installer.ps1 -Clean

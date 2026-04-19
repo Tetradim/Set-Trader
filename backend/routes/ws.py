@@ -1,6 +1,8 @@
 """WebSocket endpoint — initial state + real-time message handling."""
 import json
+import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -8,6 +10,7 @@ import deps
 from schemas import TickerConfig
 from strategies import PRESET_STRATEGIES
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -16,6 +19,19 @@ async def ws_endpoint(websocket: WebSocket):
     await deps.ws_manager.connect(websocket)
     try:
         tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
+        
+        # In demo mode with no tickers, seed with default tickers
+        if not tickers and deps.DEMO_MODE:
+            defaults = [
+                TickerConfig(symbol="SPY", base_power=100.0, market="US"),
+                TickerConfig(symbol="QQQ", base_power=100.0, market="US"),
+                TickerConfig(symbol="AAPL", base_power=100.0, market="US"),
+                TickerConfig(symbol="NVDA", base_power=100.0, market="US"),
+            ]
+            for t in defaults:
+                doc = t.model_dump()
+                await deps.db.tickers.insert_one(doc)
+            tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
         prices = {}
         for t in tickers:
             prices[t["symbol"]] = await deps.price_service.get_price(t["symbol"])
@@ -60,7 +76,9 @@ async def ws_endpoint(websocket: WebSocket):
             if action == "ADD_TICKER":
                 sym = msg.get("symbol", "").upper().strip()
                 if sym:
-                    t = TickerConfig(symbol=sym, base_power=msg.get("base_power", 100.0))
+                    from markets import detect_market_from_symbol
+                    market = msg.get("market") or detect_market_from_symbol(sym)
+                    t = TickerConfig(symbol=sym, base_power=msg.get("base_power", 100.0), market=market)
                     doc = t.model_dump()
                     try:
                         await deps.db.tickers.insert_one(doc)
@@ -182,6 +200,38 @@ async def ws_endpoint(websocket: WebSocket):
                     cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
                     cash_total = round(cash_doc.get("value", 0), 2) if cash_doc else 0
                     await deps.ws_manager.broadcast({"type": "PROFITS_UPDATE", "profits": profits, "cash_reserve": cash_total})
+
+            elif action == "OBSERVATION":
+                # Handle pattern observations from Pulse (e.g., chart patterns, signals)
+                # Format: {"type": "observation", "ticker": "...", "pattern": "double_bottom", "confidence": 0.85, "broker_data": {...}}
+                obs = msg.get("observation", {})
+                ticker = obs.get("ticker", "").upper()
+                pattern = obs.get("pattern", "")
+                confidence = obs.get("confidence", 0.0)
+                broker_data = obs.get("broker_data", {})
+                
+                if ticker and pattern:
+                    # Store observation in database for scoring
+                    await deps.db.observations.insert_one({
+                        "ticker": ticker,
+                        "pattern": pattern,
+                        "confidence": confidence,
+                        "broker_data": broker_data,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source": "pulse",
+                    })
+                    # Broadcast to all connected clients
+                    await deps.ws_manager.broadcast({
+                        "type": "OBSERVATION",
+                        "observation": obs,
+                        "stored": True,
+                    })
+                    logger.info(f"Observation stored: {ticker} {pattern} ({confidence:.2f})")
+                else:
+                    await deps.ws_manager.broadcast({
+                        "type": "OBSERVATION_ERROR",
+                        "error": "Missing ticker or pattern",
+                    })
 
     except WebSocketDisconnect:
         deps.ws_manager.disconnect(websocket)

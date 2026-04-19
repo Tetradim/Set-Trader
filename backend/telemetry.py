@@ -73,7 +73,16 @@ def setup_telemetry(app):
     provider.add_span_processor(SimpleSpanProcessor(_in_memory_exporter))
 
     # Optional: OTLP exporter for external collectors (Jaeger, Grafana Tempo, etc.)
+    # Auto-detect Edge's Tempo from PULSE_API_URL if running with Edge
     otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    pulse_url = os.environ.get("PULSE_API_URL", "")
+    
+    # Auto-detect Tempo from Edge if PULSE_API_URL is set (e.g., http://edge:8001)
+    if not otlp_endpoint and pulse_url:
+        # Replace API port with Tempo OTLP HTTP port
+        otlp_endpoint = pulse_url.replace(":8001", ":4318").replace(":8002", ":4318")
+        logger.info("Auto-detected Tempo endpoint from PULSE_API_URL: %s", otlp_endpoint)
+    
     if otlp_endpoint:
         try:
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter

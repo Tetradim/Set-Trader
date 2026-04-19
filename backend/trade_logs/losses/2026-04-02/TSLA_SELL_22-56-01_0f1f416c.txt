@@ -1,0 +1,36 @@
+============================================================
+  LOSS TRADE LOG — TSLA
+============================================================
+
+Trade ID:       0f1f416c-7455-42c9-aa2f-587f7e0c1de2
+Timestamp:      2026-04-02 22:56:01 UTC
+Symbol:         TSLA
+Side:           SELL
+
+--- ORDER INFO ---
+Order Type:     LIMIT
+Rule Mode:      DOLLAR
+
+--- PRICES ---
+Fill Price:     $360.48
+Entry Price:    $360.54
+Target Price:   $360.44
+Avg Price (MA): $386.14
+
+--- POSITION ---
+Quantity:       5.8938
+Total Value:    $2124.60
+Buy Power:      $2124.94
+
+--- TARGETS AT TIME OF TRADE ---
+Sell Target:    $360.44
+Stop Target:    $342.51
+
+--- P&L ---
+P&L:            $-0.35
+% Change:       -0.02%
+
+--- REASON ---
+[LMT] Price $360.48 >= sell target $360.44
+
+============================================================

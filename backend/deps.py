@@ -4,23 +4,93 @@ Every module that needs access to global state imports this module
 and reads deps.db, deps.engine, etc.  This breaks circular imports.
 """
 import os
+import sys
 import logging
+import tempfile
 from pathlib import Path
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+# Find .env in bundled app or development
+if getattr(sys, 'frozen', False):
+    # Running as bundled PyInstaller app
+    BASE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).parent
 
-# Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+# Try multiple possible .env locations
+for env_path in [BASE_DIR / ".env", Path(".env")]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
+
+ROOT_DIR = BASE_DIR
+
+# Demo mode - enables mock data when MongoDB is unavailable
+DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
+
+# Logging - allow DEBUG via env var
+_log_level = os.environ.get("LOG_LEVEL", "INFO")
+_level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING}
+logging.basicConfig(level=_level_map.get(_log_level, logging.INFO), format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("SentinelPulse")
 
-# MongoDB
-mongo_url = os.environ["MONGO_URL"]
-mongo_client = AsyncIOMotorClient(mongo_url)
-db = mongo_client[os.environ["DB_NAME"]]
+# MongoDB - lazy initialization with optional connection
+_mongo_client = None
+_db = None
+_mongo_connecting = False
+
+def _ensure_db():
+    """Lazily connect to MongoDB - returns None if not available."""
+    global _mongo_client, _db, _mongo_connecting
+    if _db is not None:
+        return _db
+    if _mongo_connecting:
+        return None
+    _mongo_connecting = True
+    try:
+        mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+        db_name = os.environ.get("DB_NAME", "sentinelpulse")
+        _mongo_client = AsyncIOMotorClient(
+            mongo_url,
+            serverSelectionTimeoutMS=2000,
+            connectTimeoutMS=2000,
+        )
+        _db = _mongo_client[db_name]
+        logger.info("MongoDB connected")
+        return _db
+    except Exception as e:
+        logger.warning(f"MongoDB connection failed: {e}")
+        _mongo_connecting = False
+        return None
+
+# For backward compatibility: db and mongo_client are lazy-loaded
+class LazyDB:
+    """Lazy proxy to MongoDB database."""
+    def __getattr__(self, name):
+        db = _ensure_db()
+        if db is None:
+            raise AttributeError("MongoDB not available")
+        return getattr(db, name)
+    
+    def __call__(self, *args, **kwargs):
+        db = _ensure_db()
+        if db is None:
+            raise RuntimeError("MongoDB not available")
+        return db(*args, **kwargs)
+
+class LazyClient:
+    """Lazy proxy to MongoDB client."""
+    def __getattr__(self, name):
+        if _mongo_client is None:
+            _ensure_db()
+        if _mongo_client is None:
+            raise AttributeError("MongoDB not available")
+        return getattr(_mongo_client, name)
+
+mongo_client = LazyClient()
+db = LazyDB()
 
 # yfinance
 YF_AVAILABLE = False

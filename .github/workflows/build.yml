@@ -1,181 +1,126 @@
 name: Build Sentinel Pulse
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches: [Split, main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '*.ps1'
+      - 'setup.iss'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Custom version (semver)'
+        required: false
+        default: ''
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
+    name: Build Windows Installer
 
     steps:
+      # ---------------------------------------------------------------------
+      # 1. Checkout
+      # ---------------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      # ---------------------------------------------------------------------
+      # 2. Setup Python
+      # ---------------------------------------------------------------------
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Setup Node.js
+      # ---------------------------------------------------------------------
+      # 3. Install Node.js (for frontend build)
+      # ---------------------------------------------------------------------
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
-      - name: Install Python dependencies
-        working-directory: backend
+      # ---------------------------------------------------------------------
+      # 4. Install Python dependencies
+      # ---------------------------------------------------------------------
+      - name: Install Python deps
         run: |
-          python -m pip install --upgrade pip
-          pip install --extra-index-url https://d33sy5i8bnduwe.cloudfront.net/simple/ -r requirements.txt
-          pip install pyinstaller
+          python -m pip install --upgrade pip wheel
+          pip install -r backend/requirements.txt
+          pip install pyinstaller pillow
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install
-
+      # ---------------------------------------------------------------------
+      # 5. Build frontend (React static files)
+      # ---------------------------------------------------------------------
       - name: Build frontend
-        working-directory: frontend
-        env:
-          REACT_APP_BACKEND_URL: ''
-        run: npm run build
-
-      - name: Copy frontend to backend/static
         run: |
-          if (Test-Path backend\static) { Remove-Item -Recurse -Force backend\static }
-          Copy-Item -Recurse frontend\dist backend\static
-        shell: pwsh
+          cd frontend
+          npm install
+          npm run build
+        continue-on-error: true
 
-      - name: Create default .env
-        working-directory: backend
+      # ---------------------------------------------------------------------
+      # 6. Create .env for bundled app
+      # ---------------------------------------------------------------------
+      - name: Create .env
         run: |
           @"
           MONGO_URL=mongodb://localhost:27017
           DB_NAME=sentinelpulse
-          CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
-          "@ | Out-File -Encoding UTF8 .env
-        shell: pwsh
+          CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+          DEMO_MODE=true
+          PORT=8002
+          LOG_LEVEL=DEBUG
+          "@ | Out-File -Encoding UTF8 backend/.env
 
-      - name: Build executable with PyInstaller
+      # ---------------------------------------------------------------------
+      # 7. Build with PyInstaller
+      # ---------------------------------------------------------------------
+      - name: Build exe
         working-directory: backend
         run: |
-          pyinstaller `
-            --name "SentinelPulse" `
-            --onedir `
-            --console `
-            --icon "../frontend/public/favicon.ico" `
-            --add-data "static;static" `
-            --add-data ".env;." `
-            --hidden-import "uvicorn.logging" `
-            --hidden-import "uvicorn.loops" `
-            --hidden-import "uvicorn.loops.auto" `
-            --hidden-import "uvicorn.protocols" `
-            --hidden-import "uvicorn.protocols.http" `
-            --hidden-import "uvicorn.protocols.http.auto" `
-            --hidden-import "uvicorn.protocols.websockets" `
-            --hidden-import "uvicorn.protocols.websockets.auto" `
-            --hidden-import "uvicorn.lifespan" `
-            --hidden-import "uvicorn.lifespan.on" `
-            --hidden-import "motor" `
-            --hidden-import "motor.motor_asyncio" `
-            --hidden-import "pymongo" `
-            --hidden-import "dns.resolver" `
-            --hidden-import "yfinance" `
-            --hidden-import "telegram" `
-            --hidden-import "telegram.ext" `
-            --hidden-import "opentelemetry" `
-            --hidden-import "opentelemetry.trace" `
-            --hidden-import "opentelemetry.sdk" `
-            --hidden-import "opentelemetry.sdk.trace" `
-            --hidden-import "email.mime.text" `
-            --hidden-import "email.mime.multipart" `
-            --collect-all "yfinance" `
-            --collect-all "certifi" `
-            --collect-all "motor" `
-            --collect-all "pymongo" `
-            --noconfirm `
-            server.py
-        shell: pwsh
+          python -m PyInstaller --clean sentinel_win.spec
 
-      - name: Install Inno Setup
-        run: choco install innosetup -y
-
-      - name: Create Inno Setup script
+      # ---------------------------------------------------------------------
+      # 8. Verify exe exists
+      # ---------------------------------------------------------------------
+      - name: Verify exe
         run: |
-          @"
-          [Setup]
-          AppName=Sentinel Pulse
-          AppVersion=1.0.0
-          AppPublisher=Signal Forge Laboratory
-          DefaultDirName={autopf}\SentinelPulse
-          DefaultGroupName=Sentinel Pulse
-          OutputDir=.
-          OutputBaseFilename=SentinelPulse-Setup
-          Compression=lzma2
-          SolidCompression=yes
-          PrivilegesRequired=admin
-          SetupIconFile=backend\dist\SentinelPulse\static\favicon.ico
-          UninstallDisplayIcon={app}\SentinelPulse.exe
-          WizardStyle=modern
-
-          [Files]
-          Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-
-          [Icons]
-          Name: "{group}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"
-          Name: "{group}\Uninstall Sentinel Pulse"; Filename: "{uninstallexe}"
-          Name: "{commondesktop}\Sentinel Pulse"; Filename: "{app}\SentinelPulse.exe"; WorkingDir: "{app}"; Tasks: desktopicon
-
-          [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
-
-          [Run]
-          Filename: "{app}\SentinelPulse.exe"; Description: "Launch Sentinel Pulse"; Flags: nowait postinstall skipifsilent
-          "@ | Out-File -Encoding UTF8 setup.iss
-        shell: pwsh
-
-      - name: Check for favicon
-        run: |
-          if (-not (Test-Path "backend\dist\SentinelPulse\static\favicon.ico")) {
-            # Create a simple icon if missing
-            Copy-Item "frontend\public\vite.svg" "backend\dist\SentinelPulse\static\favicon.ico" -ErrorAction SilentlyContinue
+          $exe = "backend\dist\SentinelPulse\SentinelPulse.exe"
+          if (!(Test-Path $exe)) {
+            Write-Host "ERROR: $exe not found"
+            Get-ChildItem -Path "backend\dist" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
+            exit 1
           }
-        shell: pwsh
+          Write-Host "SUCCESS: Built $exe"
+          Get-Item $exe | Select-Object Name, @{N="Size(MB)";E={[math]::Round($_.Length/1MB,2)}}
 
-      - name: Build installer with Inno Setup
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
-        shell: pwsh
+      # ---------------------------------------------------------------------
+      # 9. Install Inno Setup
+      # ---------------------------------------------------------------------
+      - name: Install Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: setup.iss
+          options: /O+ /DVersion=${{ github.event.inputs.version || '1.0.0' }}
 
-      - name: Upload installer
+      # ---------------------------------------------------------------------
+      # 10. Upload artifacts
+      # ---------------------------------------------------------------------
+      - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: SentinelPulse-Installer
-          path: SentinelPulse-Setup.exe
-          retention-days: 90
+          name: SentinelPulse-Setup
+          path: Output/SentinelPulse-Setup.exe
+          if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+      - name: Upload Standalone Exe
+        uses: actions/upload-artifact@v4
         with:
-          files: SentinelPulse-Setup.exe
-          generate_release_notes: true
-          body: |
-            ## Sentinel Pulse - Windows Installer
-            
-            ### Installation
-            1. Download `SentinelPulse-Setup.exe`
-            2. Run the installer
-            3. Follow the installation wizard
-            4. Launch from Desktop shortcut or Start Menu
-            
-            ### Requirements
-            - Windows 10/11 (64-bit)
-            - MongoDB running locally OR MongoDB Atlas connection
-            - Internet connection for live price data
-            
-            ### First Run
-            The app opens a terminal window and your browser to http://localhost:8001
-            Configure your MongoDB connection in Settings if using Atlas.
+          name: SentinelPulse-Exe
+          path: backend/dist/SentinelPulse

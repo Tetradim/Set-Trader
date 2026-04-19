@@ -1,7 +1,7 @@
 """Pydantic schemas for Sentinel Pulse."""
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -37,6 +37,7 @@ class TickerConfig(BaseModel):
     rebracket_cooldown: int = 0
     rebracket_lookback: int = 10
     rebracket_buffer: float = 0.10
+    rebracket_min_drift: float = 0.50  # Minimum price movement to trigger rebracket
     enabled: bool = True
     strategy: str = "custom"
     broker_id: str = ""
@@ -55,11 +56,16 @@ class TickerConfig(BaseModel):
     opening_bell_enabled: bool = False
     opening_bell_trail_value: float = 1.0
     opening_bell_trail_is_percent: bool = True
+    # Market / exchange (determines trading hours, currency, opening bell time)
+    market: str = "US"
+    # Pluggable strategy system
+    strategy_config: Dict[str, Any] = {}   # per-ticker params for signal strategies
 
 
 class TickerCreate(BaseModel):
     symbol: str
     base_power: float = 100.0
+    market: Optional[str] = None  # Auto-detected from symbol suffix if not provided
 
 
 class TickerUpdate(BaseModel):
@@ -90,6 +96,7 @@ class TickerUpdate(BaseModel):
     rebracket_cooldown: Optional[int] = None
     rebracket_lookback: Optional[int] = None
     rebracket_buffer: Optional[float] = None
+    rebracket_min_drift: Optional[float] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
     partial_fills_enabled: Optional[bool] = None
@@ -100,6 +107,8 @@ class TickerUpdate(BaseModel):
     opening_bell_enabled: Optional[bool] = None
     opening_bell_trail_value: Optional[float] = None
     opening_bell_trail_is_percent: Optional[bool] = None
+    market: Optional[str] = None
+    strategy_config: Optional[Dict[str, Any]] = None
 
 
 class TradeRecord(BaseModel):
@@ -153,6 +162,10 @@ class SettingsUpdate(BaseModel):
     # Auto mode switching
     live_during_market_hours: Optional[bool] = None
     paper_after_hours: Optional[bool] = None
+    # Pattern detection (Pulse → Edge)
+    pattern_detection_enabled: Optional[bool] = None
+    pattern_min_confidence: Optional[float] = None
+    pattern_send_to_edge: Optional[bool] = None
 
 
 class BetaRegistration(BaseModel):

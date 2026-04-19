@@ -1,9 +1,13 @@
 """Core trading engine — evaluates tickers, places orders, manages positions."""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict
+from zoneinfo import ZoneInfo
 
 import deps
 from schemas import TradeRecord
+from resilience import CircuitOpenError
+
+_ET = ZoneInfo("America/New_York")   # US Eastern — DST-aware (EDT/EST auto)
 
 
 class TradingEngine:
@@ -89,8 +93,8 @@ class TradingEngine:
         return mode_changed
 
     def _is_actual_market_hours(self) -> bool:
-        """Check if we're in actual market hours (ignoring simulate_24_7)."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        """Check if we're in actual US market hours (ignoring simulate_24_7). DST-aware."""
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         hour, minute = now.hour, now.minute
@@ -99,6 +103,149 @@ class TradingEngine:
         if hour >= 16:
             return False
         return True
+
+    # ------------------------------------------------------------------
+    # Market-aware helpers (support international exchanges)
+    # ------------------------------------------------------------------
+
+    def _get_market(self, ticker_doc: dict):
+        """Get the MarketConfig for a ticker (auto-detected from symbol suffix if not set)."""
+        from markets import MARKETS, detect_market_from_symbol
+        market_code = ticker_doc.get("market") or detect_market_from_symbol(ticker_doc.get("symbol", ""))
+        return MARKETS.get(market_code, MARKETS["US"])
+
+    def _is_ticker_market_open(self, ticker_doc: dict) -> bool:
+        """Check if the market for this specific ticker is currently open.
+
+        simulate_24_7 bypasses the "market closed" gate (paper trading runs 24/7)
+        but still blocks structured lunch breaks for markets that have them
+        (CN_SS, CN_SZ, HK). No broker would fill an order during Shanghai/HK
+        lunch regardless of mode, so we guard against those misfires.
+        """
+        market = self._get_market(ticker_doc)
+
+        if self.simulate_24_7:
+            # Respect lunch breaks even in simulate mode
+            if market.lunch_break and market.is_in_lunch_break():
+                return False
+            return True
+
+        if not self.market_hours_only:
+            return True
+
+        return market.is_open_now()
+
+    # ------------------------------------------------------------------
+    # Paper/Live Mode Edge Case Handling
+    # ------------------------------------------------------------------
+
+    def get_trading_mode(self) -> str:
+        """Get current trading mode as string: 'paper' or 'live'."""
+        if self.simulate_24_7:
+            return "paper"
+        # Live mode: trading with real broker
+        return "live"
+
+    def is_live_trading(self) -> bool:
+        """Check if we're currently in live trading mode."""
+        return not self.simulate_24_7
+
+    def is_paper_trading(self) -> bool:
+        """Check if we're currently in paper trading mode."""
+        return self.simulate_24_7
+
+    async def _validate_order_mode(self, broker_ids: list, ticker_doc: dict) -> tuple[bool, str]:
+        """Validate that order mode is appropriate for the configuration.
+        
+        Returns (is_valid, error_message).
+        """
+        # No brokers = always paper
+        if not broker_ids:
+            return True, ""
+        
+        # Have brokers - check mode
+        if self.simulate_24_7:
+            # Paper mode with brokers - this is valid for simulation
+            return True, ""
+        
+        # Live mode with brokers - verify brokers are connected
+        from deps import broker_mgr
+        for bid in broker_ids:
+            if bid not in broker_mgr._adapters:
+                return False, f"Broker {bid} not connected for live trading"
+        
+        return True, ""
+
+    def validate_broker_config(self, ticker_doc: dict) -> list[str]:
+        """Validate broker configuration for a ticker.
+        
+        Returns list of warnings/errors.
+        """
+        issues = []
+        broker_ids = ticker_doc.get("broker_ids", [])
+        
+        if not broker_ids:
+            return issues
+            
+        # Check if we have live brokers but are in paper mode
+        if self.simulate_24_7 and broker_ids:
+            issues.append("Tickers configured with brokers but running in paper mode")
+        
+        # Check for broker connection issues
+        for bid in broker_ids:
+            if bid in self._failed:
+                issues.append(f"Broker {bid} in failed state: {self._failed.get(bid, 'unknown error')}")
+        
+        return issues
+
+    # ------------------------------------------------------------------
+    # High Water Mark for Drawdown Tracking
+    # ------------------------------------------------------------------
+
+    def update_high_water_mark(self, symbol: str, current_price: float) -> None:
+        """Update high water mark if current price is higher."""
+        pos = self._positions.get(symbol)
+        if not pos or pos.get("qty", 0) <= 0:
+            return
+        high = pos.get("high", 0)
+        if current_price > high:
+            self._positions[symbol]["high"] = current_price
+
+    def get_drawdown_pct(self, symbol: str, current_price: float) -> float:
+        """Calculate drawdown percentage from high water mark."""
+        pos = self._positions.get(symbol)
+        if not pos or pos.get("qty", 0) <= 0:
+            return 0.0
+        high = pos.get("high", 0)
+        if high <= 0:
+            return 0.0
+        return round(((high - current_price) / high) * 100, 2)
+
+    def _is_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
+        """True during the first `minutes` after market open (DST-aware).
+        Uses the ticker's specific market when ticker_doc is provided."""
+        if ticker_doc is not None:
+            return self._get_market(ticker_doc).is_opening_window(minutes)
+        # Legacy fallback: US ET (DST-aware)
+        now = datetime.now(_ET)
+        if now.weekday() >= 5:
+            return False
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        return 0 <= elapsed <= minutes * 60
+
+    def _is_past_opening_window(self, minutes: int = 30, ticker_doc: dict = None) -> bool:
+        """True when past the opening window but still within market hours (DST-aware)."""
+        if ticker_doc is not None:
+            return self._get_market(ticker_doc).is_past_opening_window(minutes)
+        # Legacy fallback: US ET (DST-aware)
+        now = datetime.now(_ET)
+        if now.weekday() >= 5:
+            return False
+        market_open  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
+        market_close = now.replace(hour=16, minute=0,  second=0, microsecond=0)
+        elapsed = (now - market_open).total_seconds()
+        return elapsed > minutes * 60 and now < market_close
 
     async def manual_sell(self, symbol: str, order_type: str, limit_price: float = 0) -> dict:
         """Execute a manual sell from the Positions tab.
@@ -190,7 +337,7 @@ class TradingEngine:
             broker_results=broker_results,
         )
         await self._record_trade(trade)
-        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
         self._trailing_highs.pop(sym, None)
         compound = ticker_doc.get("compound_profits", True) if ticker_doc else True
         await self._update_profit(sym, pnl, compound)
@@ -206,15 +353,33 @@ class TradingEngine:
             "trading_mode": trade.trading_mode,
         }
 
-    def is_market_open(self) -> bool:
+    def is_market_open(self, market: str = None) -> bool:
+        """Check if market is open for trading.
+        
+        Args:
+            market: Market code (US, HK, AU, UK, CA). If None, checks all configured markets.
+        
+        In paper mode (simulate_24_7), always returns True.
+        """
         # In paper mode, always allow trading (24/7 simulation)
         if self.simulate_24_7:
             return True
+        
         # In live mode, respect market_hours_only setting
         if not self.market_hours_only:
             return True
-        # Check actual market hours (9:30 AM - 4:00 PM ET, weekdays)
-        now = datetime.now(timezone(timedelta(hours=-5)))
+        
+        if market:
+            # Check specific market using MarketConfig
+            from markets import MARKETS
+            config = MARKETS.get(market)
+            if config:
+                return config.is_open_now()
+            # Fallback to US check
+            market = "US"
+        
+        # Default: Check US market hours (9:30 AM - 4:00 PM ET, weekdays) — DST-aware
+        now = datetime.now(_ET)
         if now.weekday() >= 5:
             return False
         hour, minute = now.hour, now.minute
@@ -223,31 +388,23 @@ class TradingEngine:
         if hour >= 16:
             return False
         return True
-
-    def _is_opening_window(self, minutes: int = 30) -> bool:
-        """Check if we're within the first N minutes after market open (9:30 AM EST)."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        if now.weekday() >= 5:
-            return False
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        elapsed = (now - market_open).total_seconds()
-        return 0 <= elapsed <= minutes * 60
-
-    def _is_past_opening_window(self, minutes: int = 30) -> bool:
-        """Check if we're past the opening window but still within market hours."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        if now.weekday() >= 5:
-            return False
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-        elapsed = (now - market_open).total_seconds()
-        # Past opening window but before market close
-        return elapsed > minutes * 60 and now < market_close
+    
+    def get_open_markets(self) -> list[str]:
+        """Get list of currently open markets."""
+        from markets import MARKETS
+        
+        if self.simulate_24_7 or not self.market_hours_only:
+            return list(MARKETS.keys())  # All markets
+        
+        open_markets = []
+        for code, config in MARKETS.items():
+            if config.is_open_now():
+                open_markets.append(code)
+        return open_markets
 
     def _get_today_str(self) -> str:
-        """Get today's date string in Eastern Time for tracking daily operations."""
-        now = datetime.now(timezone(timedelta(hours=-5)))
-        return now.strftime("%Y-%m-%d")
+        """Get today's date string in US Eastern Time for tracking daily operations."""
+        return datetime.now(_ET).strftime("%Y-%m-%d")
 
     # ------------------------------------------------------------------
     # evaluate_ticker — the heart of the trading logic
@@ -257,6 +414,10 @@ class TradingEngine:
         if not ticker_doc.get("enabled", False):
             return
         if ticker_doc.get("auto_stopped", False):
+            return
+
+        # Per-ticker market hours check (handles US, HK, AU, UK, CA, CN, etc.)
+        if not self._is_ticker_market_open(ticker_doc):
             return
 
         now = datetime.now(timezone.utc)
@@ -306,6 +467,25 @@ class TradingEngine:
             sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
             stop_target = round(avg * (1 + stop_off / 100), 2) if is_stop_pct else round(stop_off, 2)
 
+        # --- SIGNAL STRATEGY ROUTING ---
+        # If the ticker uses a registered signal strategy (not a preset / "custom"),
+        # ask it to generate a signal. On a concrete BUY/SELL the engine executes and
+        # returns; on HOLD or None it falls through to the existing bracket logic below.
+        from strategies.presets import PRESET_STRATEGIES
+        from strategies.loader import STRATEGY_REGISTRY
+
+        strategy_name = ticker_doc.get("strategy", "custom")
+        if strategy_name not in ("custom", "", *PRESET_STRATEGIES.keys()):
+            signal_strategy = STRATEGY_REGISTRY.get(strategy_name)
+            if signal_strategy and signal_strategy.metadata.is_signal_strategy:
+                handled = await self._run_strategy_signal(
+                    signal_strategy, ticker_doc, sym, price, pos, entry,
+                    effective_power, broker_ids, broker_allocs,
+                    sell_target, stop_target, compound, avg,
+                )
+                if handled:
+                    return  # signal was executed — skip bracket logic
+
         # --- PARTIAL FILLS BRANCH ---
         if ticker_doc.get("partial_fills_enabled") and (ticker_doc.get("buy_legs") or ticker_doc.get("sell_legs")):
             await self._evaluate_partial_fills(
@@ -339,7 +519,7 @@ class TradingEngine:
                             deps.logger.warning(f"All broker orders failed for {sym} BUY — skipping position tracking")
                             return
 
-                    self._positions[sym] = {"qty": qty, "avg_entry": exec_price}
+                    self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
                     order_label = "MKT" if buy_otype == "market" else "LMT"
                     trade = TradeRecord(
                         symbol=sym, side="BUY", price=exec_price, quantity=qty,
@@ -379,7 +559,7 @@ class TradingEngine:
                 ob_trail_is_pct = ticker_doc.get("opening_bell_trail_is_percent", True)
                 today_str = self._get_today_str()
 
-                if self._is_opening_window(30):
+                if self._is_opening_window(30, ticker_doc):
                     # During opening window: force trailing stop
                     ob_high = self._opening_bell_highs.get(sym, price)
                     if price > ob_high:
@@ -418,7 +598,7 @@ class TradingEngine:
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
-                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                         self._opening_bell_highs.pop(sym, None)
                         self._trailing_highs.pop(sym, None)
                         await self._update_profit(sym, pnl, compound)
@@ -426,7 +606,7 @@ class TradingEngine:
                     # Still in opening window, skip normal sell/stop rules
                     return
 
-                elif self._is_past_opening_window(30):
+                elif self._is_past_opening_window(30, ticker_doc):
                     # Past opening window - auto-rebracket once per day
                     if self._opening_bell_rebracket_done.get(sym) != today_str:
                         ob_high = self._opening_bell_highs.get(sym, price)
@@ -448,7 +628,7 @@ class TradingEngine:
             if trailing:
                 # TIME RULE: Lock trailing stop for first 30 min after market open
                 lock_trailing = ticker_doc.get("lock_trailing_at_open", False)
-                if lock_trailing and self._is_opening_window(30):
+                if lock_trailing and self._is_opening_window(30, ticker_doc):
                     pass  # Skip trailing stop evaluation during opening window
                 else:
                     high = self._trailing_highs.get(sym, price)
@@ -487,7 +667,7 @@ class TradingEngine:
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
-                        self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                         self._trailing_highs.pop(sym, None)
                         await self._update_profit(sym, pnl, compound)
                         return
@@ -521,7 +701,7 @@ class TradingEngine:
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl, compound)
 
@@ -530,7 +710,7 @@ class TradingEngine:
                 # This tightens the stop to prevent being dragged down by opening volatility
                 effective_stop = stop_target
                 halve_stop = ticker_doc.get("halve_stop_at_open", False)
-                if halve_stop and self._is_opening_window(30) and entry > 0:
+                if halve_stop and self._is_opening_window(30, ticker_doc) and entry > 0:
                     stop_distance = entry - stop_target
                     effective_stop = round(entry - (stop_distance * 0.5), 2)
 
@@ -563,7 +743,7 @@ class TradingEngine:
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)
-                    self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                    self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                     self._trailing_highs.pop(sym, None)
                     await self._update_profit(sym, pnl, compound)
 
@@ -572,68 +752,305 @@ class TradingEngine:
         if rebracket_on and pos["qty"] == 0:
             await self._auto_rebracket(sym, ticker_doc, price, buy_target, sell_target)
 
+
+    # ------------------------------------------------------------------
+    # Pluggable strategy signal routing
+    # ------------------------------------------------------------------
+
+    async def _run_strategy_signal(
+        self,
+        strategy,
+        ticker_doc: dict,
+        sym: str,
+        price: float,
+        pos: dict,
+        entry: float,
+        effective_power: float,
+        broker_ids: list,
+        broker_allocs: dict,
+        sell_target: float,
+        stop_target: float,
+        compound: bool,
+        avg: float,
+    ) -> bool:
+        """
+        Call a signal strategy and execute the resulting action.
+        Returns True if the signal was handled (caller should skip bracket logic).
+        Returns False to fall through to bracket logic.
+        """
+        if not await strategy.validate_ticker(ticker_doc):
+            return False
+
+        params = strategy.get_params(ticker_doc)
+
+        try:
+            market_data   = await deps.price_service.get_enriched_market_data(ticker_doc)
+            market_status = self._get_market(ticker_doc).to_dict()
+            signal = await strategy.generate_signals(
+                ticker_doc, price, market_data, market_status, broker_allocs, params
+            )
+        except Exception as exc:
+            deps.logger.error(
+                f"Strategy '{strategy.metadata.name}' error on {sym}: {exc}", exc_info=True
+            )
+            return False  # safe fallback to bracket logic
+
+        if signal is None:
+            return False  # strategy deferred — use brackets
+
+        if signal.action == "HOLD":
+            deps.logger.debug(f"[{sym}] Strategy HOLD (confidence={signal.confidence:.2f})")
+            return True   # explicitly hold — skip everything this cycle
+
+        is_paper = self.simulate_24_7
+
+        # --- BUY ---
+        if signal.action == "BUY" and pos["qty"] == 0:
+            qty = round(effective_power / price, 4) if price > 0 else 0
+            if qty <= 0:
+                return False
+            broker_results = []
+            if not is_paper and broker_ids:
+                broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                    broker_ids=broker_ids, allocations=broker_allocs,
+                    order_template={"symbol": sym, "side": "BUY", "order_type": "MARKET", "price": price},
+                )
+                if any(r.get("status") == "error" for r in broker_results) and broker_results:
+                    all_failed = all(r.get("status") == "error" for r in broker_results)
+                    if all_failed:
+                        return False
+            self._positions[sym] = {"qty": qty, "avg_entry": price}
+            trade = TradeRecord(
+                symbol=sym, side="BUY", price=price, quantity=qty,
+                reason=f"[STRATEGY:{strategy.metadata.name}] {signal.reason} (conf={signal.confidence:.0%})",
+                order_type="MARKET", rule_mode="STRATEGY",
+                target_price=price, total_value=round(price * qty, 2),
+                buy_power=effective_power, avg_price=avg,
+                sell_target=sell_target, stop_target=stop_target,
+                trading_mode="paper" if is_paper or not broker_ids else "live",
+                broker_results=broker_results,
+            )
+            await self._record_trade(trade)
+            return True
+
+        # --- SELL / STOP_LOSS ---
+        if signal.action in ("SELL", "STOP_LOSS", "TAKE_PROFIT") and pos["qty"] > 0:
+            pnl = round((price - entry) * pos["qty"], 2)
+            broker_results = []
+            if not is_paper and broker_ids:
+                broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                    broker_ids=broker_ids, allocations=broker_allocs,
+                    order_template={
+                        "symbol": sym, "side": "SELL", "order_type": "MARKET",
+                        "price": price, "quantity": pos["qty"],
+                    },
+                )
+            trade = TradeRecord(
+                symbol=sym, side=signal.action if signal.action != "STOP_LOSS" else "STOP",
+                price=price, quantity=pos["qty"],
+                reason=f"[STRATEGY:{strategy.metadata.name}] {signal.reason} (conf={signal.confidence:.0%})",
+                pnl=pnl, order_type="MARKET", rule_mode="STRATEGY",
+                entry_price=entry, target_price=price,
+                total_value=round(price * pos["qty"], 2),
+                buy_power=effective_power, avg_price=avg,
+                sell_target=sell_target, stop_target=stop_target,
+                trading_mode="paper" if is_paper or not broker_ids else "live",
+                broker_results=broker_results,
+            )
+            await self._record_trade(trade)
+            self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
+            self._trailing_highs.pop(sym, None)
+            await self._update_profit(sym, pnl, compound)
+            return True
+
+        # Unrecognised action — fall through to brackets
+        deps.logger.warning(f"[{sym}] Unknown signal action '{signal.action}' from {strategy.metadata.name}")
+        return False
+
+
     # ------------------------------------------------------------------
     async def _auto_rebracket(self, sym, ticker_doc, price, buy_target, sell_target):
+        """Auto-rebracket to current price when price drifts beyond threshold.
+        
+        Args:
+            sym: Symbol
+            ticker_doc: Full ticker config from DB
+            price: Current market price
+            buy_target: Current buy target (computed from offsets)
+            sell_target: Current sell target (computed from offsets)
+        
+        Bugs fixed:
+        - Now handles both percentage and absolute offsets correctly
+        - Added minimum drift check to prevent micro-rebracketing
+        - Added revert to previous bracket feature
+        """
         threshold = ticker_doc.get("rebracket_threshold", 2.0)
         spread = ticker_doc.get("rebracket_spread", 0.80)
         cooldown = ticker_doc.get("rebracket_cooldown", 0)
         lookback = max(2, ticker_doc.get("rebracket_lookback", 10))
         buffer = ticker_doc.get("rebracket_buffer", 0.10)
-
+        
+        # Minimum price movement to trigger rebracket (prevent micro-rebracketing)
+        min_drift = ticker_doc.get("rebracket_min_drift", 0.50)
+        
         now = datetime.now(timezone.utc)
+        
+        # Cooldown check - since last rebracket
         if cooldown > 0:
             last_rb = self._last_rebracket_ts.get(sym)
             if last_rb and (now - last_rb).total_seconds() < cooldown:
                 return
-
+        
+        # Get history for drift detection
         hist = self._recent_prices.get(sym, [])
         hist.append(price)
         if len(hist) > lookback:
             hist = hist[-lookback:]
         self._recent_prices[sym] = hist
-
-        drifted_up = price > sell_target + threshold
-        drifted_down = price < buy_target - threshold
-        if drifted_up or drifted_down:
-            recent_low = min(hist)
-            new_buy = round(recent_low - buffer, 2)
+        
+        # Calculate drift from current bracket
+        # Buy drift: how far price has moved UP from buy target
+        # Sell drift: how far price has moved DOWN from sell target
+        buy_drift = price - buy_target
+        sell_drift = sell_target - price
+        
+        # Check if price has drifted enough (in either direction)
+        # AND meets minimum drift requirement
+        drifted_up = False
+        drifted_down = False
+        
+        if buy_drift > threshold and buy_drift > min_drift:
+            # Price moved up past buy target + threshold
+            drifted_up = True
+        elif sell_drift > threshold and sell_drift > min_drift:
+            # Price moved down past sell target + threshold
+            drifted_down = True
+        
+        if not (drifted_up or drifted_down):
+            return
+        
+        # Save previous bracket for potential revert
+        prev_bracket = {
+            "buy_target": buy_target,
+            "sell_target": sell_target,
+            "timestamp": now.isoformat(),
+        }
+        
+        # Calculate new bracket based on recent low/high
+        old_buy = buy_target
+        old_sell = sell_target
+        
+        if drifted_up:
+            # Price moved UP - new bracket should be higher
+            new_buy = round(min(hist) - buffer, 2)
             new_sell = round(new_buy + spread, 2)
-            old_buy = buy_target
-            old_sell = sell_target
+            direction = "UP"
+        else:
+            # Price moved DOWN - new bracket should be lower  
+            new_buy = round(max(hist) - buffer, 2)
+            new_sell = round(new_buy + spread, 2)
+            direction = "DOWN"
+        
+        # Handle offset mode (percentage vs absolute)
+        is_pct = ticker_doc.get("sell_percent", True)
+        
+        if is_pct:
+            # Store as percentage offsets relative to current price
+            new_buy_pct = round((new_buy / price - 1) * 100, 2)
+            new_sell_pct = round((new_sell / price - 1) * 100, 2)
+            updates = {
+                "buy_offset": new_buy_pct,
+                "buy_percent": True,
+                "sell_offset": new_sell_pct,
+                "sell_percent": True,
+            }
+        else:
+            # Store as absolute prices
+            updates = {
+                "buy_offset": new_buy,
+                "buy_percent": False,
+                "sell_offset": new_sell,
+                "sell_percent": False,
+            }
+        
+        # Also add previous bracket for revert capability
+        updates["prev_bracket"] = prev_bracket
+        
+        await deps.db.tickers.update_one(
+            {"symbol": sym},
+            {"$set": updates}
+        )
+        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if doc:
+            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+        
+        self._last_rebracket_ts[sym] = now
+        deps.logger.info(
+            f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} "
+            f"(was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, min_drift=${min_drift}]"
+        )
 
-            await deps.db.tickers.update_one(
-                {"symbol": sym},
-                {"$set": {"buy_offset": new_buy, "buy_percent": False, "sell_offset": new_sell, "sell_percent": False}}
+        with deps.tracer.start_as_current_span("ticker.rebracket", attributes={
+            "rebracket.symbol": sym, "rebracket.direction": direction,
+            "rebracket.old_buy": old_buy, "rebracket.old_sell": old_sell,
+            "rebracket.new_buy": new_buy, "rebracket.new_sell": new_sell,
+            "rebracket.price": price,
+        }):
+            pass
+
+        try:
+            await deps.telegram_service._broadcast_alert(
+                f"REBRACKET {sym}\nPrice drifted {direction}: ${price:.2f}\n"
+                f"Old bracket: ${old_buy:.2f} / ${old_sell:.2f}\n"
+                f"New bracket: ${new_buy:.2f} / ${new_sell:.2f}\nSpread: ${spread:.2f}"
             )
+        except Exception:
+            pass
+
+        self._recent_prices[sym] = []
+
+    # ------------------------------------------------------------------
+    async def revert_bracket(self, sym: str) -> dict:
+        """Revert to previous bracket if available.
+        
+        Returns:
+            dict with success status and message
+        """
+        ticker = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if not ticker:
+            return {"success": False, "error": "Ticker not found"}
+        
+        prev = ticker.get("prev_bracket")
+        if not prev:
+            return {"success": False, "error": "No previous bracket to revert to"}
+        
+        # Restore previous bracket
+        old_buy = prev.get("buy_target")
+        old_sell = prev.get("sell_target")
+        
+        if old_buy and old_sell:
+            price = await deps.price_service.get_price(sym)
+            is_pct = ticker.get("sell_percent", True)
+            
+            if is_pct:
+                buy_pct = round((old_buy / price - 1) * 100, 2)
+                sell_pct = round((old_sell / price - 1) * 100, 2)
+                updates = {"buy_offset": buy_pct, "sell_offset": sell_pct}
+            else:
+                updates = {"buy_offset": old_buy, "sell_offset": old_sell}
+            
+            # Clear prev_bracket
+            updates.pop("prev_bracket", None)
+            
+            await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
             doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
             if doc:
                 await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
-
-            self._last_rebracket_ts[sym] = now
-            direction = "UP" if drifted_up else "DOWN"
-            deps.logger.info(
-                f"REBRACKET: {sym} drifted {direction} — new bracket ${new_buy} / ${new_sell} "
-                f"(was ${old_buy} / ${old_sell}) [lookback={lookback}, buffer=${buffer}, cooldown={cooldown}s]"
-            )
-
-            with deps.tracer.start_as_current_span("ticker.rebracket", attributes={
-                "rebracket.symbol": sym, "rebracket.direction": direction,
-                "rebracket.old_buy": old_buy, "rebracket.old_sell": old_sell,
-                "rebracket.new_buy": new_buy, "rebracket.new_sell": new_sell,
-                "rebracket.price": price,
-            }):
-                pass
-
-            try:
-                await deps.telegram_service._broadcast_alert(
-                    f"REBRACKET {sym}\nPrice drifted {direction}: ${price:.2f}\n"
-                    f"Old bracket: ${old_buy:.2f} / ${old_sell:.2f}\n"
-                    f"New bracket: ${new_buy:.2f} / ${new_sell:.2f}\nSpread: ${spread:.2f}"
-                )
-            except Exception:
-                pass
-
-            self._recent_prices[sym] = []
+            
+            deps.logger.info(f"REVERT: {sym} reverted to ${old_buy} / ${old_sell}")
+            return {"success": True, "reverted_to": {"buy": old_buy, "sell": old_sell}}
+        
+        return {"success": False, "error": "Could not restore previous bracket"}
 
     # ------------------------------------------------------------------
     # Partial Fills — scale in/out with multiple legs
@@ -733,7 +1150,7 @@ class TradingEngine:
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl, compound)
                 return
@@ -795,7 +1212,7 @@ class TradingEngine:
 
             # If all sell legs filled and no position remains, clear
             if pos.get("qty", 0) <= 0.0001:
-                self._positions[sym] = {"qty": 0, "avg_entry": 0}
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
 
         # --- AUTO REBRACKET for partial fills ---
         # Rebracket should still work when no position is held
@@ -822,6 +1239,14 @@ class TradingEngine:
             doc = trade.model_dump()
             await deps.db.trades.insert_one(doc)
             self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
+            
+            # Send ORDER_FILLED command to Edge if enabled
+            try:
+                from shared.edge_integration import on_trade_executed
+                await on_trade_executed(doc)
+            except ImportError:
+                pass  # Edge integration not available
+            
             pnl_str = f" P&L: ${trade.pnl:+.2f}" if trade.pnl != 0 else ""
             entry_str = f" entry=${trade.entry_price:.2f}" if trade.entry_price > 0 else ""
             deps.logger.info(
