@@ -55,7 +55,7 @@ jobs:
       - name: Build exe
         working-directory: backend
         run: |
-          python -m PyInstaller --clean --onefile --console --name SentinelPulse sentinel_mac.spec
+          python -m PyInstaller --clean sentinel_mac.spec
 
       # 6. Verify exe exists
       - name: Verify exe
