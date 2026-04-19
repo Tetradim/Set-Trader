@@ -66,7 +66,12 @@ async def reload_strategies() -> Dict[str, BaseStrategy]:
 
 async def _load_from_dir(directory: Path, namespace: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-
+    
+    # Debug: log file count
+    py_files = list(directory.glob("*.py"))
+    logger.debug(f"[{namespace}] scanning: {directory}, found {len(py_files)} .py files")
+    logger.debug(f"[{namespace}] files: {[f.name for f in py_files]}")
+    
     for finder, mod_name, is_pkg in pkgutil.iter_modules([str(directory)]):
         if mod_name.startswith("_") or is_pkg:
             continue

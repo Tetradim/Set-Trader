@@ -30,8 +30,10 @@ ROOT_DIR = BASE_DIR
 # Demo mode - enables mock data when MongoDB is unavailable
 DEMO_MODE = os.environ.get("DEMO_MODE", "false").lower() in ("1", "true", "yes")
 
-# Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+# Logging - allow DEBUG via env var
+_log_level = os.environ.get("LOG_LEVEL", "INFO")
+_level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING}
+logging.basicConfig(level=_level_map.get(_log_level, logging.INFO), format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("SentinelPulse")
 
 # MongoDB - lazy initialization with optional connection
