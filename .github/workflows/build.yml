@@ -91,10 +91,10 @@ jobs:
       # ---------------------------------------------------------------------
       - name: Verify exe
         run: |
-          $exe = "backend\dist\SentinelPulse.exe"
+          $exe = "backend\dist\SentinelPulse\SentinelPulse.exe"
           if (!(Test-Path $exe)) {
             Write-Host "ERROR: $exe not found"
-            Get-ChildItem -Path "backend\dist" -Recurse -ErrorAction SilentlyContinue
+            Get-ChildItem -Path "backend\dist" -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue
             exit 1
           }
           Write-Host "SUCCESS: Built $exe"
@@ -123,4 +123,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SentinelPulse-Exe
-          path: backend/dist/SentinelPulse.exe
+          path: backend/dist/SentinelPulse

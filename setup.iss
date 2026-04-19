@@ -27,8 +27,7 @@ Name: desktopicon; Description: "Create desktop shortcut for the program"; Group
 Name: uninstallicon; Description: "Create desktop shortcut for Uninstall"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [Files]
-Source: "backend\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "backend\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Add any other files/folders you need
 
 [Icons]
