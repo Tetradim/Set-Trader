@@ -19,6 +19,19 @@ async def ws_endpoint(websocket: WebSocket):
     await deps.ws_manager.connect(websocket)
     try:
         tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
+        
+        # In demo mode with no tickers, seed with default tickers
+        if not tickers and deps.DEMO_MODE:
+            defaults = [
+                TickerConfig(symbol="SPY", base_power=100.0, market="US"),
+                TickerConfig(symbol="QQQ", base_power=100.0, market="US"),
+                TickerConfig(symbol="AAPL", base_power=100.0, market="US"),
+                TickerConfig(symbol="NVDA", base_power=100.0, market="US"),
+            ]
+            for t in defaults:
+                doc = t.model_dump()
+                await deps.db.tickers.insert_one(doc)
+            tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
         prices = {}
         for t in tickers:
             prices[t["symbol"]] = await deps.price_service.get_price(t["symbol"])
