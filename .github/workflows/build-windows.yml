@@ -1,0 +1,90 @@
+name: Build Sentinel Pulse — Windows
+
+on:
+  push:
+    branches: [Split, main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '*.ps1'
+      - 'setup.iss'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Custom version (semver)'
+        required: false
+        default: ''
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    name: Windows x64
+
+    steps:
+      # 1. Source
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Install dependencies
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r backend/requirements.txt
+          pip install pyinstaller pillow
+
+      # 4. Create .env for bundled app
+      - name: Create .env
+        run: |
+          @"
+          MONGO_URL=mongodb://localhost:27017
+          DB_NAME=sentinelpulse
+          CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+          DEMO_MODE=true
+          PORT=8002
+          "@ | Out-File -Encoding UTF8 backend/.env
+
+      # 5. Build with PyInstaller (onefile + console)
+      - name: Build exe
+        working-directory: backend
+        run: |
+          python -m PyInstaller --clean --onefile --console --name SentinelPulse sentinel_mac.spec
+
+      # 6. Verify exe exists
+      - name: Verify exe
+        run: |
+          $exe = "backend/dist/SentinelPulse.exe"
+          if (!(Test-Path $exe)) {
+            Write-Host "ERROR: $exe not found"
+            Get-ChildItem -Path "backend/dist" -Filter "*.exe" -Recurse
+            exit 1
+          }
+          Write-Host "Built: $exe"
+          Get-Item $exe | Select-Object Name, Length
+
+      # 7. Build installer with Inno Setup
+      - name: Build Installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: setup.iss
+          options: /O+ /DVersion=${{ github.event.inputs.version || '1.0.0' }}
+
+      # 8. Upload artifacts
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelPulse-Setup
+          path: Output/SentinelPulse-Setup.exe
+
+      - name: Upload Standalone Exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelPulse-Exe
+          path: backend/dist/SentinelPulse.exe

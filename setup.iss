@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64
 
 [Tasks]
 Name: desktopicon; Description: "Create desktop shortcut for the program"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
-Name: uninstallicon; Description: "Create desktop shortcut for Uninstall (beta testing)"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce unchecked
+Name: uninstallicon; Description: "Create desktop shortcut for Uninstall"; GroupDescription: "Additional shortcuts:"; Flags: checkedonce
 
 [Files]
 Source: "backend\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -35,7 +35,7 @@ Source: "backend\dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{commondesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: uninstallicon
+Name: "{commondesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: uninstallicon; IconFilename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
