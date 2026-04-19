@@ -7,6 +7,7 @@
 #            static/ directory built from frontend/  (yarn build → frontend/dist → backend/static)
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from pathlib import Path
 
 block_cipher = None
 
@@ -28,8 +29,8 @@ a = Analysis(
     ["mac_launcher.py"],
     pathex=["."],          # run from backend/
     binaries=[
-        # Bundled MongoDB — placed next to the executable in Contents/MacOS/
-        ("mongod", "."),
+        # Bundled MongoDB — only if mongod exists (macOS typically)
+        *([("mongod", ".")] if Path("mongod").exists() else []),
         *pymongo_b,
         *bson_b,
     ],
