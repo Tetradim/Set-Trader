@@ -40,8 +40,16 @@ def main():
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
     
-    # Run the server
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    # Run the server with explicit logging config
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port, 
+        log_config=None  # Use default uvicorn logging
+    )
 
 
 if __name__ == "__main__":
