@@ -2,7 +2,7 @@
 
 **Automated bracket-trading bot — multi-broker, multi-market, production-grade dark-mode dashboard.**
 
-Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, and a Windows `.exe` installer.
+Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, **Demo Mode (runs without MongoDB)**, and a Windows `.exe` installer.
 
 ---
 
@@ -34,7 +34,7 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
                       └──────────────┬──────────────────┘
                                      │  WebSocket + REST
                       ┌──────────────▼──────────────────┐
-                      │   FastAPI Server  (Port 8001)   │
+                      │   FastAPI Server  (Port 8002)   │
                       │   Motor · yfinance · Telegram   │
                       └───┬──────┬──────┬──────┬────────┘
                           │      │      │      │
@@ -61,7 +61,7 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 # Backend
 cd backend
 pip install -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8001
+uvicorn server:app --host 0.0.0.0 --port 8002
 
 # Frontend
 cd frontend
@@ -70,6 +70,22 @@ yarn dev
 ```
 
 Dashboard: `http://localhost:3000` — WebSocket connects automatically on load.
+
+### Demo Mode (No MongoDB Required)
+
+Run without MongoDB for testing or demo purposes:
+
+```bash
+cd backend
+export DEMO_MODE=true
+export PORT=8002
+uvicorn server:app --host 0.0.0.0 --port 8002
+```
+
+- **Default tickers** seeded automatically: SPY, QQQ, AAPL, NVDA
+- **In-memory storage** — data not persisted
+- **Paper trading** enforced
+- **WebSocket** works fully
 
 ---
 
@@ -972,6 +988,9 @@ details      object   — event-specific payload
 | `SMTP_PASSWORD` | No | SMTP password |
 | `SMTP_RECIPIENT` | No | Admin email for feedback/beta notifications |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins (default `*`) |
+| `PORT` | No | Server port (default `8002`) |
+| `DEMO_MODE` | No | Set `true` to run without MongoDB (seeds default tickers) |
+| `PULSE_API_URL` | No | Sentinel Edge URL for OTel auto-discovery |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector URL (e.g. Jaeger, Grafana Tempo) |
 | `OTEL_CONSOLE_EXPORT` | No | Set `true` to print spans to console |
 
