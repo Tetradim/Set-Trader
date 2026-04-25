@@ -2,42 +2,58 @@
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
+import re
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+
+def validate_symbol(symbol: str) -> str:
+    """Validate ticker symbol format."""
+    if not symbol:
+        raise ValueError("Symbol cannot be empty")
+    # Allow alphanumeric + common exchange suffixes
+    if not re.match(r"^[A-Z]{1,5}(:[A-Z]{1,5})?$", symbol.upper()):
+        raise ValueError(f"Invalid symbol format: {symbol}")
+    return symbol.upper()
 
 
 class TickerConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    symbol: str
-    base_power: float = 100.0
-    avg_days: int = 30
-    buy_offset: float = -3.0
+    symbol: str = Field(..., description="Ticker symbol")
+    base_power: float = Field(100.0, ge=0, le=100000, description="Base power (max position size)")
+    avg_days: int = Field(30, ge=1, le=365, description="Average days for calculation")
+    buy_offset: float = Field(-3.0, ge=-50, le=0, description="Buy offset percentage")
     buy_percent: bool = True
     buy_order_type: str = "limit"
-    sell_offset: float = 3.0
+    sell_offset: float = Field(3.0, ge=0, le=50, description="Sell offset percentage")
     sell_percent: bool = True
     sell_order_type: str = "limit"
-    stop_offset: float = -6.0
+    stop_offset: float = Field(-6.0, ge=-50, le=0, description="Stop loss offset percentage")
     stop_percent: bool = True
     stop_order_type: str = "limit"
     trailing_enabled: bool = False
-    trailing_percent: float = 2.0
+    trailing_percent: float = Field(2.0, ge=0, le=50, description="Trailing stop percentage")
     trailing_percent_mode: bool = True
     trailing_order_type: str = "limit"
     wait_day_after_buy: bool = False
     compound_profits: bool = True
-    max_daily_loss: float = 0
-    max_consecutive_losses: int = 0
+    max_daily_loss: float = Field(0, ge=0, le=100, description="Max daily loss percentage")
+    max_consecutive_losses: int = Field(0, ge=0, le=20, description="Max consecutive losses before auto-stop")
     auto_stopped: bool = False
     auto_stop_reason: str = ""
     auto_rebracket: bool = False
-    rebracket_threshold: float = 2.0
-    rebracket_spread: float = 0.80
-    rebracket_cooldown: int = 0
-    rebracket_lookback: int = 10
-    rebracket_buffer: float = 0.10
-    rebracket_min_drift: float = 0.50  # Minimum price movement to trigger rebracket
+    rebracket_threshold: float = Field(2.0, ge=0, le=50, description="Rebracket threshold percentage")
+    rebracket_spread: float = Field(0.80, ge=0.1, le=1.0, description="Rebracket spread")
+    rebracket_cooldown: int = Field(0, ge=0, le=1440, description="Rebracket cooldown in minutes")
+    rebracket_lookback: int = Field(10, ge=1, le=100, description="Rebracket lookback days")
+    rebracket_buffer: float = Field(0.10, ge=0, le=1.0, description="Rebracket buffer percentage")
+    rebracket_min_drift: float = Field(0.50, ge=0, le=10, description="Minimum price movement to trigger rebracket")
+    
+    @field_validator('symbol')
+    @classmethod
+    def validate_symbol_field(cls, v: str) -> str:
+        return validate_symbol(v)
     enabled: bool = True
     strategy: str = "custom"
     broker_id: str = ""

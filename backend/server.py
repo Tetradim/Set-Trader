@@ -271,12 +271,23 @@ from telemetry import setup_telemetry, get_tracer
 setup_telemetry(app)
 deps.tracer = get_tracer()
 
+# CORS configuration - secure defaults
+# Set CORS_ORIGINS env var in production to limit access
+_cors_origins = os.environ.get("CORS_ORIGINS", "")
+if _cors_origins == "*":
+    # WARNING: Wildcard allowed only in development
+    import logging
+    logging.getLogger("SentinelPulse").warning(
+        "CORS set to wildcard - this is insecure for production! "
+        "Set CORS_ORIGINS to specific origins."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins.split(",") if _cors_origins else ["http://localhost:8001"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # --- Mount routers ---
