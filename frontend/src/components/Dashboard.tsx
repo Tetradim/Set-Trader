@@ -17,8 +17,9 @@ import { ComplianceAuditTab } from './tabs/ComplianceAuditTab';
 import { IncidentsOpsTab } from './tabs/IncidentsOpsTab';
 import { PortfolioAnalyticsTab } from './tabs/PortfolioAnalyticsTab';
 import { AdminIAMTab } from './tabs/AdminIAMTab';
+import { SLODashboardTab } from './tabs/SLODashboardTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
-import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List, Scale, BarChart3, Users, Server } from 'lucide-react';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List, Scale, BarChart3, Users, Server, Target } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 
@@ -37,6 +38,7 @@ const TABS = [
   { id: 'incidents', label: 'Incidents', icon: Server },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'admin', label: 'Admin', icon: Users },
+  { id: 'slo', label: 'SLO', icon: Target },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -111,6 +113,7 @@ export function Dashboard() {
               {activeTab === 'incidents' && <IncidentsOpsTab />}
               {activeTab === 'analytics' && <PortfolioAnalyticsTab />}
               {activeTab === 'admin' && <AdminIAMTab />}
+              {activeTab === 'slo' && <SLODashboardTab />}
               {activeTab === 'settings' && <SettingsTab />}
             </ErrorBoundary>
           </div>

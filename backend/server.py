@@ -265,6 +265,7 @@ from routes.reconciliation import router as reconciliation_router
 from routes.audit import router as audit_router
 from routes.ops import router as ops_router
 from routes.analytics import router as analytics_router
+from routes.slo import router as slo_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -283,6 +284,7 @@ api.include_router(reconciliation_router)
 api.include_router(audit_router)
 api.include_router(ops_router)
 api.include_router(analytics_router)
+api.include_router(slo_router)
 
 app.include_router(api)
 
