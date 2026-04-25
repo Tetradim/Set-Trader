@@ -13,6 +13,23 @@ router = APIRouter()
 @router.get("/health")
 async def health():
     connected_brokers = sum(1 for _ in deps.broker_mgr._adapters)
+    
+    # Get circuit breaker status
+    circuit_status = "unknown"
+    try:
+        from resilience import broker_resilience
+        if broker_resilience.circuit_open:
+            circuit_status = "open"
+        else:
+            circuit_status = "closed"
+    except Exception:
+        pass
+    
+    # Get WS manager stats
+    ws_stats = {}
+    if hasattr(deps.ws_manager, 'get_stats'):
+        ws_stats = deps.ws_manager.get_stats()
+    
     return {
         "status": "online",
         "running": deps.engine.running,
@@ -24,6 +41,8 @@ async def health():
         "telegram": deps.telegram_service.running,
         "ws_clients": len(deps.ws_manager.active),
         "brokers_connected": connected_brokers,
+        "circuit_breaker": circuit_status,
+        "ws_stats": ws_stats,
     }
 
 
