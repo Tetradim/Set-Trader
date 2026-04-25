@@ -179,6 +179,11 @@ class RiskControls:
             )
         return self._kill_switches[switch_id]
     
+    def get_kill_switch(self, level: str, target_id: str) -> Optional[KillSwitch]:
+        """Get a kill switch by level and target."""
+        switch_id = f"{level}:{target_id}"
+        return self._kill_switches.get(switch_id)
+    
     def activate_kill_switch(self, level: KillSwitchLevel, target_id: str, 
                             triggered_by: str, reason: str = "") -> bool:
         """Activate a kill switch."""
