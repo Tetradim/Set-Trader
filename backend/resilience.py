@@ -1,24 +1,22 @@
 """Resilience module — Rate Limiting & Circuit Breakers for Broker APIs.
 
 Provides production-grade resilience patterns:
-- Token bucket rate limiting (via aiolimiter)
+- Token bucket rate limiting (custom implementation for accuracy)
 - Circuit breaker state machine (CLOSED → OPEN → HALF_OPEN → CLOSED)
 - Per-broker configuration stored in MongoDB
 - Prometheus metrics integration
 - Telegram alerts for circuit state changes
 """
 import asyncio
+import time as sync_time
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional, Any, Callable
+from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 from zoneinfo import ZoneInfo
 
 _ET = ZoneInfo("America/New_York")
-import time
-
-from aiolimiter import AsyncLimiter
 
 import deps
 
@@ -33,9 +31,9 @@ class CircuitState(str, Enum):
 class BrokerResilienceConfig:
     """Per-broker resilience configuration."""
     # Rate limiting (token bucket)
-    max_rps: float = 10.0           # Max requests per second
+    max_rps: float = 10.0           # Max requests per second sustained
     burst: int = 20                 # Burst capacity
-    cooldown_ms: int = 100          # Min ms between requests
+    cooldown_ms: int = 100          # Min ms between requests (legacy, use max_rps)
     
     # Circuit breaker
     failure_threshold: int = 5      # Failures to trip circuit
@@ -115,6 +113,101 @@ class RateLimitExceededError(Exception):
         super().__init__(f"Rate limit for {broker_id}. Wait {wait_ms}ms")
 
 
+class TokenBucket:
+    """
+    Accurate token bucket rate limiter that properly enforces both burst and sustained rates.
+    
+    Unlike aiolimiter which is a leaky bucket, this is a true token bucket:
+    - Tokens accumulate up to max_capacity (burst)
+    - Tokens refill at rate tokens per second
+    - Each acquire() consumes one token
+    - If no tokens, wait until one becomes available
+    
+    This ensures:
+    - Burst: You can make up to max_capacity requests instantly
+    - Sustained: You cannot exceed rate requests/second over time
+    """
+    
+    def __init__(self, rate: float, capacity: int):
+        """
+        Args:
+            rate: Tokens added per second (max_rps)
+            capacity: Maximum tokens (burst size)
+        """
+        self.rate = rate
+        self.capacity = capacity
+        self._tokens = float(capacity)
+        self._last_update = sync_time.monotonic()
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self, timeout: Optional[float] = None) -> None:
+        """
+        Acquire a token, waiting if necessary.
+        
+        Args:
+            timeout: Maximum seconds to wait (None = wait forever)
+        """
+        deadline = None if timeout is None else sync_time.monotonic() + timeout
+        
+        async with self._lock:
+            while self._tokens < 1:
+                if deadline is not None:
+                    wait_time = (1 - self._tokens) / self.rate
+                    if sync_time.monotonic() + wait_time > deadline:
+                        raise RateLimitExceededError("bucket", int(wait_time * 1000))
+                
+                # Calculate wait time and release lock
+                wait_time = (1 - self._tokens) / self.rate
+                
+                # Release lock while sleeping
+                self._lock.release()
+                try:
+                    await asyncio.sleep(wait_time)
+                finally:
+                    await self._lock.acquire()
+                
+                self._refill()
+            
+            self._tokens -= 1
+    
+    def _refill(self) -> None:
+        """Refill tokens based on elapsed time."""
+        now = sync_time.monotonic()
+        elapsed = now - self._last_update
+        self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
+        self._last_update = now
+    
+    @property
+    def available_tokens(self) -> float:
+        """Get current available tokens."""
+        self._refill()
+        return self._tokens
+
+
+class _BrokerCallContext:
+    """
+    Async context manager for broker calls that auto-records success/failure.
+    
+    Usage:
+        async with resilience.acquire(broker_id) as ctx:
+            result = await broker.place_order(...)
+    """
+    
+    def __init__(self, resilience: "BrokerResilience", broker_id: str):
+        self._resilience = resilience
+        self._broker_id = broker_id
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            await self._resilience.record_failure(self._broker_id, exc_val)
+        else:
+            await self._resilience.record_success(self._broker_id)
+        return False  # Don't suppress exceptions
+
+
 class BrokerResilience:
     """
     Manages rate limiting and circuit breakers for all brokers.
@@ -138,7 +231,7 @@ class BrokerResilience:
     
     def __init__(self):
         self._configs: Dict[str, BrokerResilienceConfig] = {}
-        self._limiters: Dict[str, AsyncLimiter] = {}
+        self._limiters: Dict[str, TokenBucket] = {}
         self._circuits: Dict[str, CircuitBreakerState] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._telegram = None
@@ -152,6 +245,20 @@ class BrokerResilience:
     def set_ws_manager(self, ws_manager):
         """Set WebSocket manager for real-time updates."""
         self._ws_manager = ws_manager
+    
+    async def acquire(self, broker_id: str):
+        """
+        Async context manager for rate limiting and circuit breaking.
+        
+        Usage:
+            async with resilience.acquire(broker_id):
+                result = await broker.place_order(...)
+        
+        This is the preferred way to use the resilience layer.
+        Automatically records success/failure on exit.
+        """
+        await self.before_call(broker_id)
+        return _BrokerCallContext(self, broker_id)
     
     async def load_config(self):
         """Load resilience config from MongoDB."""
@@ -200,16 +307,15 @@ class BrokerResilience:
     def _create_limiter(self, broker_id: str):
         """Create or recreate the rate limiter for a broker.
         
-        AsyncLimiter(max_rate, time_period) fills at max_rate/time_period tokens per second
-        and allows up to max_rate tokens in a burst.  To get:
-          - sustained throughput: cfg.max_rps tokens/second
-          - burst capacity: cfg.burst tokens
-        set time_period = burst / max_rps so the bucket holds exactly burst tokens.
+        Uses our custom TokenBucket that properly enforces:
+        - Sustained rate: max_rps requests per second
+        - Burst capacity: burst requests at once
         """
         cfg = self._configs.get(broker_id, BrokerResilienceConfig())
-        # Guard against division by zero
-        time_period = max(cfg.burst / cfg.max_rps, 0.001)
-        self._limiters[broker_id] = AsyncLimiter(cfg.burst, time_period)
+        # TokenBucket(rate, capacity) where:
+        # - rate = max_rps (tokens per second)
+        # - capacity = burst (max tokens at once)
+        self._limiters[broker_id] = TokenBucket(cfg.max_rps, cfg.burst)
     
     def _get_circuit(self, broker_id: str) -> CircuitBreakerState:
         """Get or create circuit breaker state."""
@@ -234,13 +340,17 @@ class BrokerResilience:
         """
         Check rate limit and circuit breaker before making a call.
         Raises CircuitOpenError or waits for rate limit.
+        
+        Note: Rate limiting is now handled by TokenBucket which accurately
+        enforces both burst and sustained rate limits. The cooldown_ms
+        parameter is deprecated but retained for backward compatibility.
         """
         cfg = self.get_config(broker_id)
         circuit = self._get_circuit(broker_id)
         now = datetime.now(timezone.utc)
         
         async with self._get_lock(broker_id):
-            # Check circuit breaker
+            # Check circuit breaker state
             if circuit.state == CircuitState.OPEN:
                 if circuit.opened_at:
                     elapsed = (now - circuit.opened_at).total_seconds()
@@ -254,17 +364,16 @@ class BrokerResilience:
                         remaining = int(cfg.recovery_timeout_seconds - elapsed)
                         raise CircuitOpenError(broker_id, remaining)
             
-            # Clean old failures
+            # Clean old failures (O(n) in window size, usually small)
             self._clean_old_failures(circuit, cfg.failure_window_seconds)
         
-        # Acquire rate limiter (this will wait if needed)
+        # Acquire rate limiter - TokenBucket enforces rate/burst accurately
         limiter = self._limiters.get(broker_id)
         if limiter:
             await limiter.acquire()
         
-        # Additional cooldown if configured
-        if cfg.cooldown_ms > 0:
-            await asyncio.sleep(cfg.cooldown_ms / 1000.0)
+        # Note: cooldown_ms is deprecated - TokenBucket handles rate limiting
+        # Keeping for backward compatibility but it will be superseded by bucket
     
     async def record_success(self, broker_id: str):
         """Record a successful API call."""
@@ -383,10 +492,29 @@ class BrokerResilience:
         )
     
     def _update_metrics(self, broker_id: str, success: bool):
-        """Update Prometheus metrics."""
-        # These would integrate with your existing metrics
-        # For now, just log
-        pass
+        """Update Prometheus metrics.
+        
+        In production, this would use the OpenTelemetry or Prometheus client:
+        
+        ```python
+        from prometheus_client import Counter, Gauge
+        
+        circuit_state = Gauge('broker_circuit_state', 'Circuit state', ['broker_id'])
+        request_total = Counter('broker_requests_total', 'Total requests', ['broker_id', 'status'])
+        failure_rate = Gauge('broker_failure_rate', 'Recent failure rate', ['broker_id'])
+        ```
+        """
+        cfg = self.get_config(broker_id)
+        circuit = self._get_circuit(broker_id)
+        
+        # Log metrics for observability (replace with actual metrics in production)
+        deps.logger.debug(
+            f"resilience_metrics",
+            broker_id=broker_id,
+            circuit_state=circuit.state.value,
+            success=success,
+            recent_failures=len(circuit.failure_timestamps),
+        )
     
     def get_status(self, broker_id: str) -> Dict[str, Any]:
         """Get current status for a broker."""
