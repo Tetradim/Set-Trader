@@ -12,8 +12,13 @@ import { TracesTab } from './tabs/TracesTab';
 import { ForeignTab } from './tabs/ForeignTab';
 import { RiskCenterTab } from './tabs/RiskCenterTab';
 import { OrdersExecutionTab } from './tabs/OrdersExecutionTab';
+import { ReconciliationTab } from './tabs/ReconciliationTab';
+import { ComplianceAuditTab } from './tabs/ComplianceAuditTab';
+import { IncidentsOpsTab } from './tabs/IncidentsOpsTab';
+import { PortfolioAnalyticsTab } from './tabs/PortfolioAnalyticsTab';
+import { AdminIAMTab } from './tabs/AdminIAMTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
-import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List } from 'lucide-react';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List, Scale, BarChart3, Users, Server } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 
@@ -22,11 +27,16 @@ const TABS = [
   { id: 'positions', label: 'Positions', icon: Crosshair },
   { id: 'risk-center', label: 'Risk Center', icon: Shield },
   { id: 'orders', label: 'Orders', icon: List },
+  { id: 'reconciliation', label: 'Reconciliation', icon: Scale },
+  { id: 'compliance', label: 'Compliance', icon: Users },
   { id: 'history', label: 'History', icon: History },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'brokers', label: 'Brokers', icon: Plug },
   { id: 'foreign', label: 'Foreign', icon: Globe },
   { id: 'traces', label: 'Traces', icon: Activity },
+  { id: 'incidents', label: 'Incidents', icon: Server },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'admin', label: 'Admin', icon: Users },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -91,11 +101,16 @@ export function Dashboard() {
               {activeTab === 'positions' && <PositionsTab />}
               {activeTab === 'risk-center' && <RiskCenterTab />}
               {activeTab === 'orders' && <OrdersExecutionTab />}
+              {activeTab === 'reconciliation' && <ReconciliationTab />}
+              {activeTab === 'compliance' && <ComplianceAuditTab />}
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'logs' && <LogsTab />}
               {activeTab === 'brokers' && <BrokersTab />}
               {activeTab === 'foreign' && <ForeignTab />}
               {activeTab === 'traces' && <TracesTab />}
+              {activeTab === 'incidents' && <IncidentsOpsTab />}
+              {activeTab === 'analytics' && <PortfolioAnalyticsTab />}
+              {activeTab === 'admin' && <AdminIAMTab />}
               {activeTab === 'settings' && <SettingsTab />}
             </ErrorBoundary>
           </div>
