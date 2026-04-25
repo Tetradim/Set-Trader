@@ -1,6 +1,6 @@
 """Core trading engine — evaluates tickers, places orders, manages positions."""
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 from collections import deque
 
@@ -52,6 +52,11 @@ class TradingEngine:
         
         # Safety flags
         self._dry_run_mode: bool = False  # If True, no real orders placed
+        
+        # Error tracking for backpressure
+        self._ticker_errors: Dict[str, int] = {}  # symbol -> error count
+        self._ticker_last_error: Dict[str, datetime] = {}  # symbol -> last error timestamp
+        self._max_consecutive_errors = 3  # Pause ticker after this many consecutive errors
 
     def _initialize_risk_defaults(self):
         """Initialize default risk controls."""
@@ -136,6 +141,25 @@ class TradingEngine:
         """Check if actually trading live (not paper)."""
         return not self.simulate_24_7
     
+    def _log_trading_error(self, context: str, error: Exception, symbol: str = None):
+        """Enhanced error logging for trading errors with Telegram alerts."""
+        error_msg = f"{context}: {error}"
+        if symbol:
+            error_msg = f"[{symbol}] {error_msg}"
+        
+        deps.logger.error(error_msg, exc_info=True)
+        
+        # Send Telegram alert for critical errors
+        if hasattr(deps, 'telegram_service') and deps.telegram_service.running:
+            if "Circuit" in str(type(error).__name__) or "Error" in str(type(error).__name__):
+                try:
+                    import asyncio
+                    asyncio.create_task(deps.telegram_service.send_alert(
+                        f"⚠️ Trading Error\n{context}\n{error_msg[:200]}"
+                    ))
+                except Exception:
+                    pass  # Don't fail on logging errors
+    
     async def pre_trade_check(self, symbol: str, side: str, quantity: float, 
                               price: float) -> tuple[bool, str]:
         """
@@ -208,6 +232,40 @@ class TradingEngine:
         
         # Update order count
         self.risk_controls.update_exposure("portfolio", "global", order_count=1)
+    
+    # === Error Tracking & Backpressure ===
+    
+    def record_ticker_error(self, symbol: str, error: Exception):
+        """Record an error for a ticker for backpressure."""
+        now = datetime.now(timezone.utc)
+        
+        # Check if this is a new error or repeated
+        if symbol in self._ticker_last_error:
+            time_since_last = (now - self._ticker_last_error[symbol]).total_seconds()
+            if time_since_last < 60:  # Within 1 minute = consecutive
+                self._ticker_errors[symbol] = self._ticker_errors.get(symbol, 0) + 1
+            else:
+                self._ticker_errors[symbol] = 1  # Reset after 1 min gap
+        else:
+            self._ticker_errors[symbol] = 1
+        
+        self._ticker_last_error[symbol] = now
+        deps.logger.warning(f"Ticker {symbol} error #{self._ticker_errors[symbol]}: {error}")
+        
+        # Auto-pause if too many errors
+        if self._ticker_errors[symbol] >= self._max_consecutive_errors:
+            deps.logger.error(
+                f" AUTO-PAUSE ticker {symbol} due to {self._ticker_errors[symbol]} consecutive errors"
+            )
+    
+    def clear_ticker_error(self, symbol: str):
+        """Clear error count for a ticker after successful evaluation."""
+        self._ticker_errors.pop(symbol, None)
+        self._ticker_last_error.pop(symbol, None)
+    
+    def should_skip_ticker(self, symbol: str) -> bool:
+        """Check if ticker should be skipped due to errors."""
+        return self._ticker_errors.get(symbol, 0) >= self._max_consecutive_errors
 
     async def save_state(self):
         await deps.db.settings.update_one(
@@ -234,6 +292,40 @@ class TradingEngine:
             self.live_during_market_hours = v.get("live_during_market_hours", False)
             self.paper_after_hours = v.get("paper_after_hours", False)
             deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
+    
+    async def reconcile_positions(self):
+        """Reconcile positions from DB on startup to recover state."""
+        deps.logger.info("Reconciling positions from database...")
+        
+        # Load open positions from trades
+        open_trades = await deps.db.trades.find({
+            "side": "BUY",
+            "status": {"$ne": "CLOSED"}
+        }).to_list(length=1000)
+        
+        for trade in open_trades:
+            sym = trade.get("symbol")
+            if sym:
+                self._positions[sym] = {
+                    "qty": trade.get("quantity", 0),
+                    "avg_entry": trade.get("price", 0),
+                    "high": trade.get("price", 0),
+                }
+                deps.logger.info(f"Restored position: {sym} qty={trade.get('quantity')} @ ${trade.get('price')}")
+        
+        # Load pending sells
+        pending = await deps.db.settings.find_one({"key": "pending_sells"})
+        if pending and pending.get("value"):
+            self._pending_sells = pending.get("value")
+            deps.logger.info(f"Restored {len(self._pending_sells)} pending sells")
+        
+        # Load trailing highs
+        trailing = await deps.db.settings.find_one({"key": "trailing_highs"})
+        if trailing and trailing.get("value"):
+            self._trailing_highs = trailing.get("value")
+            deps.logger.info(f"Restored {len(self._trailing_highs)} trailing highs")
+        
+        deps.logger.info("Position reconciliation complete")
 
     def check_auto_mode_switch(self) -> bool:
         """Check and apply auto mode switching based on market hours. 
