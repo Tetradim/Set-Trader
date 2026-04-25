@@ -7,6 +7,7 @@ import random
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
 
 import deps
 
@@ -16,6 +17,32 @@ _ZSCORE_WINDOW = 60          # 60-second rolling window
 _ZSCORE_MIN_SAMPLES = 15     # min samples before z-score is meaningful
 _ANOMALY_THRESHOLD = 2.5     # z-score above which volume is anomalous
 _EXTREME_THRESHOLD = 3.5     # z-score above which volume is extreme
+
+# Rate limiting settings
+_MAX_CONCURRENT_YFINANCE = 5  # Max concurrent yfinance calls
+_YFINANCE_RATE_LIMIT = 2.0    # Seconds between yfinance calls per symbol
+
+
+@dataclass
+class PriceMetrics:
+    """Metrics for price source reliability tracking."""
+    broker_success: int = 0
+    broker_failure: int = 0
+    yfinance_success: int = 0
+    yfinance_failure: int = 0
+    cache_hit: int = 0
+    last_broker_error: Optional[str] = None
+    last_yfinance_error: Optional[str] = None
+    
+    @property
+    def broker_success_rate(self) -> float:
+        total = self.broker_success + self.broker_failure
+        return self.broker_success / total if total > 0 else 0.0
+    
+    @property
+    def yfinance_success_rate(self) -> float:
+        total = self.yfinance_success + self.yfinance_failure
+        return self.yfinance_success / total if total > 0 else 0.0
 
 
 # Demo tickers for testing without real data
@@ -42,6 +69,45 @@ class PriceService:
         # Volume tracking for z-score
         self._volume_history: Dict[str, deque] = {}  # symbol -> deque of volumes
         self._avg_volume: Dict[str, float] = {}   # symbol -> EMA average volume
+        
+        # Metrics tracking for Prometheus
+        self._metrics: Dict[str, PriceMetrics] = {}  # symbol -> metrics
+        
+        # Rate limiting
+        self._yfinance_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_YFINANCE)
+        self._yfinance_last_call: Dict[str, datetime] = {}  # symbol -> last call time
+    
+    def get_metrics(self, symbol: str) -> PriceMetrics:
+        """Get metrics for a symbol, creating if needed."""
+        if symbol not in self._metrics:
+            self._metrics[symbol] = PriceMetrics()
+        return self._metrics[symbol]
+    
+    def get_all_metrics(self) -> Dict[str, PriceMetrics]:
+        """Get metrics for all tracked symbols."""
+        return self._metrics.copy()
+    
+    def record_broker_success(self, symbol: str):
+        """Record successful broker price fetch."""
+        self.get_metrics(symbol).broker_success += 1
+    
+    def record_broker_failure(self, symbol: str, error: str):
+        """Record failed broker price fetch."""
+        self.get_metrics(symbol).broker_failure += 1
+        self.get_metrics(symbol).last_broker_error = error
+    
+    def record_yfinance_success(self, symbol: str):
+        """Record successful yfinance fetch."""
+        self.get_metrics(symbol).yfinance_success += 1
+    
+    def record_yfinance_failure(self, symbol: str, error: str):
+        """Record failed yfinance fetch."""
+        self.get_metrics(symbol).yfinance_failure += 1
+        self.get_metrics(symbol).last_yfinance_error = error
+    
+    def record_cache_hit(self, symbol: str):
+        """Record cache hit."""
+        self.get_metrics(symbol).cache_hit += 1
     
     def set_prefer_broker_feeds(self, prefer: bool):
         """Toggle preference for broker market data feeds."""
@@ -69,28 +135,40 @@ class PriceService:
             age = (now - broker_data["timestamp"]).total_seconds()
             if age < 30:  # Broker data fresh within 30 seconds
                 self._price_source[symbol] = f"broker:{broker_data['broker_id']}"
+                self.record_broker_success(symbol)
                 return broker_data["price"]
+            else:
+                self.record_broker_failure(symbol, "stale data")
         
         # Check cache
         cached = self._cache.get(symbol)
         last = self._last_fetch.get(symbol)
 
         if cached and last and (now - last).total_seconds() < 15:
+            self.record_cache_hit(symbol)
             noise = cached["price"] * random.uniform(-0.001, 0.001)
             return round(cached["price"] + noise, 2)
-
-        # Fetch from yfinance
+        
+        # Rate limit yfinance calls
+        await self._rate_limit_yfinance(symbol)
+        
+        # Fetch from yfinance with semaphore
         if deps.YF_AVAILABLE:
             try:
-                loop = asyncio.get_event_loop()
-                price = await loop.run_in_executor(None, self._fetch_yf, symbol)
-                if price > 0:
-                    self._cache[symbol] = {"price": price}
-                    self._last_fetch[symbol] = now
-                    self._price_source[symbol] = "yfinance"
-                    return price
+                async with self._yfinance_semaphore:
+                    loop = asyncio.get_event_loop()
+                    price = await loop.run_in_executor(None, self._fetch_yf, symbol)
+                    if price > 0:
+                        self._cache[symbol] = {"price": price}
+                        self._last_fetch[symbol] = now
+                        self._price_source[symbol] = "yfinance"
+                        self.record_yfinance_success(symbol)
+                        return price
+                    else:
+                        self.record_yfinance_failure(symbol, "zero price")
             except Exception as e:
                 deps.logger.warning(f"yfinance error for {symbol}: {e}")
+                self.record_yfinance_failure(symbol, str(e))
 
         # Fallback to cached with drift
         if cached:
@@ -105,7 +183,21 @@ class PriceService:
         self._cache[symbol] = {"price": round(base, 2)}
         self._price_source[symbol] = "simulated"
         return round(base, 2)
-
+    
+    async def _rate_limit_yfinance(self, symbol: str):
+        """Apply rate limiting to yfinance calls per symbol."""
+        now = datetime.now(timezone.utc)
+        last_call = self._yfinance_last_call.get(symbol)
+        
+        if last_call:
+            elapsed = (now - last_call).total_seconds()
+            if elapsed < _YFINANCE_RATE_LIMIT:
+                wait_time = _YFINANCE_RATE_LIMIT - elapsed
+                deps.logger.debug(f"Rate limiting yfinance for {symbol}, wait {wait_time:.1f}s")
+                await asyncio.sleep(wait_time)
+        
+        self._yfinance_last_call[symbol] = datetime.now(timezone.utc)
+    
     def _fetch_yf(self, symbol: str) -> float:
         try:
             import yfinance as yf
