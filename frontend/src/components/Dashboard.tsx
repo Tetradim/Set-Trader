@@ -10,14 +10,18 @@ import { SettingsTab } from './tabs/SettingsTab';
 import { BrokersTab } from './tabs/BrokersTab';
 import { TracesTab } from './tabs/TracesTab';
 import { ForeignTab } from './tabs/ForeignTab';
+import { RiskCenterTab } from './tabs/RiskCenterTab';
+import { OrdersExecutionTab } from './tabs/OrdersExecutionTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
-import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe } from 'lucide-react';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 
 const TABS = [
   { id: 'watchlist', label: 'Watchlist', icon: LayoutDashboard },
   { id: 'positions', label: 'Positions', icon: Crosshair },
+  { id: 'risk-center', label: 'Risk Center', icon: Shield },
+  { id: 'orders', label: 'Orders', icon: List },
   { id: 'history', label: 'History', icon: History },
   { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'brokers', label: 'Brokers', icon: Plug },
@@ -85,6 +89,8 @@ export function Dashboard() {
             <ErrorBoundary fallbackLabel="Tab failed to render">
               {activeTab === 'watchlist' && <WatchlistTab />}
               {activeTab === 'positions' && <PositionsTab />}
+              {activeTab === 'risk-center' && <RiskCenterTab />}
+              {activeTab === 'orders' && <OrdersExecutionTab />}
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'logs' && <LogsTab />}
               {activeTab === 'brokers' && <BrokersTab />}
