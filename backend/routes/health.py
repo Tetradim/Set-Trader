@@ -13,6 +13,19 @@ router = APIRouter()
 @router.get("/health")
 async def health():
     connected_brokers = sum(1 for _ in deps.broker_mgr._adapters)
+    
+    # Get environment info
+    env_info = {}
+    try:
+        from config import get_config, get_environment
+        env_info = {
+            "environment": get_environment().value,
+            "debug": get_config().debug,
+            "log_level": get_config().log_level,
+        }
+    except ImportError:
+        pass
+    
     return {
         "status": "online",
         "running": deps.engine.running,
@@ -24,6 +37,7 @@ async def health():
         "telegram": deps.telegram_service.running,
         "ws_clients": len(deps.ws_manager.active),
         "brokers_connected": connected_brokers,
+        "environment": env_info,
     }
 
 

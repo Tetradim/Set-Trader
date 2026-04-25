@@ -1091,4 +1091,126 @@ Manage via API: `GET /api/rate-limits`, `POST /api/rate-limits/{id}` (update con
 
 ---
 
+## Production Readiness Matrix
+
+This section tracks the implementation status of all features documented in this README against the current codebase on the `Sentinel-Prod` branch.
+
+### Status Legend
+
+| Status | Description |
+|--------|-------------|
+| ✅ **Implemented** | Fully functional, tested, and verified |
+| 🔵 **Partial** | Core functionality present, needs production hardening |
+| 🚧 **Planned** | Architecture in place, full implementation pending |
+
+### Security & Authentication
+
+| Feature | Status | Implementation |
+|---------|--------|--------------|
+| JWT Authentication | ✅ Implemented | `backend/auth.py` |
+| RBAC Roles (trader/risk_officer/admin/viewer) | ✅ Implemented | `backend/auth.py` |
+| API Key Management | ✅ Implemented | `backend/routes/auth.py` |
+| Session Management | ✅ Implemented | `backend/auth.py` |
+| OIDC/SSO Integration | 🔵 Partial | Config ready, requires vault integration for production |
+| Secrets Vault | 🔵 Partial | `backend/config.py` with vault stub |
+
+### Risk Controls
+
+| Feature | Status | Implementation |
+|---------|--------|--------------|
+| Pre-Trade Risk Gateway | ✅ Implemented | `backend/risk_controls.py` |
+| Hierarchical Kill Switches | ✅ Implemented | `backend/risk_controls.py` |
+| Exposure Limits | ✅ Implemented | `backend/risk_controls.py` |
+| Fat-Finger Protection | ✅ Implemented | `backend/risk_controls.py` |
+| Symbol Restrictions | ✅ Implemented | `backend/risk_controls.py` |
+
+### Backend API Routes
+
+| Route Module | Status | Notes |
+|------------|--------|-------|
+| `/api/ws` | ✅ Implemented | WebSocket with message dispatch |
+| `/api/tickers` | ✅ Implemented | CRUD operations |
+| `/api/trades` | ✅ Implemented | Trade history |
+| `/api/brokers` | ✅ Implemented | Broker management |
+| `/api/health` | ✅ Implemented | Including environment info |
+| `/api/bot` | ✅ Implemented | Bot control |
+| `/api/system` | ✅ Implemented | Audit logs, rate limits |
+| `/api/markets` | ✅ Implemented | 7 markets, FX rates |
+| `/api/strategies` | ✅ Implemented | Strategy registry |
+| `/api/edge` | ✅ Implemented | Edge integration |
+| `/api/auth` | ✅ Implemented | Login, API keys |
+| `/api/risk` | ✅ Implemented | Risk controls |
+| `/api/orders` | ✅ Implemented | Order management |
+| `/api/reconciliation` | 🔵 Partial | Demo data, needs broker integration |
+| `/api/audit` | 🔵 Partial | Demo events, needs full audit pipeline |
+| `/api/ops` | 🔵 Partial | Demo data, needs observability integration |
+| `/api/analytics` | 🔵 Partial | Demo data, needs live metrics |
+| `/api/slo` | 🔵 Partial | SLO definitions, needs Prometheus |
+
+### Frontend Dashboard Tabs
+
+| Tab | Status | Implementation |
+|-----|--------|--------------|
+| Watchlist | ✅ Implemented | Existing |
+| Positions | ✅ Implemented | Existing |
+| History | ✅ Implemented | Existing |
+| Logs | ✅ Implemented | Existing |
+| Brokers | ✅ Implemented | Existing |
+| Foreign | ✅ Implemented | 7 exchanges |
+| Traces | ✅ Implemented | OpenTelemetry |
+| Settings | ✅ Implemented | Existing |
+| Risk Center | ✅ Implemented | `RiskCenterTab.tsx` |
+| Orders | ✅ Implemented | `OrdersExecutionTab.tsx` |
+| Reconciliation | 🔵 Partial | Demo data |
+| Compliance & Audit | 🔵 Partial | Demo events |
+| Incidents/Ops | 🔵 Partial | Demo data |
+| Portfolio Analytics | 🔵 Partial | Demo metrics |
+| Admin/IAM | 🔵 Partial | User management UI |
+| SLO Dashboard | 🔵 Partial | SLO definitions |
+
+### Environment & Deployment
+
+| Feature | Status | Implementation |
+|---------|--------|--------------|
+| Environment Config | ✅ Implemented | `backend/config.py` |
+| Demo Mode | ✅ Implemented | `DEMO_MODE=true` |
+| Docker Support | ✅ Implemented | `docker-compose.yml` |
+| Windows Installer | ✅ Implemented | PyInstaller + Inno Setup |
+| GitHub Actions CI/CD | ✅ Implemented | `.github/workflows/` |
+
+### SLOs & Alerting
+
+| SLO | Status | Notes |
+|-----|-------|-------|
+| API Availability | 🔵 Partial | Defined, needs Prometheus metrics |
+| API Latency P95 | 🔵 Partial | Defined, needs Prometheus metrics |
+| Order Execution Success | 🔵 Partial | Defined, needs order tracking |
+| WebSocket Connectivity | 🔵 Partial | Defined, needs metrics |
+| Price Feed Latency | 🔵 Partial | Defined, needs metrics |
+
+### Demo vs Production Endpoints
+
+The following endpoints include **demo/sample data** for UI testing and need **live broker/integration integration** for production:
+
+1. **`/api/reconciliation/records`** - Returns demo reconciliation records; needs broker statement sync
+2. **`/api/audit/events`** - Includes demo audit events; uses existing audit_service
+3. **`/api/ops/services`** - Returns demo service health; needs observability integration
+4. **`/api/ops/incidents`** - Returns demo incidents; needs alerting integration
+5. **`/api/analytics/*`** - Returns demo analytics; needs real metrics
+6. **`/api/slo/*`** - SLO definitions in place; needs metric collection
+
+### Build & Runtime Status
+
+| Component | Status |
+|-----------|--------|
+| Backend starts | ✅ Verified |
+| Frontend builds | ✅ Verified |
+| WebSocket connects | ✅ Verified |
+| Demo mode runs | ✅ Verified |
+| MongoDB integration | ✅ Verified |
+| Multi-broker execution | ✅ Verified |
+| Paper/live trading | ✅ Verified |
+
+---
+
 *Sentinel Pulse — Signal Forge Laboratory*
