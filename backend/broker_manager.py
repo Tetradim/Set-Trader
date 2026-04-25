@@ -4,27 +4,90 @@ import logging
 import base64
 import os
 import uuid
+import secrets
 from datetime import datetime, timezone
 from typing import Optional, Set
 from brokers import BrokerAdapter, BrokerOrder, get_broker_adapter, get_broker_info, BROKER_REGISTRY
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+import hashlib
 
 logger = logging.getLogger("SentinelPulse")
 
-# Simple XOR-based obfuscation for credentials at rest.
-_KEY = (os.environ.get("CREDENTIAL_KEY") or "sentinel-pulse-default-key-2026").encode()
+# Generate a secure key from the environment or create a new one
+def _get_encryption_key() -> bytes:
+    """Get or create a secure encryption key."""
+    key_env = os.environ.get("CREDENTIAL_KEY")
+    if key_env:
+        # Use the environment key to derive a proper Fernet key
+        # PBKDF2 with high iterations for security
+        kdf = PBKDF2(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b"sentinel_pulse_salt_v1",  # Static salt for deterministic key derivation
+            iterations=480000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(key_env.encode()))
+        return key
+    else:
+        # Generate a new random key - this should be stored securely!
+        logger.warning("No CREDENTIAL_KEY set - generating random key. Set CREDENTIAL_KEY env var for production!")
+        return Fernet.generate_key()
+
+# Initialize Fernet with the derived key
+_FERNET_KEY = _get_encryption_key()
+_fernet = Fernet(_FERNET_KEY)
+
+# Legacy XOR key kept for backward compatibility with old credentials
+# TODO: Migrate old credentials to new format
+_LEGACY_KEY = b"sentinel-pulse-default-key-2026"
 
 def _xor_bytes(data: bytes, key: bytes) -> bytes:
+    """Legacy XOR obfuscation - only for migrating old data."""
     return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
 
 def encrypt_credentials(creds: dict) -> str:
+    """
+    Encrypt credentials using Fernet (AES) symmetric encryption.
+    
+    This replaces the old XOR-based encryption which was insecure.
+    Uses PBKDF2 key derivation from CREDENTIAL_KEY env var.
+    """
     import json
     raw = json.dumps(creds).encode()
-    return base64.b64encode(_xor_bytes(raw, _KEY)).decode()
+    encrypted = _fernet.encrypt(raw)
+    return encrypted.decode()
 
 def decrypt_credentials(encrypted: str) -> dict:
+    """
+    Decrypt credentials using Fernet.
+    
+    Falls back to legacy XOR decryption for backward compatibility.
+    """
     import json
-    raw = _xor_bytes(base64.b64decode(encrypted), _KEY)
-    return json.loads(raw)
+    try:
+        # Try new Fernet encryption first
+        raw = _fernet.decrypt(encrypted.encode())
+        return json.loads(raw)
+    except Exception:
+        # Fallback to legacy XOR for old stored credentials
+        try:
+            raw = _xor_bytes(base64.b64decode(encrypted), _LEGACY_KEY)
+            return json.loads(raw)
+        except Exception as e:
+            logger.error(f"Failed to decrypt credentials: {e}")
+            raise ValueError("Invalid encrypted credentials") from e
+
+def migrate_credential_format(encrypted: str) -> str:
+    """
+    Migrate old XOR-encrypted credentials to new Fernet format.
+    Call this once to upgrade old stored credentials.
+    """
+    # Decrypt using legacy method
+    creds = decrypt_credentials(encrypted)
+    # Re-encrypt using new method
+    return encrypt_credentials(creds)
 
 
 class BrokerConnectionManager:
@@ -37,8 +100,24 @@ class BrokerConnectionManager:
         self._telegram = None
         self._ws_manager = None
         # Idempotency tracking: submitted order keys to prevent duplicates
+        # In-memory cache (lost on restart) - see load_idempotency_keys()
         self._submitted_orders: dict[str, dict] = {}  # idempotency_key -> {symbol, side, status, broker_order_id}
         self._order_ttl_seconds: int = 300  # Keep order tracking for 5 minutes
+
+    async def load_idempotency_keys(self):
+        """Load idempotency keys from MongoDB for crash recovery."""
+        doc = await self.db.settings.find_one({"key": "broker_idempotency_keys"})
+        if doc and doc.get("value"):
+            self._submitted_orders = doc["value"]
+            logger.info(f"Loaded {len(self._submitted_orders)} idempotency keys from DB")
+    
+    async def save_idempotency_keys(self):
+        """Persist idempotency keys to MongoDB for crash recovery."""
+        await self.db.settings.update_one(
+            {"key": "broker_idempotency_keys"},
+            {"$set": {"value": self._submitted_orders}},
+            upsert=True,
+        )
 
     def set_telegram(self, telegram_service):
         self._telegram = telegram_service
