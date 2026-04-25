@@ -40,6 +40,14 @@ deps.broker_mgr = BrokerConnectionManager(deps.db)
 
 
 # --- Background tasks ---
+import random
+
+def add_jitter(base_seconds: float, jitter_pct: float = 0.2) -> float:
+    """Add random jitter to prevent thundering herd on restart."""
+    jitter = base_seconds * jitter_pct
+    return base_seconds + random.uniform(-jitter, jitter)
+
+
 async def price_broadcast_loop():
     while True:
         try:
@@ -81,8 +89,8 @@ async def price_broadcast_loop():
                     "market_hours_only": deps.engine.market_hours_only,
                 })
         except Exception as e:
-            deps.logger.error(f"Price broadcast error: {e}")
-        await asyncio.sleep(2)
+            deps.logger.error(f"Price broadcast error: {e}", exc_info=True)
+        await asyncio.sleep(add_jitter(2))
 
 
 async def trading_loop():
@@ -107,13 +115,13 @@ async def trading_loop():
                     except CircuitOpenError as ce:
                         deps.logger.warning(f"Skipping {t.get('symbol','?')} — {ce}")
                     except Exception as te:
-                        deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
+                        deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}", exc_info=True)
             # Always check pending limit sells (even when paused — user explicitly requested)
             if deps.engine._pending_sells:
                 await deps.engine.check_pending_sells()
         except Exception as e:
-            deps.logger.error(f"Trading loop error: {e}")
-        await asyncio.sleep(5)
+            deps.logger.error(f"Trading loop error: {e}", exc_info=True)
+        await asyncio.sleep(add_jitter(5))
 
 
 # --- App lifecycle ---
@@ -221,12 +229,38 @@ async def lifespan(application: FastAPI):
     deps.logger.info("Sentinel Pulse Engine started")
     yield
 
-    # Shutdown
+    # --- Graceful Shutdown ---
+    deps.logger.info("Sentinel Pulse shutting down...")
+    
+    # Stop WS broadcast loop first to stop accepting new messages
+    try:
+        if hasattr(deps.ws_manager, 'stop_broadcast_loop'):
+            await deps.ws_manager.stop_broadcast_loop()
+    except Exception:
+        pass
+    
+    # Save engine state
+    try:
+        await deps.engine.save_state()
+    except Exception:
+        pass
+    
+    # Stop broker manager
+    try:
+        if hasattr(deps.broker_mgr, 'save_idempotency_keys'):
+            await deps.broker_mgr.save_idempotency_keys()
+    except Exception:
+        pass
+    
+    # Stop Telegram gracefully
     try:
         await deps.telegram_service.stop()
     except Exception:
         pass
+    
+    # Close MongoDB
     deps.mongo_client.close()
+    deps.logger.info("Sentinel Pulse shutdown complete")
 
 
 # --- FastAPI app ---
