@@ -29,7 +29,7 @@ OutputDir=dist
 OutputBaseFilename=SentinelPulse-Setup-{#MyAppVersion}
 SetupIconFile=SentinelPulse.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma2/extra
+Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 ; Minimum Windows version (Win 10 1903+)
