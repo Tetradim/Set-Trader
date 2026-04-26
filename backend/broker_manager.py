@@ -10,7 +10,7 @@ from typing import Optional, Set
 from brokers import BrokerAdapter, BrokerOrder, get_broker_adapter, get_broker_info, BROKER_REGISTRY
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import hashlib
 
 logger = logging.getLogger("SentinelPulse")
@@ -22,7 +22,7 @@ def _get_encryption_key() -> bytes:
     if key_env:
         # Use the environment key to derive a proper Fernet key
         # PBKDF2 with high iterations for security
-        kdf = PBKDF2(
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=b"sentinel_pulse_salt_v1",  # Static salt for deterministic key derivation
