@@ -52,8 +52,8 @@ a = Analysis(
         ("email_service.py",   "."),
         ("ws_manager.py",      "."),
         ("telemetry.py",       "."),
-        # Env — overridden at runtime by mac_launcher but kept as fallback
-        (".env.mac",   ".env"),
+        # Env — use .env if exists (created by workflow for demo mode)
+        (".env",  ".env"),
         *pymongo_d,
         *bson_d,
         *motor_d,
