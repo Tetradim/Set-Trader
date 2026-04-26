@@ -63,7 +63,7 @@ Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion r
 
 ; Documentation
 Source: "README.md"; DestDir: "{app}"; Flags: isreadme
-Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
+; Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion  ; Create CHANGELOG.md
 
 ; Sample configuration
 Source: "backend\.env.example"; DestDir: "{app}"; Flags: ignoreversion; DestName: ".env.example"
