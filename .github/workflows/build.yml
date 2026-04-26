@@ -199,9 +199,9 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload Standalone Folder
-        uses: actions/upload-artifact@v4
-        with:
-          name: SentinelPulse-Portable-${{ env.VERSION }}
-          path: backend/dist/SentinelPulse
-          retention-days: 30
+      # - name: Upload Standalone Folder
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: SentinelPulse-Portable-${{ env.VERSION }}
+      #     path: backend/dist/SentinelPulse
+      #     retention-days: 30
