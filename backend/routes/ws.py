@@ -20,8 +20,8 @@ async def ws_endpoint(websocket: WebSocket):
     try:
         tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
         
-        # In demo mode with no tickers, seed with default tickers
-        if not tickers and deps.DEMO_MODE:
+        # Seed default tickers if none exist (always, not just demo mode)
+        if not tickers:
             defaults = [
                 TickerConfig(symbol="SPY", base_power=100.0, market="US"),
                 TickerConfig(symbol="QQQ", base_power=100.0, market="US"),
