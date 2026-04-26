@@ -92,6 +92,114 @@ class LazyClient:
 mongo_client = LazyClient()
 db = LazyDB()
 
+# Demo mode: in-memory DB fallback
+_demo_db = None
+
+def get_demo_db():
+    """Get in-memory database for demo mode."""
+    global _demo_db
+    if _demo_db is None:
+        _demo_db = InMemoryDatabase()
+    return _demo_db
+
+class InMemoryCursor:
+    """In-memory cursor for find() results."""
+    def __init__(self, docs):
+        self._docs = docs
+    
+    async def to_list(self, limit=None):
+        if limit:
+            return self._docs[:limit]
+        return self._docs
+
+class InMemoryCollection:
+    """In-memory collection for demo mode."""
+    def __init__(self):
+        self._docs = []
+        self._id_counter = 0
+    
+    async def find(self, query=None, projection=None):
+        return InMemoryCursor(self._docs)
+    
+    async def insert_one(self, doc):
+        self._id_counter += 1
+        doc["_id"] = self._id_counter
+        self._docs.append(doc)
+        return doc
+    
+    async def update_one(self, query, update, upsert=False):
+        for i, doc in enumerate(self._docs):
+            if _match_query(query, doc):
+                if "$set" in update:
+                    doc.update(update["$set"])
+                if "$setOnInsert" in update and upsert:
+                    for k, v in update["$setOnInsert"].items():
+                        if k not in doc:
+                            doc[k] = v
+                return doc
+        if upsert:
+            new_doc = dict(query)
+            if "$set" in update:
+                new_doc.update(update["$set"])
+            if "$setOnInsert" in update:
+                new_doc.update(update["$setOnInsert"])
+            await self.insert_one(new_doc)
+            return new_doc
+        return None
+    
+    async def delete_one(self, query):
+        for i, doc in enumerate(self._docs):
+            if _match_query(query, doc):
+                self._docs.pop(i)
+                return
+        return None
+    
+    async def find_one(self, query, projection=None):
+        for doc in self._docs:
+            if _match_query(query, doc):
+                return doc
+        return None
+    
+    async def create_index(self, *args, **kwargs):
+        pass
+    
+    async def count_documents(self, query=None):
+        if query is None:
+            return len(self._docs)
+        return sum(1 for doc in self._docs if _match_query(query, doc))
+
+def _match_query(query, doc):
+    if query is None:
+        return True
+    for k, v in query.items():
+        if doc.get(k) != v:
+            return False
+    return True
+
+class InMemoryDatabase:
+    """In-memory database for demo mode."""
+    def __init__(self):
+        self.tickers = InMemoryCollection()
+        self.trades = InMemoryCollection()
+        self.profits = InMemoryCollection()
+        self.settings = InMemoryCollection()
+        self.audit_logs = InMemoryCollection()
+        
+        # Seed default tickers
+        import asyncio
+        loop = asyncio.get_event_loop()
+        for sym in ["SPY", "QQQ", "AAPL", "NVDA"]:
+            loop.run_until_complete(
+                self.tickers.insert_one({"symbol": sym, "base_power": 100.0, "market": "US"})
+            )
+        # Seed default settings
+        for key, value in [("account_balance", 100000.0), ("cash_reserve", 10000.0), 
+                         ("increment_step", 0.5), ("decrement_step", 0.5)]:
+            loop.run_until_complete(
+                self.settings.insert_one({"key": key, "value": value})
+            )
+
+
 # yfinance
 YF_AVAILABLE = False
 try:

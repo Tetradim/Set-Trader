@@ -150,6 +150,7 @@ async def lifespan(application: FastAPI):
     
     if DEMO_MODE_ACTIVE:
         deps.logger.info("Demo mode enabled - using in-memory data")
+        deps.db = deps.get_demo_db()
         yield
         return
     
