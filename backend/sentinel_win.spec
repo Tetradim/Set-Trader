@@ -26,8 +26,8 @@ a = Analysis(
     ["win_launcher.py"],
     pathex=["."],          # run from backend/
     binaries=[
-        # Bundled MongoDB — only if mongod exists (macOS typically)
-        *([("mongod", ".")] if Path("mongod").exists() else []),
+        # Bundled MongoDB — include if mongodb/mongod.exe exists
+        *([("mongodb/mongod", "mongodb")] if Path("mongodb/mongod.exe").exists() else []),
         *pymongo_b,
         *bson_b,
     ],

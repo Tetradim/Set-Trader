@@ -2,7 +2,7 @@ name: Build Sentinel Pulse
 
 on:
   push:
-    branches: [Split, main]
+    branches: [Split, main, Sentinel-Prod]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -15,6 +15,10 @@ on:
         description: 'Custom version (semver)'
         required: false
         default: ''
+
+env:
+  APP_NAME: "Sentinel Pulse"
+  VERSION: ${{ github.event.inputs.version || '1.0.0-beta' }}
 
 jobs:
   build:
@@ -87,7 +91,82 @@ jobs:
           python -m PyInstaller --clean sentinel_win.spec
 
       # ---------------------------------------------------------------------
-      # 8. Verify exe exists
+      # 8. Download portable MongoDB
+      # ---------------------------------------------------------------------
+      - name: Download MongoDB
+        shell: pwsh
+        run: |
+          # Download MongoDB Windows binary
+          $mongoUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.14.zip"
+          Write-Host "Downloading MongoDB..."
+          Invoke-WebRequest -Uri $mongoUrl -OutFile backend\mongodb.zip
+          
+          # Extract mongod.exe
+          Expand-Archive -Path backend\mongodb.zip -DestinationPath backend\mongodb_temp -Force
+          New-Item -ItemType Directory -Force -Path backend\mongodb | Out-Null
+          Copy-Item (Get-ChildItem -Path backend\mongodb_temp -Recurse -Filter mongod.exe | Select-Object -First 1).FullName -Destination backend\mongodb\mongod.exe -Force
+          
+          # Cleanup
+          Remove-Item backend\mongodb.zip -Force -ErrorAction SilentlyContinue
+          Remove-Item backend\mongodb_temp -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "MongoDB ready"
+
+      # ---------------------------------------------------------------------
+      # 9. Download VC++ Redistributable
+      # ---------------------------------------------------------------------
+      - name: Download VC++ Redist
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" -OutFile backend\vc_redist.x64.exe
+
+      # ---------------------------------------------------------------------
+      # 10. Create launcher batch file
+      # ---------------------------------------------------------------------
+      - name: Create launcher batch
+        shell: pwsh
+        run: |
+          $launcher = @"
+          @echo off
+          title Sentinel Pulse - Trading Bot
+          echo ==================================================
+          echo   Sentinel Pulse v${{ env.VERSION }}
+          echo ==================================================
+          echo.
+          
+          echo [1/3] Preparing directories...
+          if not exist "data\db" mkdir "data\db"
+          if not exist "logs" mkdir "logs"
+          echo.
+          
+          echo [2/3] Starting MongoDB (if bundled)...
+          if exist "mongodb\mongod.exe" (
+              start "" /min "mongodb\mongod.exe" --dbpath "data\db" --port 27017 --logpath "logs\mongod.log" --quiet
+              timeout /t 4 /nobreak > nul
+              echo   MongoDB started on localhost:27017
+          ) else (
+              echo   MongoDB not bundled - ensure MongoDB is running externally
+          )
+          echo.
+          
+          echo [3/3] Starting Sentinel Pulse server...
+          echo   Browser will open automatically...
+          echo.
+          echo Press Ctrl+C to stop the application.
+          echo ==================================================
+          echo.
+          
+          SentinelPulse.exe
+          
+          echo.
+          echo Shutting down MongoDB...
+          taskkill /F /IM mongod.exe /T > nul 2>&1
+          echo Done.
+          pause
+          "@
+          $launcher | Out-File -Encoding ASCII "backend\dist\SentinelPulse\Start Sentinel Pulse.bat"
+
+      # ---------------------------------------------------------------------
+      # 11. Verify exe exists
       # ---------------------------------------------------------------------
       - name: Verify exe
         run: |
@@ -101,26 +180,28 @@ jobs:
           Get-Item $exe | Select-Object Name, @{N="Size(MB)";E={[math]::Round($_.Length/1MB,2)}}
 
       # ---------------------------------------------------------------------
-      # 9. Install Inno Setup
+      # 12. Install Inno Setup and build installer
       # ---------------------------------------------------------------------
-      - name: Install Inno Setup
+      - name: Install Inno Setup and build installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: setup.iss
-          options: /O+ /DVersion=${{ github.event.inputs.version || '1.0.0' }}
+          options: /O+ /DVersion=${{ env.VERSION }}
 
       # ---------------------------------------------------------------------
-      # 10. Upload artifacts
+      # 13. Upload artifacts
       # ---------------------------------------------------------------------
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: SentinelPulse-Setup
-          path: Output/SentinelPulse-Setup.exe
+          name: SentinelPulse-Setup-${{ env.VERSION }}
+          path: dist/SentinelPulse-Setup*.exe
           if-no-files-found: error
+          retention-days: 90
 
-      - name: Upload Standalone Exe
+      - name: Upload Standalone Folder
         uses: actions/upload-artifact@v4
         with:
-          name: SentinelPulse-Exe
+          name: SentinelPulse-Portable-${{ env.VERSION }}
           path: backend/dist/SentinelPulse
+          retention-days: 30

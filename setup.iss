@@ -55,6 +55,7 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Name: "autostart"; Description: "Start Sentinel Pulse on Windows login"; GroupDescription: "Startup Options"
 Name: "firewall"; Description: "Add Windows Firewall exception for local web server"; GroupDescription: "Network"
 Name: "telemetry"; Description: "Send anonymous usage statistics"; GroupDescription: "Privacy"; Flags: unchecked
+Name: "mongodb"; Description: "Install portable MongoDB server"; GroupDescription: "Database"; Flags: unchecked
 
 [Files]
 ; Main executable
@@ -67,15 +68,15 @@ Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 ; Sample configuration
 Source: "backend\.env.example"; DestDir: "{app}"; Flags: ignoreversion; DestName: ".env.example"
 
-; Optional portable MongoDB (user choice)
-Source: "mongod.exe"; DestDir: "{app}\mongodb"; Flags: ignoreversion; Check: ShouldInstallMongo
+; VC++ Redistributable (silent install)
+Source: "backend\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; Main app (launches batch which starts MongoDB then exe)
+Name: "{group}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: autostart
-Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: autostart
 
 [Registry]
 ; File association for .sentinel config files
@@ -89,52 +90,32 @@ Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
+; Install VC++ Redistributable silently
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated
+; Launch after install
+Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent shellexec; WorkingDir: "{app}"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-// Check if user wants MongoDB bundled
-function ShouldInstallMongo(): Boolean;
-begin
-  Result := False;
-  if FileExists(ExpandConstant('{src}\mongod.exe')) then
-  begin
-    if MsgBox('Do you want to install a portable MongoDB server with Sentinel Pulse?' + #13#10 + #13#10 +
-              'If you already have MongoDB installed or plan to use MongoDB Atlas, choose No.',
-              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-    begin
-      Result := True;
-    end;
-  end;
-end;
-
 // Create necessary directories after installation
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  DataPath, MongoPath, LogPath: String;
+  DataPath, LogPath: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    DataPath := ExpandConstant('{app}\data');
+    DataPath := ExpandConstant('{app}\data\db');
     LogPath := ExpandConstant('{app}\logs');
 
-    // Create data directory for state/MongoDB
+    // Create data directory for MongoDB
     if not DirExists(DataPath) then
       CreateDir(DataPath);
 
     // Create logs directory
     if not DirExists(LogPath) then
       CreateDir(LogPath);
-
-    // Create MongoDB directory if installing portable
-    if ShouldInstallMongo then
-    begin
-      MongoPath := ExpandConstant('{app}\mongodb');
-      if not DirExists(MongoPath) then
-        CreateDir(MongoPath);
-    end;
   end;
 end;
 
@@ -147,7 +128,6 @@ begin
   begin
     if IsTaskSelected('firewall') then
     begin
-      // Add inbound rule for the app
       Exec('netsh', 'advfirewall firewall add rule name="Sentinel Pulse Web Server" dir=in action=allow program="{app}\{#MyAppExeName}" enable=yes', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
