@@ -37,7 +37,6 @@ MinVersion=10.0.18362
 
 ; Privileges
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 
 ; Architecture
 ArchitecturesAllowed=x64compatible
@@ -50,10 +49,10 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 telemetryOptIn=Enable anonymous usage telemetry to help improve Sentinel Pulse
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 0,6.1
 Name: "autostart"; Description: "Start Sentinel Pulse on Windows login"; GroupDescription: "Startup Options"
-Name: "firewall"; Description: "Add Windows Firewall exception for local web server"; GroupDescription: "Network"
+Name: "uninstallicon"; Description: "{cm:UninstallProgram,{#MyAppName}}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "telemetry"; Description: "Send anonymous usage statistics"; GroupDescription: "Privacy"; Flags: unchecked
 Name: "mongodb"; Description: "Install portable MongoDB server"; GroupDescription: "Database"; Flags: unchecked
 
@@ -76,6 +75,7 @@ Source: "backend\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion dele
 Name: "{group}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commondesktop}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Tasks: uninstallicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: autostart
 
 [Registry]
@@ -116,31 +116,6 @@ begin
     // Create logs directory
     if not DirExists(LogPath) then
       CreateDir(LogPath);
-  end;
-end;
-
-// Add Windows Firewall exception if requested
-procedure CurPageChanged(CurPageID: Integer);
-var
-  ResultCode: Integer;
-begin
-  if CurPageID = wpFinished then
-  begin
-    if IsTaskSelected('firewall') then
-    begin
-      Exec('netsh', 'advfirewall firewall add rule name="Sentinel Pulse Web Server" dir=in action=allow program="{app}\{#MyAppExeName}" enable=yes', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    end;
-  end;
-end;
-
-// Clean up firewall on uninstall
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  ResultCode: Integer;
-begin
-  if CurUninstallStep = usPostUninstall then
-  begin
-    Exec('netsh', 'advfirewall firewall delete rule name="Sentinel Pulse Web Server"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
 
