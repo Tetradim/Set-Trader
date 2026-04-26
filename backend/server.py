@@ -18,6 +18,10 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+# Load .env file early so env vars are available
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 
