@@ -66,10 +66,29 @@ jobs:
           cd frontend
           npm install
           npm run build
-        continue-on-error: true
 
       # ---------------------------------------------------------------------
-      # 6. Create .env for bundled app
+      # 5b. Verify frontend build exists
+      # ---------------------------------------------------------------------
+      - name: Verify frontend build
+        run: |
+          if (!(Test-Path frontend/dist)) {
+            Write-Host "ERROR: frontend/dist not found - frontend build failed"
+            exit 1
+          }
+          Write-Host "Frontend build verified"
+
+      # ---------------------------------------------------------------------
+      # 6. Copy frontend build to backend static dir
+      # ---------------------------------------------------------------------
+      - name: Copy frontend to static
+        run: |
+          Remove-Item backend/static -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path frontend/dist -Destination backend/static -Recurse
+          Write-Host "Frontend copied to backend/static"
+
+      # ---------------------------------------------------------------------
+      # 7. Create .env for bundled app
       # ---------------------------------------------------------------------
       - name: Create .env
         run: |
