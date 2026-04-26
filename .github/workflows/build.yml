@@ -59,11 +59,17 @@ jobs:
           pip install pyinstaller pillow
 
       # ---------------------------------------------------------------------
-      # 5. Build frontend (React static files)
+      # 5. Build frontend (React static files) — clear cache first
       # ---------------------------------------------------------------------
       - name: Build frontend
         run: |
           cd frontend
+          if (Test-Path node_modules) {
+            Write-Host "Clearing npm cache..."
+            npm cache clean --force
+          }
+          Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item node_modules -Recurse -Force -ErrorAction SilentlyContinue
           npm install
           npm run build
 
@@ -102,11 +108,18 @@ jobs:
           "@ | Out-File -Encoding UTF8 backend/.env
 
       # ---------------------------------------------------------------------
-      # 7. Build with PyInstaller
+      # 7. Build with PyInstaller — clear cache first
       # ---------------------------------------------------------------------
       - name: Build exe
         working-directory: backend
         run: |
+          Write-Host "Clearing PyInstaller cache..."
+          Remove-Item build -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          $cacheDir = "$env:LOCALAPPDATA\pyinstaller"
+          if (Test-Path $cacheDir) {
+            Remove-Item $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
           python -m PyInstaller --clean sentinel_win.spec
 
       # ---------------------------------------------------------------------
