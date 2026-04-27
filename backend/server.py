@@ -236,35 +236,53 @@ async def lifespan(application: FastAPI):
 
     # --- Graceful Shutdown ---
     deps.logger.info("Sentinel Pulse shutting down...")
-    
-    # Stop WS broadcast loop first to stop accepting new messages
+
+    # 1. Cancel background tasks gracefully
+    try:
+        current_task = asyncio.current_task()
+        for task in asyncio.all_tasks():
+            if task is not current_task and not task.done():
+                task.cancel()
+        await asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
+    except Exception as e:
+        deps.logger.warning(f"Task cancellation warning: {e}")
+
+    # 2. Stop WS broadcast loop first to stop accepting new messages
     try:
         if hasattr(deps.ws_manager, 'stop_broadcast_loop'):
             await deps.ws_manager.stop_broadcast_loop()
     except Exception:
         pass
     
-    # Save engine state
+    # 3. Save engine state
     try:
+        if deps.engine:
+            deps.engine.running = False
+            deps.engine.paused = True
         await deps.engine.save_state()
     except Exception:
         pass
     
-    # Stop broker manager
+    # 4. Stop broker manager
     try:
         if hasattr(deps.broker_mgr, 'save_idempotency_keys'):
             await deps.broker_mgr.save_idempotency_keys()
     except Exception:
         pass
     
-    # Stop Telegram gracefully
+    # 5. Stop Telegram gracefully
     try:
-        await deps.telegram_service.stop()
+        if deps.telegram_service:
+            await deps.telegram_service.stop()
     except Exception:
         pass
     
-    # Close MongoDB
-    deps.mongo_client.close()
+    # 6. Close MongoDB connection
+    try:
+        if hasattr(deps, "mongo_client") and deps.mongo_client:
+            deps.mongo_client.close()
+    except Exception as e:
+        deps.logger.warning(f"MongoDB close warning: {e}")
     deps.logger.info("Sentinel Pulse shutdown complete")
 
 
