@@ -1,5 +1,6 @@
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useState, useEffect } from 'react';
 import { AddTickerDialog } from './AddTickerDialog';
 import { FeedbackDialog } from './FeedbackDialog';
 import {
@@ -16,6 +17,8 @@ import {
   PiggyBank,
   AlertTriangle,
   Shield,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export function Header() {
@@ -41,6 +44,31 @@ export function Header() {
   const effectiveAvailable = accountBalance - effectiveAllocated;
   const isOverAllocated = accountBalance > 0 && effectiveAvailable < 0;
   const isLowBalance = accountBalance > 0 && effectiveAvailable > 0 && effectiveAvailable < accountBalance * 0.1;
+
+  // Theme state
+  const themeMode = useStore((s) => s.themeMode);
+  const accentColor = useStore((s) => s.accentColor);
+  const setThemeMode = useStore((s) => s.setThemeMode);
+  const setAccentColor = useStore((s) => s.setAccentColor);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.classList.remove('light');
+    document.documentElement.classList.remove('accent-blue', 'accent-emerald', 'accent-amber', 'accent-rose', 'accent-violet', 'accent-cyan');
+    if (themeMode === 'light') {
+      document.documentElement.classList.add('light');
+    }
+    document.documentElement.classList.add(`accent-${accentColor}`);
+  }, [themeMode, accentColor]);
+
+  const accentColors: Array<{id: 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan'; color: string}> = [
+    { id: 'blue', color: '#6366f1' },
+    { id: 'emerald', color: '#10b981' },
+    { id: 'amber', color: '#f59e0b' },
+    { id: 'rose', color: '#f43f5e' },
+    { id: 'violet', color: '#8b5cf6' },
+    { id: 'cyan', color: '#06b6d4' },
+  ];
 
   return (
     <>
@@ -147,6 +175,35 @@ export function Header() {
 
         {/* Right: Controls */}
         <div className="flex items-center gap-3">
+          {/* Theme toggles */}
+          <div className="flex items-center gap-1 px-2 py-1 rounded-lg border border-border bg-secondary/30" data-testid="theme-controls">
+            {/* Theme mode toggle */}
+            <button
+              data-testid="theme-mode-btn"
+              onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+              title={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="p-1.5 rounded hover:bg-secondary transition-colors"
+            >
+              {themeMode === 'dark' ? <Sun size={13} className="text-amber-400" /> : <Moon size={13} className="text-violet-400" />}
+            </button>
+
+            {/* Accent color picker */}
+            <div className="flex items-center gap-1 ml-1">
+              {accentColors.map((c) => (
+                <button
+                  key={c.id}
+                  data-testid={`accent-${c.id}`}
+                  onClick={() => setAccentColor(c.id)}
+                  title={`${c.id.charAt(0).toUpperCase() + c.id.slice(1)} accent`}
+                  className={`w-4 h-4 rounded-full transition-all ${
+                    accentColor === c.id ? 'ring-2 ring-offset-1 ring-offset-background scale-110' : 'opacity-60 hover:opacity-100'
+                  }`}
+                  style={{ backgroundColor: c.color }}
+                />
+              ))}
+            </div>
+          </div>
+
           <AddTickerDialog />
 
           <FeedbackDialog />

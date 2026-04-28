@@ -231,6 +231,14 @@ async def lifespan(application: FastAPI):
     except Exception as e:
         deps.logger.warning(f"Telegram auto-start failed: {e}")
 
+    # Initialize notification service
+    try:
+        from notification_service import notification_service
+        await notification_service.load_config()
+        deps.logger.info("Notification service initialized")
+    except Exception as e:
+        deps.logger.warning(f"Failed to init notification service: {e}")
+
     deps.logger.info("Sentinel Pulse Engine started")
     yield
 
@@ -326,6 +334,10 @@ from routes.system import router as system_router
 from routes.markets import router as markets_router
 from routes.strategies import router as strategies_router
 from routes.edge import router as edge_router
+from routes.notifications import router as notifications_router
+from routes.portfolio import router as portfolio_router
+from routes.developer import router as developer_router
+from routes.auth import router as auth_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -337,6 +349,10 @@ api.include_router(system_router)
 api.include_router(markets_router)
 api.include_router(strategies_router)
 api.include_router(edge_router)
+api.include_router(notifications_router)
+api.include_router(portfolio_router)
+api.include_router(developer_router)
+api.include_router(auth_router)
 
 app.include_router(api)
 

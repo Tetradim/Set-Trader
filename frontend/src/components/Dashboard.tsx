@@ -10,13 +10,15 @@ import { SettingsTab } from './tabs/SettingsTab';
 import { BrokersTab } from './tabs/BrokersTab';
 import { TracesTab } from './tabs/TracesTab';
 import { ForeignTab } from './tabs/ForeignTab';
+import { PortfolioTab } from './tabs/PortfolioTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
-import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe } from 'lucide-react';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Wallet } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 
 const TABS = [
   { id: 'watchlist', label: 'Watchlist', icon: LayoutDashboard },
+  { id: 'portfolio', label: 'Portfolio', icon: Wallet },
   { id: 'positions', label: 'Positions', icon: Crosshair },
   { id: 'history', label: 'History', icon: History },
   { id: 'logs', label: 'Logs', icon: ScrollText },
@@ -84,6 +86,7 @@ export function Dashboard() {
           <div className="flex-1 overflow-auto p-6" data-testid="tab-content">
             <ErrorBoundary fallbackLabel="Tab failed to render">
               {activeTab === 'watchlist' && <WatchlistTab />}
+              {activeTab === 'portfolio' && <PortfolioTab />}
               {activeTab === 'positions' && <PositionsTab />}
               {activeTab === 'history' && <HistoryTab />}
               {activeTab === 'logs' && <LogsTab />}

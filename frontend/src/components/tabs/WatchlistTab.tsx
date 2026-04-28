@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { TickerCard } from '../TickerCard';
 import { ConfigModal } from '../ConfigModal';
-import { Shield, Zap, Sun, Moon } from 'lucide-react';
+import { Shield, Zap, Sun, Moon, LayoutGrid, List, Trash2, Power, PowerOff, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiFetch } from '@/lib/api';
 import {
@@ -19,6 +19,7 @@ import {
   sortableKeyboardCoordinates,
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
+import { toast } from 'sonner';
 
 export function WatchlistTab() {
   const tickers = useStore((s) => Object.values(s.tickers));
@@ -31,6 +32,11 @@ export function WatchlistTab() {
   const setPaperAfterHours = useStore((s) => s.setPaperAfterHours);
   const chartEnabled = useStore((s) => s.chartEnabled);
   const profits = useStore((s) => s.profits);
+  const compactMode = useStore((s) => s.compactMode);
+  const setCompactMode = useStore((s) => s.setCompactMode);
+  const selectedTickers = useStore((s) => s.selectedTickers);
+  const clearTickerSelection = useStore((s) => s.clearTickerSelection);
+  const selectAllTickers = useStore((s) => s.selectAllTickers);
   const [configSymbol, setConfigSymbol] = useState<string | null>(null);
 
   // Sort tickers by Net P&L (descending - best winners first)
@@ -122,6 +128,32 @@ export function WatchlistTab() {
   const activeSymbols = activeTickers.map((t) => t.symbol);
   const inactiveSymbols = inactiveTickers.map((t) => t.symbol);
 
+  // Bulk actions
+  const handleBulkEnable = async () => {
+    for (const sym of selectedTickers) {
+      await apiFetch('/api/tickers', { method: 'POST', body: JSON.stringify({ symbol: sym, enabled: true }) });
+    }
+    toast.success(`Enabled ${selectedTickers.length} tickers`);
+    clearTickerSelection();
+  };
+
+  const handleBulkDisable = async () => {
+    for (const sym of selectedTickers) {
+      await apiFetch('/api/tickers', { method: 'POST', body: JSON.stringify({ symbol: sym, enabled: false }) });
+    }
+    toast.success(`Disabled ${selectedTickers.length} tickers`);
+    clearTickerSelection();
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedTickers.length} tickers?`)) return;
+    for (const sym of selectedTickers) {
+      await apiFetch(`/api/tickers/${sym}`, { method: 'DELETE' });
+    }
+    toast.success(`Deleted ${selectedTickers.length} tickers`);
+    clearTickerSelection();
+  };
+
   return (
     <div className="space-y-8" data-testid="watchlist-tab">
       {/* Control bar */}
@@ -172,6 +204,36 @@ export function WatchlistTab() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Bulk actions when tickers selected */}
+          {selectedTickers.length > 0 && (
+            <div className="flex items-center gap-1 mr-2">
+              <span className="text-xs text-muted-foreground mr-1">{selectedTickers.length} selected</span>
+              <button onClick={handleBulkEnable} className="p-1 rounded hover:bg-emerald-500/20 text-emerald-400" title="Enable selected">
+                <Power size={12} />
+              </button>
+              <button onClick={handleBulkDisable} className="p-1 rounded hover:bg-amber-500/20 text-amber-400" title="Disable selected">
+                <PowerOff size={12} />
+              </button>
+              <button onClick={handleBulkDelete} className="p-1 rounded hover:bg-red-500/20 text-red-400" title="Delete selected">
+                <Trash2 size={12} />
+              </button>
+              <button onClick={clearTickerSelection} className="p-1 rounded hover:bg-secondary text-muted-foreground" title="Clear selection">
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Compact mode toggle */}
+          <button
+            onClick={() => setCompactMode(!compactMode)}
+            className={`p-1.5 rounded-lg border transition-colors ${
+              compactMode ? 'bg-primary/20 text-primary border-primary/30' : 'border-border text-muted-foreground hover:text-foreground'
+            }`}
+            title={compactMode ? 'Switch to full view' : 'Switch to compact view'}
+          >
+            {compactMode ? <LayoutGrid size={14} /> : <List size={14} />}
+          </button>
+
           <span className="text-[10px] font-mono text-muted-foreground/50">
             double-click card to configure
           </span>

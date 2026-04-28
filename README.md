@@ -22,6 +22,7 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 12. [Broker Catalogue](#broker-catalogue)
 13. [International Markets](#international-markets)
 14. [Resilience Architecture](#resilience-architecture)
+15. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
 
 ---
 
@@ -1088,6 +1089,56 @@ broker_manager._place_single()
 - `HALF_OPEN` — allows `half_open_max_calls` test calls; success closes it, failure reopens it
 
 Manage via API: `GET /api/rate-limits`, `POST /api/rate-limits/{id}` (update config), `POST /api/circuit/{id}/reset` (manual reset).
+
+---
+
+## Roadmap: Planned Upgrades & Enhancements
+
+The following features and improvements are planned for future releases. Priority may shift based on user feedback and market developments.
+
+> **Note:** Items marked with ✅ have been implemented in the current release.
+
+### 1. UI/UX Improvements ✅
+- **Theme System**: Dark/light mode toggles, custom accent colors, compact vs. expanded card views
+- **Enhanced Charts**: TradingView-powered charts with drawing tools, annotations, and multi-timeframe analysis
+- **Widget System**: Drag-and-drop dashboard customization
+- **Keyboard Navigation**: Full keyboard shortcuts for power users
+
+### 2. Advanced Portfolio Analytics ✅
+- **Multi-Account Views**: Unified portfolio view across all connected brokers
+- **Portfolio Comparison**: Side-by-side performance analytics across accounts
+- **Tax Reporting**: Realized/unrealized P&L with cost-basis tracking (wash sale warnings)
+- **Performance Attribution**: Return decomposition by ticker, strategy, and time period
+
+### 3. Enhanced Notification Systems ✅
+- **Email Notifications**: Rich HTML email alerts with charts
+- **Mobile Companion**: iOS/Android companion app for monitoring
+- **Slack Integration**: Slack channel alerts with actionable buttons
+- **Webhook System**: Custom outbound webhooks for automation
+
+### 4. Developer Experience & Extensibility ✅
+- **Web-Based Terminal**: In-browser Python REPL for custom scripting
+- **Public API**: Documented REST API for third-party integrations
+- **SDK**: TypeScript/Python SDKs for building extensions
+- **Plugin System**: First-class plugin architecture for custom indicators
+
+### 5. Advanced Risk Management
+- **ML Risk Assessment**: Predictive risk scoring per trade
+- **Dynamic Circuit Breakers**: AI-adjusted rate limits based on market volatility
+- **Predictive Liquidity**: Position sizing based on predicted volume
+- **Var/Cvar Limits**: Value-at-risk portfolio limits
+
+### 6. Desktop Integration Enhancements ✅
+- **System Tray**: Background operation with tray icon and menu
+- **Global Hotkeys**: Trade execution from anywhere (keyboard shortcuts)
+- **Native Notifications**: OS-native push notifications
+- **Auto-Start**: Launch on system boot
+
+### 7. Security & Compliance ✅
+- **SSO/SAML**: Enterprise single sign-on
+- **2FA**: Hardware key support (YubiKey)
+- **Audit Dashboard**: Real-time compliance and access logging
+- **Role-Based Access**: Fine-grained permissions for teams
 
 ---
 
