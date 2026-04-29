@@ -37,8 +37,8 @@ API_DOCS: Dict[str, List[APIDocEndpoint]] = {
             summary="Create ticker",
             description="Add a new ticker to track",
             params=[
-                {"name": "symbol", "type": "string", "required": True, "description": "Stock symbol"},
-                {"name": "base_power", "type": "number", "required": False, "description": "Buy power allocation"}
+                {"name": "symbol", "type": "string", "required": "true", "description": "Stock symbol"},
+                {"name": "base_power", "type": "number", "required": "false", "description": "Buy power allocation"}
             ],
             example={"symbol": "TSLA", "base_power": 5000}
         ),
@@ -47,7 +47,7 @@ API_DOCS: Dict[str, List[APIDocEndpoint]] = {
             method="DELETE",
             summary="Delete ticker",
             description="Remove a ticker from tracking",
-            params=[{"name": "symbol", "type": "string", "required": True}],
+            params=[{"name": "symbol", "type": "string", "required": "true", "description": "Stock symbol"}],
             example={}
         ),
     ],
@@ -75,7 +75,7 @@ API_DOCS: Dict[str, List[APIDocEndpoint]] = {
             method="GET",
             summary="Get portfolio stats",
             description="Get performance statistics for the portfolio",
-            params=[{"name": "period", "type": "string", "required": False, "description": "today|week|month|all"}],
+            params=[{"name": "period", "type": "string", "required": "false", "description": "today|week|month|all"}],
             example={"stats": {"totalPnl": 1250.50, "winRate": 68.5}}
         ),
     ],
@@ -94,9 +94,9 @@ API_DOCS: Dict[str, List[APIDocEndpoint]] = {
             summary="Update notifications",
             description="Configure notification channels",
             params=[
-                {"name": "slack_webhook_url", "type": "string", "required": False},
-                {"name": "slack_enabled", "type": "boolean", "required": False},
-                {"name": "discord_webhook_url", "type": "string", "required": False},
+                {"name": "slack_webhook_url", "type": "string", "required": "false"},
+                {"name": "slack_enabled", "type": "boolean", "required": "false"},
+                {"name": "discord_webhook_url", "type": "string", "required": "false"},
             ],
             example={"slack_enabled": True, "slack_webhook_url": "https://hooks.slack.com/..."}
         ),
