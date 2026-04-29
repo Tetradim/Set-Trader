@@ -288,6 +288,8 @@ def _setup_auto_start():
             except FileNotFoundError:
                 winreg.SetValueEx(key, "SentinelPulse", 0, winreg.REG_SZ, exe_path)
                 logger.info("Auto-start configured")
+    except Exception as e:
+        logger.warning(f"Failed to set up auto-start: {e}")
 
 
 def is_auto_start_enabled() -> bool:
