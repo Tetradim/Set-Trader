@@ -62,81 +62,39 @@ def check_mongo_running() -> bool:
 
 
 def start_mongodb():
-    """Start MongoDB daemon if not already running."""
+    """Skip MongoDB in packaged app - use in-memory instead."""
     global _mongo_process
+    # Packaged apps should not try to start bundled MongoDB
+    if getattr(sys, 'frozen', False):
+        logger.info("Packaged mode - skipping MongoDB, using in-memory")
+        return
     
+    # Only try to start MongoDB in dev mode
     mongo_exe = BASE_DIR / 'mongodb' / 'mongod.exe'
-    data_dir = BASE_DIR / 'data' / 'db'
+    if not mongo_exe.exists():
+        logger.info("MongoDB not found - using in-memory")
+        return
     
-    # Check if MongoDB is already running (as admin, tasklist might need elevation)
     if is_port_in_use(27017):
-        logger.info("Port 27017 in use - MongoDB likely already running")
+        logger.info("Port 27017 in use")
         return
     
-    # Create directories without admin check - Windows will prompt if needed
+    logger.info("Starting MongoDB...")
     try:
+        data_dir = BASE_DIR / 'data' / 'db'
         data_dir.mkdir(parents=True, exist_ok=True)
-    except PermissionError as e:
-        logger.warning(f"Permission denied creating data dir: {e}")
-        logger.info("Trying to continue without bundled MongoDB...")
-        return
-    
-    try:
-        log_file = BASE_DIR / 'logs' / 'mongod.log'
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-    except PermissionError as e:
-        logger.warning(f"Permission denied creating log dir: {e}")
-        # Continue anyway - logs can go to default location
-    
-    logger.info("Starting MongoDB on port 27017...")
-    
-    try:
-        # Use CREATE_NO_WINDOW=0 when running as admin to avoid issues
-        creation_flags = 0  # Always show window for debugging
-        
         _mongo_process = subprocess.Popen(
-            [
-                str(mongo_exe),
-                '--dbpath', str(data_dir),
-                '--port', '27017',
-                '--logpath', str(log_file) if log_file.parent.exists() else 'mongod.log',
-                '--quiet',
-                '--bind_ip', '127.0.0.1',
-                '--noauth'
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            creationflags=creation_flags
+            [str(mongo_exe), '--dbpath', str(data_dir), '--port', '27017', '--bind_ip', '127.0.0.1'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
-        
-        # Give MongoDB a moment to start
-        import time
-        time.sleep(2)
-        
-        # Check if process is still running
+        import time; time.sleep(2)
         if _mongo_process.poll() is not None:
-            # Process exited - get error output
-            try:
-                _, stderr = _mongo_process.communicate(timeout=2)
-                if stderr:
-                    logger.warning(f"MongoDB stderr: {stderr.decode('utf-8', errors='ignore')}")
-            except:
-                pass
-            logger.warning("MongoDB process exited immediately")
             _mongo_process = None
-            return
-            
-        logger.info("MongoDB started successfully (PID: %s)", _mongo_process.pid)
-        
-    except FileNotFoundError:
-        logger.warning("MongoDB executable not found at: %s", mongo_exe)
-        logger.info("Continuing without bundled MongoDB...")
-    except PermissionError as e:
-        logger.warning("Permission denied running MongoDB: %s", e)
-        logger.info("Continuing without bundled MongoDB...")
+            logger.info("MongoDB failed - using in-memory")
+        else:
+            logger.info("MongoDB started")
     except Exception as e:
-        logger.warning("MongoDB failed to start: %s", e)
-        logger.info("Continuing without bundled MongoDB...")
+        logger.info(f"MongoDB error: {e} - using in-memory")
 
 
 def stop_mongodb():
