@@ -88,34 +88,36 @@ def start_mongodb():
     logger.info("[Server] Starting on port %d...", port)
     logger.info("")
     
-    browser_thread = threading.Thread(target=open_browser, daemon=True)
-    browser_thread.start()
+
+def main():
+        browser_thread = threading.Thread(target=open_browser, daemon=True)
+        browser_thread.start()
     
-    # Set up system tray (optional - don't fail if it doesn't work)
-    try:
-        _setup_system_tray()
-    except Exception as e:
-        logger.warning(f"System tray setup skipped: {e}")
+        # Set up system tray (optional - don't fail if it doesn't work)
+        try:
+            _setup_system_tray()
+        except Exception as e:
+            logger.warning(f"System tray setup skipped: {e}")
     
-    # Set up global hotkeys (optional)
-    try:
-        _setup_global_hotkeys()
-    except Exception as e:
-        logger.warning(f"Global hotkeys setup skipped: {e}")
+        # Set up global hotkeys (optional)
+        try:
+            _setup_global_hotkeys()
+        except Exception as e:
+            logger.warning(f"Global hotkeys setup skipped: {e}")
     
-    import uvicorn
-    from server import app
+        import uvicorn
+        from server import app
     
-    try:
-        uvicorn.run(
-            app, 
-            host="0.0.0.0", 
-            port=port, 
-            log_config=None
-        )
-    finally:
-        stop_mongodb()
-        logger.info("[Sentinel Pulse] Server stopped")
+        try:
+            uvicorn.run(
+                app, 
+                host="0.0.0.0", 
+                port=port, 
+                log_config=None
+            )
+        finally:
+            stop_mongodb()
+            logger.info("[Sentinel Pulse] Server stopped")
 
 
 if __name__ == "__main__":
