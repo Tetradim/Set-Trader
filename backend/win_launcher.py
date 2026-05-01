@@ -112,33 +112,47 @@ def _setup_system_tray(): pass  # Optional system tray (can be implemented later
 def _setup_global_hotkeys(): pass  # Optional global hotkeys (can be implemented later)
 
 def main():
-        browser_thread = threading.Thread(target=open_browser, daemon=True)
-        browser_thread.start()
+    port = int(os.environ.get("PORT", "8002"))
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    logger.info("=" * 50)
+    logger.info("Sentinel Pulse v1.0.0")
+    logger.info("=" * 50)
+    logger.info("")
+    if getattr(sys, "frozen", False):
+        logger.info("Packaged mode - in-memory")
+    else:
+        mongo_exe = BASE_DIR / "mongodb" / "mongod.exe"
+        if mongo_exe.exists():
+            start_mongodb()
     
-        # Set up system tray (optional - don't fail if it doesn't work)
-        try:
-            _setup_system_tray()
-        except Exception as e:
-            logger.warning(f"System tray setup skipped: {e}")
+    browser_thread = threading.Thread(target=open_browser, daemon=True)
+    browser_thread.start()
     
-        # Set up global hotkeys (optional)
-        try:
-            _setup_global_hotkeys()
-        except Exception as e:
-            logger.warning(f"Global hotkeys setup skipped: {e}")
+    # Set up system tray (optional - don't fail if it doesn't work)
+    try:
+        _setup_system_tray()
+    except Exception as e:
+        logger.warning(f"System tray setup skipped: {e}")
     
-        import uvicorn
-        from server import app
+    # Set up global hotkeys (optional)
+    try:
+        _setup_global_hotkeys()
+    except Exception as e:
+        logger.warning(f"Global hotkeys setup skipped: {e}")
     
-        try:
-            uvicorn.run(
-                app, 
-                host="0.0.0.0", 
-                port=port, 
-                log_config=None
-            )
-        finally:
-            stop_mongodb()
+    import uvicorn
+    from server import app
+    
+    try:
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=port, 
+            log_config=None
+        )
+    finally:
+        stop_mongodb()
             logger.info("[Sentinel Pulse] Server stopped")
 
 
