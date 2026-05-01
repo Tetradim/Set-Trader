@@ -89,6 +89,28 @@ def start_mongodb():
     logger.info("")
     
 
+
+def open_browser():
+    """Open the dashboard in the default browser."""
+    import webbrowser
+    import os
+    port = int(os.environ.get("PORT", "8002"))
+    webbrowser.open(f"http://localhost:{port}")
+
+
+def graceful_shutdown(signum, frame):
+    """Handle graceful shutdown."""
+    logger.info("Shutting down...")
+    stop_mongodb()
+    sys.exit(0)
+
+
+
+
+def _setup_system_tray(): pass  # Optional system tray (can be implemented later)
+
+def _setup_global_hotkeys(): pass  # Optional global hotkeys (can be implemented later)
+
 def main():
         browser_thread = threading.Thread(target=open_browser, daemon=True)
         browser_thread.start()
