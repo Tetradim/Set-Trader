@@ -153,7 +153,7 @@ def main():
         )
     finally:
         stop_mongodb()
-            logger.info("[Sentinel Pulse] Server stopped")
+        logger.info("[Sentinel Pulse] Server stopped")
 
 
 if __name__ == "__main__":
