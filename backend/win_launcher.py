@@ -111,6 +111,21 @@ def _setup_system_tray(): pass  # Optional system tray (can be implemented later
 
 def _setup_global_hotkeys(): pass  # Optional global hotkeys (can be implemented later)
 
+def stop_mongodb():
+    """Stop the MongoDB process we started."""
+    global _mongo_process
+    if _mongo_process:
+        try:
+            _mongo_process.terminate()
+            _mongo_process.wait(timeout=5)
+        except Exception:
+            try:
+                _mongo_process.kill()
+            except Exception:
+                pass
+        _mongo_process = None
+
+
 def main():
     port = int(os.environ.get("PORT", "8002"))
     signal.signal(signal.SIGINT, graceful_shutdown)
