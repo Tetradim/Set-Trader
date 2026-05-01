@@ -61,7 +61,7 @@ Name: "mongodb"; Description: "Install portable MongoDB server"; GroupDescriptio
 Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Documentation
-Source: "README.md"; DestDir: "{app}"; Flags: isreadme
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 ; Source: "CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion  ; Create CHANGELOG.md
 
 ; Sample configuration
