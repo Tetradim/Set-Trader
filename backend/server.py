@@ -166,15 +166,19 @@ async def lifespan(application: FastAPI):
     
     # Try to connect to MongoDB
     mongo_works = True
+    mongo_error = None
     try:
         await deps.db.command("ping")
-    except Exception:
+    except Exception as e:
+        mongo_error = str(e)
         mongo_works = False
-    
+        logger.info("MongoDB ping failed: %s", e)
+
+    logger.info("mongo_works=%s, demo_forced=%s", mongo_works, demo_forced)
     DEMO_MODE_ACTIVE = demo_forced or not mongo_works
     
     if DEMO_MODE_ACTIVE:
-        deps.logger.info("Demo mode enabled - using in-memory data")
+        logger.info("Demo mode: mongo_error=%s", mongo_error)
         deps.db = deps.get_demo_db()
         yield
         return
