@@ -21,26 +21,23 @@ import logging
 import winreg
 from pathlib import Path
 
-logger = logging.getLogger("SentinelPulse")
-
-# Simple file logger for debugging packaged app
-log_file = BASE_DIR / "sentinel_pulse.log"
-try:
-    fh = logging.FileHandler(str(log_file))
-    fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-    logger.addHandler(fh)
-except Exception:
-    pass
-
-logger.info("=== Launcher PID: %d ===", os.getpid())
-
-# Add the app directory to path
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
 else:
     BASE_DIR = Path(__file__).parent
 
 sys.path.insert(0, str(BASE_DIR))
+
+# Simple file logger for debugging packaged app
+try:
+    log_file = BASE_DIR / "sentinel_pulse.log"
+    fh = logging.FileHandler(str(log_file))
+    fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger.addHandler(fh)
+    logger.info("=== Launcher PID: %d, Log: %s ===", os.getpid(), log_file)
+except Exception as e:
+    logger.warning("Log file failed: %s", e)
+
 
 # Optional MongoDB process
 _mongo_process = None
