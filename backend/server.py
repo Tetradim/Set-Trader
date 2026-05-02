@@ -15,12 +15,37 @@ import os
 import sys
 import webbrowser
 import threading
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Simple file logger for debugging
+def get_log_path():
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS) / 'sentinel_pulse.log'
+    return Path(__file__).parent / 'sentinel_pulse.log'
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler(str(get_log_path())),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("SentinelPulse")
+
+# Log startup
+logger.info("=" * 50)
+logger.info("Sentinel Pulse starting - PID: %s", os.getpid())
+logger.info("Python: %s", sys.version.split()[0])
+logger.info("Frozen: %s", getattr(sys, 'frozen', False))
 
 # Load .env file early so env vars are available
 from dotenv import load_dotenv
 load_dotenv()
+
+logger.info("ENV loaded - DEMO_MODE: %s", os.environ.get("DEMO_MODE", ""))
 
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware

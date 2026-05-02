@@ -23,6 +23,17 @@ from pathlib import Path
 
 logger = logging.getLogger("SentinelPulse")
 
+# Simple file logger for debugging packaged app
+log_file = BASE_DIR / "sentinel_pulse.log"
+try:
+    fh = logging.FileHandler(str(log_file))
+    fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logger.addHandler(fh)
+except Exception:
+    pass
+
+logger.info("=== Launcher PID: %d ===", os.getpid())
+
 # Add the app directory to path
 if getattr(sys, 'frozen', False):
     BASE_DIR = Path(sys._MEIPASS)
@@ -135,7 +146,7 @@ def main():
     logger.info("=" * 50)
     logger.info("")
     if getattr(sys, "frozen", False):
-        logger.info("Packaged mode - in-memory")
+        logger.info("PACKAGED: Using in-memory, skipping MongoDB")
     else:
         mongo_exe = BASE_DIR / "mongodb" / "mongod.exe"
         if mongo_exe.exists():
