@@ -32,9 +32,10 @@ sys.path.insert(0, str(BASE_DIR))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("SentinelPulse")
 
-# Simple file logger for debugging packaged app
+# Simple file logger for debugging packaged app (on desktop for easy access)
 try:
-    log_file = BASE_DIR / "sentinel_pulse.log"
+    desktop = Path.home() / "Desktop"
+    log_file = desktop / "sentinel_pulse.log"
     fh = logging.FileHandler(str(log_file))
     fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     logger.addHandler(fh)
