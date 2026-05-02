@@ -113,9 +113,11 @@ jobs:
       - name: Build exe
         working-directory: backend
         run: |
-          Write-Host "Clearing PyInstaller cache..."
+          Write-Host "Clearing PyInstaller cache - FORCE..."
           Remove-Item build -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item dist -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item backend\build -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item backend\dist -Recurse -Force -ErrorAction SilentlyContinue
           $cacheDir = "$env:LOCALAPPDATA\pyinstaller"
           if (Test-Path $cacheDir) {
             Remove-Item $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
