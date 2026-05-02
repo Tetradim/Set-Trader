@@ -165,8 +165,18 @@ async def lifespan(application: FastAPI):
     demo_forced = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
     
     # Try to connect to MongoDB
+    # In packaged mode, skip MongoDB if not bundled
     mongo_works = True
     mongo_error = None
+    
+    if getattr(sys, 'frozen', False):
+        # Packaged mode - check if MongoDB exists
+        from pathlib import Path
+        mongo_exists = Path(sys._MEIPASS).joinpath("mongodb", "mongod.exe").exists()
+        if not mongo_exists:
+            logger.info("Packaged mode - MongoDB not bundled, using demo mode")
+            demo_forced = True
+    
     try:
         await deps.db.command("ping")
     except Exception as e:
