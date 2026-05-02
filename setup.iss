@@ -95,9 +95,18 @@ Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; S
 ; Launch after install
 Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent shellexec; WorkingDir: "{app}"
 
-[UninstallRun]
-; Delete log file from desktop on uninstall
-Filename: "{cmd}"; Parameters: "/C If Exist "{userdesktop}\sentinel_pulse.log" Del /F "{userdesktop}\sentinel_pulse.log"""; Flags: runhidden
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  LogFile: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    LogFile := ExpandConstant('{userdesktop}') + '\sentinel_pulse.log';
+    if FileExists(LogFile) then
+      DeleteFile(LogFile);
+  end;
+end;
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
