@@ -28,6 +28,10 @@ else:
 
 sys.path.insert(0, str(BASE_DIR))
 
+# Set up logger
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+logger = logging.getLogger("SentinelPulse")
+
 # Simple file logger for debugging packaged app
 try:
     log_file = BASE_DIR / "sentinel_pulse.log"
