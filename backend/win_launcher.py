@@ -141,6 +141,9 @@ def main():
         if mongo_exe.exists():
             start_mongodb()
     
+    # Give server time to start before opening browser
+    time.sleep(2)
+    
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
     
