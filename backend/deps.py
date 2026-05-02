@@ -54,8 +54,8 @@ def _ensure_db():
         db_name = os.environ.get("DB_NAME", "sentinelpulse")
         _mongo_client = AsyncIOMotorClient(
             mongo_url,
-            serverSelectionTimeoutMS=2000,
-            connectTimeoutMS=2000,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
         )
         _db = _mongo_client[db_name]
         logger.info("MongoDB connected")
