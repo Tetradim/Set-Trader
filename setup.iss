@@ -54,11 +54,14 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 Name: "autostart"; Description: "Start Sentinel Pulse on Windows login"; GroupDescription: "Startup Options"
 Name: "uninstallicon"; Description: "{cm:UninstallProgram,{#MyAppName}}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "telemetry"; Description: "Send anonymous usage statistics"; GroupDescription: "Privacy"; Flags: unchecked
-Name: "mongodb"; Description: "Install portable MongoDB server"; GroupDescription: "Database"; Flags: unchecked
+Name: "mongodb"; Description: "Install MongoDB server"; GroupDescription: "Database"; Flags: unchecked
 
 [Files]
 ; Main executable
 Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Auto-setup launcher
+Source: "Setup-And-Launch.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Documentation
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -71,12 +74,12 @@ Source: "backend\.env.example"; DestDir: "{app}"; Flags: ignoreversion; DestName
 Source: "backend\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 
 [Icons]
-; Main app (launches batch which starts MongoDB then exe)
-Name: "{group}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"
+; Main app (launches auto-setup which detects MongoDB)
+Name: "{group}\{#MyAppName}"; Filename: "{app}\Setup-And-Launch.bat"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Setup-And-Launch.bat"; WorkingDir: "{app}"; Tasks: desktopicon
 Name: "{commondesktop}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Tasks: uninstallicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\Start Sentinel Pulse.bat"; WorkingDir: "{app}"; Tasks: autostart
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\Setup-And-Launch.bat"; WorkingDir: "{app}"; Tasks: autostart
 
 [Registry]
 ; File association for .sentinel config files
@@ -93,7 +96,7 @@ Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 ; Install VC++ Redistributable silently
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated
 ; Launch after install
-Filename: "{app}\Start Sentinel Pulse.bat"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent shellexec; WorkingDir: "{app}"
+Filename: "{app}\Setup-And-Launch.bat"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent shellexec; WorkingDir: "{app}"
 
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
