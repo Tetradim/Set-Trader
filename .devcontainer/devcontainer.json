@@ -1,5 +1,5 @@
 {
-  "name": "BracketBot Dev Container",
+  "name": "Sentinel Pulse Dev Container",
   "dockerComposeFile": "../docker-compose.yml",
   "service": "backend",
   "workspaceFolder": "/app",

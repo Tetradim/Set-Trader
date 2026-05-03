@@ -1,8 +1,8 @@
 @echo off
-title BracketBot Terminal (Dev Mode)
+title Sentinel Pulse Terminal (Dev Mode)
 echo.
 echo  ========================================
-echo    BracketBot Terminal - Dev Mode
+echo    Sentinel Pulse Terminal - Dev Mode
 echo  ========================================
 echo.
 
@@ -62,7 +62,7 @@ start http://localhost:3000
 
 echo.
 echo  ========================================
-echo    BracketBot is running!
+echo    Sentinel Pulse is running!
 echo  ========================================
 echo.
 echo  Frontend: http://localhost:3000

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Build BracketBot into a standalone Windows executable.
+    Build Sentinel Pulse into a standalone Windows executable.
 .DESCRIPTION
     This script:
     1. Creates/activates a Python virtual environment
@@ -20,7 +20,7 @@
 .EXAMPLE
     .\build-windows.ps1
     .\build-windows.ps1 -Clean
-    .\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/bracketbot"
+    .\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/sentinel_pulse"
 #>
 
 param(
@@ -39,7 +39,7 @@ $DIST = Join-Path $BACKEND "dist"
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Cyan
-Write-Host "    BracketBot Windows Build" -ForegroundColor Cyan
+Write-Host "    Sentinel Pulse Windows Build" -ForegroundColor Cyan
 Write-Host "  ========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -94,7 +94,7 @@ if (-not $SkipFrontend) {
 Write-Host "[4/6] Creating production .env..." -ForegroundColor Yellow
 $envContent = @"
 MONGO_URL=$MongoUri
-DB_NAME=bracketbot
+DB_NAME=sentinel_pulse
 CORS_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
 "@
 $envContent | Out-File -Encoding UTF8 (Join-Path $BACKEND ".env")
@@ -105,7 +105,7 @@ if (-not $SkipBackend) {
     Write-Host "[5/6] Building executable with PyInstaller..." -ForegroundColor Yellow
     Push-Location $BACKEND
     pyinstaller `
-        --name "BracketBot" `
+        --name "Sentinel Pulse" `
         --onedir `
         --noconsole `
         --add-data "static;static" `
@@ -141,30 +141,30 @@ if (-not $SkipBackend) {
 Write-Host "[6/6] Creating launcher..." -ForegroundColor Yellow
 $launcher = @"
 @echo off
-title BracketBot Terminal
+title Sentinel Pulse Terminal
 echo.
 echo  ========================================
-echo    BracketBot Terminal
+echo    Sentinel Pulse Terminal
 echo  ========================================
 echo.
-echo  Starting BracketBot...
+echo  Starting Sentinel Pulse...
 echo  Browser will open at http://localhost:8001
 echo.
 echo  Prerequisites:
 echo    - MongoDB running locally (mongod)
-echo    - OR edit BracketBot\.env with your Atlas URI
+echo    - OR edit Sentinel Pulse\.env with your Atlas URI
 echo.
 echo  Press Ctrl+C to stop.
 echo.
 timeout /t 2 /nobreak > nul
 start http://localhost:8001
-cd /d "%~dp0BracketBot"
-BracketBot.exe
+cd /d "%~dp0Sentinel Pulse"
+Sentinel Pulse.exe
 "@
-$launcher | Out-File -Encoding ASCII (Join-Path $DIST "Start BracketBot.bat")
+$launcher | Out-File -Encoding ASCII (Join-Path $DIST "Start Sentinel Pulse.bat")
 
 # --- ALSO COPY .ENV TO DIST ---
-Copy-Item (Join-Path $BACKEND ".env") (Join-Path $DIST "BracketBot\.env") -Force
+Copy-Item (Join-Path $BACKEND ".env") (Join-Path $DIST "Sentinel Pulse\.env") -Force
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Green
@@ -172,8 +172,8 @@ Write-Host "    BUILD COMPLETE!" -ForegroundColor Green
 Write-Host "  ========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Output: backend\dist\" -ForegroundColor Cyan
-Write-Host "    - Start BracketBot.bat  (double-click to launch)" -ForegroundColor White
-Write-Host "    - BracketBot\           (executable + static files)" -ForegroundColor White
+Write-Host "    - Start Sentinel Pulse.bat  (double-click to launch)" -ForegroundColor White
+Write-Host "    - Sentinel Pulse\           (executable + static files)" -ForegroundColor White
 Write-Host ""
 Write-Host "  To distribute:" -ForegroundColor Yellow
 Write-Host "    1. Zip the entire 'dist' folder" -ForegroundColor White
