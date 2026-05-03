@@ -10,12 +10,15 @@ set DEMO_MODE=
 echo Checking for MongoDB...
 
 :: Method 1: Check if Docker MongoDB exists
-docker ps -a | findstr mongo >nul 2>&1
+where docker >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Found Docker MongoDB container - starting...
-    docker start mongo >nul 2>&1
-    set MONGO_URL=mongodb://localhost:27017
-    goto :writeEnv
+    docker ps -a 2>nul | findstr mongo >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo Found Docker MongoDB container - starting...
+        docker start mongo >nul 2>&1
+        set MONGO_URL=mongodb://localhost:27017
+        goto :writeEnv
+    )
 )
 
 :: Method 2: Check if local MongoDB installed
