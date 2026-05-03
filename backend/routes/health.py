@@ -26,6 +26,22 @@ async def health():
     except ImportError:
         pass
     
+    # Get circuit breaker status
+    circuit_status = "unknown"
+    try:
+        from resilience import broker_resilience
+        if broker_resilience.circuit_open:
+            circuit_status = "open"
+        else:
+            circuit_status = "closed"
+    except Exception:
+        pass
+    
+    # Get WS manager stats
+    ws_stats = {}
+    if hasattr(deps.ws_manager, 'get_stats'):
+        ws_stats = deps.ws_manager.get_stats()
+    
     return {
         "status": "online",
         "running": deps.engine.running,
@@ -38,6 +54,8 @@ async def health():
         "ws_clients": len(deps.ws_manager.active),
         "brokers_connected": connected_brokers,
         "environment": env_info,
+        "circuit_breaker": circuit_status,
+        "ws_stats": ws_stats,
     }
 
 

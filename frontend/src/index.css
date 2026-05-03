@@ -6,6 +6,7 @@
 
 @layer base {
   :root {
+    /* Dark theme (default) */
     --background: 222 47% 4%;
     --foreground: 213 31% 91%;
     --card: 220 40% 8%;
@@ -33,6 +34,55 @@
     --radius: 0.625rem;
     --success: 160 84% 39%;
     --warning: 38 92% 50%;
+  }
+
+  /* Light theme */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 215 25% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 12%;
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 25% 96%;
+    --secondary-foreground: 215 25% 12%;
+    --muted: 215 25% 96%;
+    --muted-foreground: 215 20% 45%;
+    --accent: 263 70% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 14% 85%;
+    --input: 214 14% 85%;
+    --ring: 239 84% 67%;
+  }
+
+  /* Accent color schemes */
+  .accent-blue {
+    --primary: 239 84% 67%;
+    --accent: 239 84% 67%;
+  }
+  .accent-emerald {
+    --primary: 160 84% 39%;
+    --accent: 160 84% 39%;
+  }
+  .accent-amber {
+    --primary: 38 92% 50%;
+    --accent: 38 92% 50%;
+  }
+  .accent-rose {
+    --primary: 350 85% 55%;
+    --accent: 350 85% 55%;
+  }
+  .accent-violet {
+    --primary: 270 65% 55%;
+    --accent: 270 65% 55%;
+  }
+  .accent-cyan {
+    --primary: 187 85% 53%;
+    --accent: 187 85% 53%;
   }
 }
 

@@ -1,8 +1,8 @@
-# BracketBot Windows Build & Distribution Guide
+# Sentinel Pulse Windows Build & Distribution Guide
 
 ## Overview
 
-BracketBot can be packaged into a standalone Windows executable that bundles:
+Sentinel Pulse can be packaged into a standalone Windows executable that bundles:
 - The Python/FastAPI backend
 - The React frontend (pre-built static files)
 - All dependencies
@@ -22,7 +22,7 @@ The easiest way to build the executable is through the GitHub Actions workflow.
 3. Click **Run workflow**
 4. Optionally set a custom MongoDB URI (defaults to `mongodb://localhost:27017`)
 5. Wait ~10 minutes for the build to complete
-6. Download **BracketBot-Windows.zip** from the workflow artifacts
+6. Download **Sentinel Pulse-Windows.zip** from the workflow artifacts
 
 ### Auto-Release on Tag
 
@@ -33,7 +33,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release will include `BracketBot-Windows.zip` as a downloadable asset.
+The release will include `Sentinel Pulse-Windows.zip` as a downloadable asset.
 
 ---
 
@@ -50,14 +50,14 @@ The release will include `BracketBot-Windows.zip` as a downloadable asset.
 
 ```powershell
 # Clone and enter the repo
-git clone <your-repo-url> BracketBot
-cd BracketBot
+git clone <your-repo-url> Sentinel Pulse
+cd Sentinel Pulse
 
 # Run the build script
 .\build-windows.ps1
 
 # With a custom MongoDB URI:
-.\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/bracketbot"
+.\build-windows.ps1 -MongoUri "mongodb+srv://user:pass@cluster.mongodb.net/sentinel_pulse"
 
 # Clean build (removes old artifacts first):
 .\build-windows.ps1 -Clean
@@ -67,9 +67,9 @@ cd BracketBot
 
 ```
 backend/dist/
-  Start BracketBot.bat     <-- Double-click to launch
-  BracketBot/
-    BracketBot.exe         <-- The executable
+  Start Sentinel Pulse.bat     <-- Double-click to launch
+  Sentinel Pulse/
+    Sentinel Pulse.exe         <-- The executable
     static/                <-- Frontend files
     .env                   <-- Configuration
     ...                    <-- Bundled dependencies
@@ -93,12 +93,12 @@ Zip the entire `backend/dist/` folder and share the `.zip` file.
 
 ### Setup for Recipients
 
-1. Unzip `BracketBot-Windows.zip`
-2. **If using Atlas:** Edit `BracketBot\.env` and set:
+1. Unzip `Sentinel Pulse-Windows.zip`
+2. **If using Atlas:** Edit `Sentinel Pulse\.env` and set:
    ```
-   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/bracketbot
+   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/sentinel_pulse
    ```
-3. Double-click `Start BracketBot.bat`
+3. Double-click `Start Sentinel Pulse.bat`
 4. Browser opens to `http://localhost:8001`
 
 ---
@@ -115,7 +115,7 @@ When running as a standalone executable:
        |
        v
   +----------------------------+
-  |     BracketBot.exe         |
+  |     Sentinel Pulse.exe         |
   |                            |
   |  FastAPI (port 8001)       |
   |    ├── /api/*  REST + WS   |
@@ -142,7 +142,7 @@ When running as a standalone executable:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MONGO_URL` | `mongodb://localhost:27017` | MongoDB connection string |
-| `DB_NAME` | `bracketbot` | Database name |
+| `DB_NAME` | `sentinel_pulse` | Database name |
 | `CORS_ORIGINS` | `http://localhost:8001` | Allowed CORS origins |
 
 ---
@@ -154,7 +154,7 @@ When running as a standalone executable:
 | App won't start | Make sure MongoDB is running (`mongod`) |
 | Port 8001 in use | Close whatever's using port 8001, or edit server.py's port |
 | "Module not found" errors | Re-build with `.\build-windows.ps1 -Clean` |
-| Frontend shows blank page | Make sure `static/` folder exists inside `BracketBot/` |
+| Frontend shows blank page | Make sure `static/` folder exists inside `Sentinel Pulse/` |
 | Can't connect to Atlas | Check your Atlas URI, whitelist your IP in Atlas |
 | Windows Defender blocks exe | Click "More info" > "Run anyway" (or add an exception) |
 
@@ -166,7 +166,7 @@ For development without building an executable:
 
 ```bash
 # Windows
-start-bracketbot.bat
+start-sentinel_pulse.bat
 
 # Or manually:
 # Terminal 1: Backend

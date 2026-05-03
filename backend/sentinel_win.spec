@@ -26,8 +26,8 @@ a = Analysis(
     ["win_launcher.py"],
     pathex=["."],          # run from backend/
     binaries=[
-        # Bundled MongoDB — only if mongod exists (macOS typically)
-        *([("mongod", ".")] if Path("mongod").exists() else []),
+        # Bundled MongoDB — include if mongodb/mongod.exe exists
+        *([("mongodb/mongod", "mongodb")] if Path("mongodb/mongod.exe").exists() else []),
         *pymongo_b,
         *bson_b,
     ],
@@ -52,8 +52,8 @@ a = Analysis(
         ("email_service.py",   "."),
         ("ws_manager.py",      "."),
         ("telemetry.py",       "."),
-        # Env — overridden at runtime by mac_launcher but kept as fallback
-        (".env.mac",   ".env"),
+        # Env — use .env if exists (created by workflow for demo mode)
+        (".env",  ".env"),
         *pymongo_d,
         *bson_d,
         *motor_d,

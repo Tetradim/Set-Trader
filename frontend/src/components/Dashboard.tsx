@@ -20,11 +20,15 @@ import { AdminIAMTab } from './tabs/AdminIAMTab';
 import { SLODashboardTab } from './tabs/SLODashboardTab';
 import { TradeLogSidebar } from './TradeLogSidebar';
 import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Shield, List, Scale, BarChart3, Users, Server, Target } from 'lucide-react';
+import { PortfolioTab } from './tabs/PortfolioTab';
+import { TradeLogSidebar } from './TradeLogSidebar';
+import { LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug, Activity, Globe, Wallet } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 
 const TABS = [
   { id: 'watchlist', label: 'Watchlist', icon: LayoutDashboard },
+  { id: 'portfolio', label: 'Portfolio', icon: Wallet },
   { id: 'positions', label: 'Positions', icon: Crosshair },
   { id: 'risk-center', label: 'Risk Center', icon: Shield },
   { id: 'orders', label: 'Orders', icon: List },
@@ -100,6 +104,7 @@ export function Dashboard() {
           <div className="flex-1 overflow-auto p-6" data-testid="tab-content">
             <ErrorBoundary fallbackLabel="Tab failed to render">
               {activeTab === 'watchlist' && <WatchlistTab />}
+              {activeTab === 'portfolio' && <PortfolioTab />}
               {activeTab === 'positions' && <PositionsTab />}
               {activeTab === 'risk-center' && <RiskCenterTab />}
               {activeTab === 'orders' && <OrdersExecutionTab />}

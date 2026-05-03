@@ -4,7 +4,7 @@ import json
 import sys
 from datetime import datetime
 
-class BracketBotAPITester:
+class Sentinel PulseAPITester:
     def __init__(self, base_url="https://pulse-api-shield.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
@@ -457,7 +457,7 @@ class BracketBotAPITester:
 
     def run_all_tests(self):
         """Run comprehensive API test suite"""
-        print("🚀 Starting BracketBot API Test Suite")
+        print("🚀 Starting Sentinel Pulse API Test Suite")
         print(f"Testing against: {self.base_url}")
         print("=" * 60)
 
@@ -495,7 +495,7 @@ class BracketBotAPITester:
             return False
 
 def main():
-    tester = BracketBotAPITester()
+    tester = Sentinel PulseAPITester()
     success = tester.run_all_tests()
     return 0 if success else 1
 

@@ -186,6 +186,22 @@ interface BotState {
   failedBrokers: Record<string, { reason: string; symbol: string; timestamp: number }>;
   setBrokerFailed: (brokerId: string, reason: string, symbol: string) => void;
   clearBrokerFailed: (brokerId: string) => void;
+
+  // Theme settings
+  themeMode: 'dark' | 'light';
+  accentColor: 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan';
+  setThemeMode: (mode: 'dark' | 'light') => void;
+  setAccentColor: (color: 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan') => void;
+
+  // Ticker card view settings
+  compactMode: boolean;
+  setCompactMode: (compact: boolean) => void;
+  tickerColors: Record<string, string>;
+  setTickerColor: (symbol: string, color: string) => void;
+  selectedTickers: string[];
+  toggleTickerSelection: (symbol: string) => void;
+  clearTickerSelection: () => void;
+  selectAllTickers: () => void;
 }
 
 export const useStore = create<BotState>((set) => ({
@@ -295,4 +311,26 @@ export const useStore = create<BotState>((set) => ({
     delete copy[brokerId];
     return { failedBrokers: copy };
   }),
+
+  themeMode: 'dark',
+  accentColor: 'blue',
+  setThemeMode: (themeMode) => set({ themeMode }),
+  setAccentColor: (accentColor) => set({ accentColor }),
+
+  compactMode: false,
+  setCompactMode: (compactMode) => set({ compactMode }),
+  tickerColors: {},
+  setTickerColor: (symbol, color) => set((state) => ({
+    tickerColors: { ...state.tickerColors, [symbol]: color }
+  })),
+  selectedTickers: [],
+  toggleTickerSelection: (symbol) => set((state) => ({
+    selectedTickers: state.selectedTickers.includes(symbol)
+      ? state.selectedTickers.filter(s => s !== symbol)
+      : [...state.selectedTickers, symbol]
+  })),
+  clearTickerSelection: () => set({ selectedTickers: [] }),
+  selectAllTickers: () => set((state) => ({
+    selectedTickers: Object.keys(state.tickers)
+  })),
 }));

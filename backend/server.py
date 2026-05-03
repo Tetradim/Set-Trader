@@ -15,8 +15,37 @@ import os
 import sys
 import webbrowser
 import threading
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Simple file logger for debugging
+def get_log_path():
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS) / 'sentinel_pulse.log'
+    return Path(__file__).parent / 'sentinel_pulse.log'
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(message)s',
+    handlers=[
+        logging.FileHandler(str(get_log_path())),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("SentinelPulse")
+
+# Log startup
+logger.info("=" * 50)
+logger.info("Sentinel Pulse starting - PID: %s", os.getpid())
+logger.info("Python: %s", sys.version.split()[0])
+logger.info("Frozen: %s", getattr(sys, 'frozen', False))
+
+# Load .env file early so env vars are available
+from dotenv import load_dotenv
+load_dotenv()
+
+logger.info("ENV loaded - DEMO_MODE: %s", os.environ.get("DEMO_MODE", ""))
 
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
@@ -40,6 +69,14 @@ deps.broker_mgr = BrokerConnectionManager(deps.db)
 
 
 # --- Background tasks ---
+import random
+
+def add_jitter(base_seconds: float, jitter_pct: float = 0.2) -> float:
+    """Add random jitter to prevent thundering herd on restart."""
+    jitter = base_seconds * jitter_pct
+    return base_seconds + random.uniform(-jitter, jitter)
+
+
 async def price_broadcast_loop():
     while True:
         try:
@@ -81,8 +118,8 @@ async def price_broadcast_loop():
                     "market_hours_only": deps.engine.market_hours_only,
                 })
         except Exception as e:
-            deps.logger.error(f"Price broadcast error: {e}")
-        await asyncio.sleep(2)
+            deps.logger.error(f"Price broadcast error: {e}", exc_info=True)
+        await asyncio.sleep(add_jitter(2))
 
 
 async def trading_loop():
@@ -107,13 +144,13 @@ async def trading_loop():
                     except CircuitOpenError as ce:
                         deps.logger.warning(f"Skipping {t.get('symbol','?')} — {ce}")
                     except Exception as te:
-                        deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}")
+                        deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}", exc_info=True)
             # Always check pending limit sells (even when paused — user explicitly requested)
             if deps.engine._pending_sells:
                 await deps.engine.check_pending_sells()
         except Exception as e:
-            deps.logger.error(f"Trading loop error: {e}")
-        await asyncio.sleep(5)
+            deps.logger.error(f"Trading loop error: {e}", exc_info=True)
+        await asyncio.sleep(add_jitter(5))
 
 
 # --- App lifecycle ---
@@ -128,16 +165,31 @@ async def lifespan(application: FastAPI):
     demo_forced = os.environ.get("DEMO_MODE", "").lower() in ("1", "true", "yes")
     
     # Try to connect to MongoDB
+    # In packaged mode, skip MongoDB if not bundled
     mongo_works = True
+    mongo_error = None
+    
+    if getattr(sys, 'frozen', False):
+        # Packaged mode - check if MongoDB exists
+        from pathlib import Path
+        mongo_exists = Path(sys._MEIPASS).joinpath("mongodb", "mongod.exe").exists()
+        if not mongo_exists:
+            logger.info("Packaged mode - MongoDB not bundled, using demo mode")
+            demo_forced = True
+    
     try:
         await deps.db.command("ping")
-    except Exception:
+    except Exception as e:
+        mongo_error = str(e)
         mongo_works = False
-    
+        logger.info("MongoDB ping failed: %s", e)
+
+    logger.info("mongo_works=%s, demo_forced=%s", mongo_works, demo_forced)
     DEMO_MODE_ACTIVE = demo_forced or not mongo_works
     
     if DEMO_MODE_ACTIVE:
-        deps.logger.info("Demo mode enabled - using in-memory data")
+        logger.info("Demo mode: mongo_error=%s", mongo_error)
+        deps.db = deps.get_demo_db()
         yield
         return
     
@@ -218,15 +270,67 @@ async def lifespan(application: FastAPI):
     except Exception as e:
         deps.logger.warning(f"Telegram auto-start failed: {e}")
 
+    # Initialize notification service
+    try:
+        from notification_service import notification_service
+        await notification_service.load_config()
+        deps.logger.info("Notification service initialized")
+    except Exception as e:
+        deps.logger.warning(f"Failed to init notification service: {e}")
+
     deps.logger.info("Sentinel Pulse Engine started")
     yield
 
-    # Shutdown
+    # --- Graceful Shutdown ---
+    deps.logger.info("Sentinel Pulse shutting down...")
+
+    # 1. Cancel background tasks gracefully
     try:
-        await deps.telegram_service.stop()
+        current_task = asyncio.current_task()
+        for task in asyncio.all_tasks():
+            if task is not current_task and not task.done():
+                task.cancel()
+        await asyncio.gather(*asyncio.all_tasks(), return_exceptions=True)
+    except Exception as e:
+        deps.logger.warning(f"Task cancellation warning: {e}")
+
+    # 2. Stop WS broadcast loop first to stop accepting new messages
+    try:
+        if hasattr(deps.ws_manager, 'stop_broadcast_loop'):
+            await deps.ws_manager.stop_broadcast_loop()
     except Exception:
         pass
-    deps.mongo_client.close()
+    
+    # 3. Save engine state
+    try:
+        if deps.engine:
+            deps.engine.running = False
+            deps.engine.paused = True
+        await deps.engine.save_state()
+    except Exception:
+        pass
+    
+    # 4. Stop broker manager
+    try:
+        if hasattr(deps.broker_mgr, 'save_idempotency_keys'):
+            await deps.broker_mgr.save_idempotency_keys()
+    except Exception:
+        pass
+    
+    # 5. Stop Telegram gracefully
+    try:
+        if deps.telegram_service:
+            await deps.telegram_service.stop()
+    except Exception:
+        pass
+    
+    # 6. Close MongoDB connection
+    try:
+        if hasattr(deps, "mongo_client") and deps.mongo_client:
+            deps.mongo_client.close()
+    except Exception as e:
+        deps.logger.warning(f"MongoDB close warning: {e}")
+    deps.logger.info("Sentinel Pulse shutdown complete")
 
 
 # --- FastAPI app ---
@@ -237,12 +341,23 @@ from telemetry import setup_telemetry, get_tracer
 setup_telemetry(app)
 deps.tracer = get_tracer()
 
+# CORS configuration - secure defaults
+# Set CORS_ORIGINS env var in production to limit access
+_cors_origins = os.environ.get("CORS_ORIGINS", "")
+if _cors_origins == "*":
+    # WARNING: Wildcard allowed only in development
+    import logging
+    logging.getLogger("SentinelPulse").warning(
+        "CORS set to wildcard - this is insecure for production! "
+        "Set CORS_ORIGINS to specific origins."
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins.split(",") if _cors_origins else ["http://localhost:8001"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 
 # --- Mount routers ---
@@ -266,6 +381,10 @@ from routes.audit import router as audit_router
 from routes.ops import router as ops_router
 from routes.analytics import router as analytics_router
 from routes.slo import router as slo_router
+from routes.notifications import router as notifications_router
+from routes.portfolio import router as portfolio_router
+from routes.developer import router as developer_router
+from routes.auth import router as auth_router
 
 api.include_router(health_router)
 api.include_router(brokers_router)
@@ -285,6 +404,10 @@ api.include_router(audit_router)
 api.include_router(ops_router)
 api.include_router(analytics_router)
 api.include_router(slo_router)
+api.include_router(notifications_router)
+api.include_router(portfolio_router)
+api.include_router(developer_router)
+api.include_router(auth_router)
 
 app.include_router(api)
 
