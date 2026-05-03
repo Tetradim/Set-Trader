@@ -1,7 +1,6 @@
-"""Orders & Execution Dashboard Tab.
-
-Displays order state machine, fill timeline, reject reasons, slippage analysis.
-"""
+// Orders & Execution Dashboard Tab.
+// 
+// Displays order state machine, fill timeline, reject reasons, slippage analysis.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { List, Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';

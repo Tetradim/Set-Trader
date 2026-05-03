@@ -1,7 +1,6 @@
-"""Compliance & Audit Dashboard Tab.
-
-Displays immutable event log explorer, operator attestations, and export bundles.
-"""
+// Compliance & Audit Dashboard Tab.
+// 
+// Displays immutable event log explorer, operator attestations, and export bundles.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Shield, Search, Download, FileText, User, Clock, Filter, RefreshCw } from 'lucide-react';

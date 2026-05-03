@@ -1,7 +1,6 @@
-"""Portfolio Analytics Dashboard Tab.
-
-Displays PnL attribution, drawdown, Sharpe-like metrics, and performance analytics.
-"""
+// Portfolio Analytics Dashboard Tab.
+// 
+// Displays PnL attribution, drawdown, Sharpe-like metrics, and performance analytics.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, RefreshCw, PieChart } from 'lucide-react';

@@ -1,7 +1,6 @@
-"""Risk Center Dashboard Tab.
-
-Displays live exposure ladder, limits panel, kill switches, and risk controls.
-"""
+// Risk Center Dashboard Tab.
+// 
+// Displays live exposure ladder, limits panel, kill switches, and risk controls.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { Shield, AlertTriangle, Activity, Crosshair, ToggleLeft, ToggleRight, RefreshCw, Users, DollarSign, TrendingDown } from 'lucide-react';
