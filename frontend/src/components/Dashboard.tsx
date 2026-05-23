@@ -1,5 +1,5 @@
+import { useEffect } from 'react';
 import { useStore } from '@/stores/useStore';
-import { useEffect, useRef } from 'react';
 import { Header } from './Header';
 import { WatchlistTab } from './tabs/WatchlistTab';
 import { PositionsTab } from './tabs/PositionsTab';
@@ -10,6 +10,7 @@ import { BrokersTab } from './tabs/BrokersTab';
 import { TracesTab } from './tabs/TracesTab';
 import { ForeignTab } from './tabs/ForeignTab';
 import { RiskCenterTab } from './tabs/RiskCenterTab';
+import { PreflightTab } from './tabs/PreflightTab';
 import { OrdersExecutionTab } from './tabs/OrdersExecutionTab';
 import { ReconciliationTab } from './tabs/ReconciliationTab';
 import { ComplianceAuditTab } from './tabs/ComplianceAuditTab';
@@ -21,61 +22,73 @@ import { PortfolioTab } from './tabs/PortfolioTab';
 import { ErrorBoundary } from './ErrorBoundary';
 import { apiFetch } from '@/lib/api';
 import {
-  LayoutDashboard, Crosshair, History, ScrollText, Settings, Plug,
-  Activity, Globe, Wallet, ChevronLeft, ChevronRight, Shield, List,
-  Scale, BarChart3, Users, Server, Target, Bell, Briefcase,
+  DASHBOARD_TAB_GROUPS,
+  DashboardGroupId,
+  DashboardTabId,
+  getDashboardGroupForTab,
+  getDefaultTabForDashboardGroup,
+  getTabsForDashboardGroup,
+  normalizeDashboardTabId,
+} from '@/lib/dashboard-tabs';
+import {
+  Activity,
+  BarChart3,
+  Bell,
+  Briefcase,
+  Crosshair,
+  Globe,
+  History,
+  LayoutDashboard,
+  List,
+  Plug,
+  Scale,
+  ScrollText,
+  Server,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Target,
+  Users,
 } from 'lucide-react';
 
-// ── Sidebar icon buttons ────────────────────────────────────────────────────
-const SIDEBAR_ITEMS = [
-  { id: 'watchlist',   icon: LayoutDashboard, title: 'Watchlist'  },
-  { id: 'portfolio',   icon: Briefcase,       title: 'Portfolio'  },
-  { id: 'positions',   icon: Crosshair,       title: 'Positions'  },
-  { id: 'history',     icon: History,         title: 'History'    },
-  { id: '---' },
-  { id: 'risk-center', icon: Shield,          title: 'Risk'       },
-  { id: 'orders',      icon: List,            title: 'Orders'     },
-  { id: 'logs',        icon: ScrollText,      title: 'Logs'       },
-  { id: 'brokers',     icon: Plug,            title: 'Brokers'    },
-  { id: 'foreign',     icon: Globe,           title: 'Foreign'    },
-  { id: '---' },
-  { id: 'analytics',   icon: BarChart3,       title: 'Analytics'  },
-  { id: 'traces',      icon: Activity,        title: 'Traces'     },
+const GROUP_NAV: Array<{ id: DashboardGroupId; icon: any; title: string }> = [
+  { id: 'trading', icon: LayoutDashboard, title: 'Trading' },
+  { id: 'risk', icon: ShieldCheck, title: 'Risk' },
+  { id: 'monitoring', icon: Activity, title: 'Monitoring' },
+  { id: 'integrations', icon: Plug, title: 'Integrations' },
+  { id: 'settings', icon: Settings, title: 'Settings' },
 ];
 
-// ── Full tab list ────────────────────────────────────────────────────────────
-const TABS = [
-  { id: 'watchlist',      label: 'Watchlist',   icon: LayoutDashboard, group: 'primary'  },
-  { id: 'portfolio',      label: 'Portfolio',   icon: Briefcase,       group: 'primary'  },
-  { id: 'positions',      label: 'Positions',   icon: Crosshair,       group: 'primary'  },
-  { id: 'history',        label: 'History',     icon: History,         group: 'primary'  },
-  { id: 'risk-center',    label: 'Risk',        icon: Shield,          group: 'ops'      },
-  { id: 'orders',         label: 'Orders',      icon: List,            group: 'ops'      },
-  { id: 'reconciliation', label: 'Reconcile',   icon: Scale,           group: 'ops'      },
-  { id: 'compliance',     label: 'Compliance',  icon: Users,           group: 'ops'      },
-  { id: 'logs',           label: 'Logs',        icon: ScrollText,      group: 'system'   },
-  { id: 'brokers',        label: 'Brokers',     icon: Plug,            group: 'system'   },
-  { id: 'foreign',        label: 'Foreign',     icon: Globe,           group: 'system'   },
-  { id: 'traces',         label: 'Traces',      icon: Activity,        group: 'system'   },
-  { id: 'incidents',      label: 'Incidents',   icon: Server,          group: 'system'   },
-  { id: 'analytics',      label: 'Analytics',   icon: BarChart3,       group: 'advanced' },
-  { id: 'admin',          label: 'Admin',       icon: Users,           group: 'advanced' },
-  { id: 'slo',            label: 'SLO',         icon: Target,          group: 'advanced' },
-  { id: 'settings',       label: 'Settings',    icon: Settings,        group: 'settings' },
-];
+const TAB_DETAILS: Record<DashboardTabId, { label: string; icon: any }> = {
+  watchlist: { label: 'Watchlist', icon: LayoutDashboard },
+  portfolio: { label: 'Portfolio', icon: Briefcase },
+  positions: { label: 'Positions', icon: Crosshair },
+  orders: { label: 'Orders', icon: List },
+  history: { label: 'History', icon: History },
+  preflight: { label: 'Preflight', icon: ShieldCheck },
+  'risk-center': { label: 'Risk Center', icon: Shield },
+  reconciliation: { label: 'Reconcile', icon: Scale },
+  compliance: { label: 'Compliance', icon: Users },
+  logs: { label: 'Logs', icon: ScrollText },
+  traces: { label: 'Traces', icon: Activity },
+  incidents: { label: 'Incidents', icon: Bell },
+  slo: { label: 'SLO', icon: Target },
+  analytics: { label: 'Analytics', icon: BarChart3 },
+  brokers: { label: 'Brokers', icon: Plug },
+  foreign: { label: 'Foreign', icon: Globe },
+  settings: { label: 'Settings', icon: Settings },
+  admin: { label: 'Admin', icon: Users },
+};
 
 export function Dashboard() {
-  const activeTab          = useStore((s) => s.activeTab);
-  const setActiveTab       = useStore((s) => s.setActiveTab);
-  const setFxRates         = useStore((s) => s.setFxRates);
+  const activeTabState = useStore((s) => s.activeTab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  const setFxRates = useStore((s) => s.setFxRates);
   const setCurrencyDisplay = useStore((s) => s.setCurrencyDisplay);
-  const tabNavRef          = useRef<HTMLDivElement>(null);
+  const activeTab = normalizeDashboardTabId(activeTabState);
+  const activeGroup = getDashboardGroupForTab(activeTab);
+  const activeGroupTabs = getTabsForDashboardGroup(activeGroup);
 
-  const scrollTabs = (dir: 'left' | 'right') => {
-    tabNavRef.current?.scrollBy({ left: dir === 'left' ? -200 : 200, behavior: 'smooth' });
-  };
-
-  // Pre-load FX rates
   useEffect(() => {
     apiFetch('/api/fx-rates').then((d) => setFxRates(d.rates)).catch(() => {});
     apiFetch('/api/settings/currency-display').then((d) => setCurrencyDisplay(d.mode)).catch(() => {});
@@ -85,8 +98,11 @@ export function Dashboard() {
     return () => clearInterval(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Render tab separators between groups
-  let lastGroup = '';
+  useEffect(() => {
+    if (activeTab !== activeTabState) {
+      setActiveTab(activeTab);
+    }
+  }, [activeTab, activeTabState, setActiveTab]);
 
   return (
     <div
@@ -94,7 +110,6 @@ export function Dashboard() {
       style={{ position: 'relative', zIndex: 1 }}
       data-testid="dashboard-container"
     >
-      {/* Full-page gold X triangle background */}
       <div className="sp-bg" aria-hidden="true">
         <div className="sp-bg-pattern" />
         <div className="sp-bg-vignette" />
@@ -104,125 +119,108 @@ export function Dashboard() {
       <div className="sp-gleam-bar" />
 
       <div className="sp-layout" style={{ flex: 1, overflow: 'hidden' }}>
-
-        {/* ── Left sidebar icon nav ── */}
-        <nav className="sp-sidebar" aria-label="Main navigation">
-          {SIDEBAR_ITEMS.map((item, i) => {
-            if (item.id === '---') {
-              return <div key={`sep-${i}`} className="sp-sb-divider" />;
-            }
-            const Icon = item.icon!;
+        <nav className="sp-sidebar" aria-label="Main navigation groups">
+          {GROUP_NAV.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeGroup === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
-                className={`sp-sb-btn ${activeTab === item.id ? 'active' : ''}`}
+                className={`sp-sb-btn ${isActive ? 'active' : ''}`}
                 title={item.title}
-                aria-label={`Open ${item.title} tab`}
-                aria-current={activeTab === item.id ? 'page' : undefined}
-                onClick={() => setActiveTab(item.id!)}
-                data-testid={`sidebar-${item.id}`}
+                aria-label={`Open ${item.title} group`}
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => setActiveTab(getDefaultTabForDashboardGroup(item.id))}
+                data-testid={`sidebar-group-${item.id}`}
               >
                 <Icon size={17} />
               </button>
             );
           })}
-          <div className="sp-sb-spacer" />
-          <div className="sp-sb-divider" />
-          <button
-            type="button"
-            className={`sp-sb-btn ${activeTab === 'incidents' ? 'active' : ''}`}
-            title="Alerts"
-            aria-label="Open Incidents and alerts tab"
-            aria-current={activeTab === 'incidents' ? 'page' : undefined}
-            onClick={() => setActiveTab('incidents')}
-            data-testid="sidebar-alerts"
-          >
-            <Bell size={17} />
-          </button>
-          <button
-            type="button"
-            className={`sp-sb-btn ${activeTab === 'settings' ? 'active' : ''}`}
-            title="Settings"
-            aria-label="Open Settings tab"
-            aria-current={activeTab === 'settings' ? 'page' : undefined}
-            onClick={() => setActiveTab('settings')}
-          >
-            <Settings size={17} />
-          </button>
         </nav>
 
-        {/* ── Main content ── */}
         <div className="sp-main">
-
-          {/* Tab bar */}
           <div className="sp-tabbar scrollbar-hide" data-testid="tab-bar">
-            <button type="button" className="sp-tab-scr" onClick={() => scrollTabs('left')} title="Scroll left" aria-label="Scroll tabs left">
-              <ChevronLeft size={13} />
-            </button>
-
             <nav
-              ref={tabNavRef}
               className="scrollbar-hide"
-              style={{ display: 'flex', alignItems: 'stretch', flex: 1, overflowX: 'auto' }}
+              style={{ display: 'flex', alignItems: 'stretch', flex: 1, gap: 6, overflowX: 'auto' }}
             >
-              {TABS.map((tab) => {
-                const Icon     = tab.icon;
-                const isActive = activeTab === tab.id;
-                const showSep  = tab.group !== lastGroup && lastGroup !== '';
-                lastGroup = tab.group;
-
+              {DASHBOARD_TAB_GROUPS.map((group) => {
+                const nav = GROUP_NAV.find((item) => item.id === group.id)!;
+                const Icon = nav.icon;
+                const isActive = activeGroup === group.id;
                 return (
-                  <div key={tab.id} style={{ display: 'flex', alignItems: 'stretch' }}>
-                    {showSep && (
-                      <div
-                        className={tab.group === 'system' ? 'sp-tab-sep-r' : 'sp-tab-sep'}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      className={`sp-tab ${isActive ? 'active' : ''}`}
-                      aria-current={isActive ? 'page' : undefined}
-                      onClick={() => setActiveTab(tab.id)}
-                      data-testid={`tab-${tab.id}`}
-                    >
-                      <Icon size={10} />
-                      {tab.label}
-                    </button>
-                  </div>
+                  <button
+                    key={group.id}
+                    type="button"
+                    className={`sp-tab ${isActive ? 'active' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setActiveTab(getDefaultTabForDashboardGroup(group.id))}
+                    data-testid={`tab-group-${group.id}`}
+                  >
+                    <Icon size={12} />
+                    {group.label}
+                  </button>
                 );
               })}
             </nav>
-
-            <button type="button" className="sp-tab-scr" onClick={() => scrollTabs('right')} title="Scroll right" aria-label="Scroll tabs right">
-              <ChevronRight size={13} />
-            </button>
           </div>
 
-          {/* Tab content */}
+          <div
+            className="sp-tabbar scrollbar-hide"
+            data-testid="sub-tab-bar"
+            style={{ minHeight: 34, borderTop: '1px solid rgba(255,255,255,0.04)' }}
+          >
+            <nav
+              className="scrollbar-hide"
+              style={{ display: 'flex', alignItems: 'stretch', flex: 1, gap: 4, overflowX: 'auto' }}
+            >
+              {activeGroupTabs.map((tabId) => {
+                const tab = TAB_DETAILS[tabId];
+                const Icon = tab.icon;
+                const isActive = activeTab === tabId;
+                return (
+                  <button
+                    key={tabId}
+                    type="button"
+                    className={`sp-tab ${isActive ? 'active' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => setActiveTab(tabId)}
+                    data-testid={`tab-${tabId}`}
+                  >
+                    <Icon size={10} />
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
           <div
             className="flex-1 overflow-auto"
             style={{ padding: '14px 16px' }}
             data-testid="tab-content"
           >
             <ErrorBoundary key={activeTab} fallbackLabel={`Tab "${activeTab}" failed to render`}>
-              {activeTab === 'watchlist'      && <WatchlistTab />}
-              {activeTab === 'portfolio'      && <PortfolioTab />}
-              {activeTab === 'positions'      && <PositionsTab />}
-              {activeTab === 'risk-center'    && <RiskCenterTab />}
-              {activeTab === 'orders'         && <OrdersExecutionTab />}
+              {activeTab === 'watchlist' && <WatchlistTab />}
+              {activeTab === 'portfolio' && <PortfolioTab />}
+              {activeTab === 'positions' && <PositionsTab />}
+              {activeTab === 'preflight' && <PreflightTab />}
+              {activeTab === 'risk-center' && <RiskCenterTab />}
+              {activeTab === 'orders' && <OrdersExecutionTab />}
               {activeTab === 'reconciliation' && <ReconciliationTab />}
-              {activeTab === 'compliance'     && <ComplianceAuditTab />}
-              {activeTab === 'history'        && <HistoryTab />}
-              {activeTab === 'logs'           && <LogsTab />}
-              {activeTab === 'brokers'        && <BrokersTab />}
-              {activeTab === 'foreign'        && <ForeignTab />}
-              {activeTab === 'traces'         && <TracesTab />}
-              {activeTab === 'incidents'      && <IncidentsOpsTab />}
-              {activeTab === 'analytics'      && <PortfolioAnalyticsTab />}
-              {activeTab === 'admin'          && <AdminIAMTab />}
-              {activeTab === 'slo'            && <SLODashboardTab />}
-              {activeTab === 'settings'       && <SettingsTab />}
+              {activeTab === 'compliance' && <ComplianceAuditTab />}
+              {activeTab === 'history' && <HistoryTab />}
+              {activeTab === 'logs' && <LogsTab />}
+              {activeTab === 'brokers' && <BrokersTab />}
+              {activeTab === 'foreign' && <ForeignTab />}
+              {activeTab === 'traces' && <TracesTab />}
+              {activeTab === 'incidents' && <IncidentsOpsTab />}
+              {activeTab === 'analytics' && <PortfolioAnalyticsTab />}
+              {activeTab === 'admin' && <AdminIAMTab />}
+              {activeTab === 'slo' && <SLODashboardTab />}
+              {activeTab === 'settings' && <SettingsTab />}
             </ErrorBoundary>
           </div>
         </div>

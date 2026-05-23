@@ -48,12 +48,12 @@
       "options": {"colorMode": "background"}
     },
     {
-      "id": 4, "type": "stat", "title": "Demo Mode",
+      "id": 4, "type": "stat", "title": "Database Required",
       "gridPos": {"x": 16, "y": 1, "w": 4, "h": 4},
-      "description": "Running without MongoDB",
+      "description": "Runtime expects MongoDB-backed persistence",
       "datasource": {"uid": "${DS_PROMETHEUS}"},
-      "targets": [{"expr": "sentinel_pulse_demo_mode", "instant": true, "refId": "A"}],
-      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "PROD"}, "1": {"text": "DEMO"}}}], "thresholds": {"steps": [{"color": "green"}, {"color": "blue", "value": 1}]}}},
+      "targets": [{"expr": "sentinel_pulse_up", "instant": true, "refId": "A"}],
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN"}, "1": {"text": "READY"}}}], "thresholds": {"steps": [{"color": "red"}, {"color": "green", "value": 1}]}}},
       "options": {"colorMode": "background"}
     },
     {

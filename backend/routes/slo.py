@@ -13,7 +13,7 @@ from slo_alerting import (
 )
 
 
-router = APIRouter(prefix="/api/slo", tags=["slo"])
+router = APIRouter(prefix="/slo", tags=["slo"])
 
 
 class UpdateSLORequest(BaseModel):

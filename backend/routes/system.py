@@ -1,4 +1,5 @@
 """Audit log, resilience monitoring, and system routes."""
+import os
 from typing import Optional, List
 from fastapi import APIRouter, Query
 
@@ -7,6 +8,140 @@ from audit_service import audit_service
 from resilience import broker_resilience, BrokerResilienceConfig
 
 router = APIRouter(tags=["System"])
+
+
+def _preflight_item(check_id: str, label: str, status: str, detail: str, action: str = "") -> dict:
+    return {
+        "id": check_id,
+        "label": label,
+        "status": status,
+        "detail": detail,
+        "action": action,
+    }
+
+
+@router.get("/preflight")
+async def get_release_preflight():
+    """Return beta release readiness checks before users start trading."""
+    checks = []
+
+    user_count = await deps.db.users.count_documents({})
+    checks.append(_preflight_item(
+        "admin_user",
+        "Admin account",
+        "pass" if user_count > 0 else "fail",
+        f"{user_count} user account(s) configured" if user_count else "No admin account has been created",
+        "Create the first admin account from the sign-in screen.",
+    ))
+
+    balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    account_balance = float(balance_doc.get("value", 0) if balance_doc else 0)
+    tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(500)
+    enabled_tickers = [ticker for ticker in tickers if ticker.get("enabled", True)]
+    allocated = round(sum(float(ticker.get("base_power", 0) or 0) for ticker in tickers), 2)
+
+    checks.append(_preflight_item(
+        "account_balance",
+        "Account balance",
+        "pass" if account_balance > 0 else "fail",
+        f"${account_balance:,.2f} configured" if account_balance > 0 else "No account balance configured",
+        "Set total account balance in Settings.",
+    ))
+    checks.append(_preflight_item(
+        "allocation",
+        "Capital allocation",
+        "pass" if account_balance > 0 and allocated <= account_balance else "fail",
+        f"${allocated:,.2f} allocated of ${account_balance:,.2f}",
+        "Reduce ticker buy power or increase account balance.",
+    ))
+    checks.append(_preflight_item(
+        "tickers",
+        "Enabled tickers",
+        "pass" if enabled_tickers else "fail",
+        f"{len(enabled_tickers)} enabled of {len(tickers)} configured",
+        "Add or enable at least one ticker.",
+    ))
+
+    connected_brokers = len(getattr(deps.broker_mgr, "_adapters", {}))
+    checks.append(_preflight_item(
+        "brokers",
+        "Broker connection",
+        "pass" if connected_brokers else "warn",
+        f"{connected_brokers} broker adapter(s) connected",
+        "Connect a broker before live trading. Paper-only testing can continue without one.",
+    ))
+
+    has_price_source = bool(deps.YF_AVAILABLE or connected_brokers)
+    checks.append(_preflight_item(
+        "price_source",
+        "Price source",
+        "pass" if has_price_source else "fail",
+        "Broker feed or yfinance is available" if has_price_source else "No broker feed or yfinance source is available",
+        "Install/enable yfinance or connect a broker feed.",
+    ))
+
+    drawdown_doc = await deps.db.settings.find_one({"key": "global_daily_drawdown"}, {"_id": 0})
+    global_daily_drawdown = drawdown_doc.get("value", {"enabled": False, "limit": 3, "type": "percent"}) if drawdown_doc else {"enabled": False, "limit": 3, "type": "percent"}
+    checks.append(_preflight_item(
+        "global_daily_drawdown",
+        "Global daily drawdown",
+        "pass" if global_daily_drawdown.get("enabled") else "warn",
+        (
+            f"Enabled at {global_daily_drawdown.get('limit', 3)}"
+            f"{'%' if global_daily_drawdown.get('type') == 'percent' else ' USD'}"
+        ) if global_daily_drawdown.get("enabled") else "Portfolio-level daily drawdown stop is disabled",
+        "Enable the global daily drawdown circuit breaker in Settings.",
+    ))
+
+    edge_key_doc = await deps.db.settings.find_one({"key": "edge_api_key"}, {"_id": 0})
+    edge_api_key = edge_key_doc.get("value", "") if edge_key_doc else ""
+    checks.append(_preflight_item(
+        "edge_api_key",
+        "Edge API key",
+        "pass" if edge_api_key else "warn",
+        "Configured" if edge_api_key else "Not configured",
+        "Set edge_api_key before enabling Sentinel Edge integrations.",
+    ))
+
+    checks.append(_preflight_item(
+        "alert_webhook_secret",
+        "Alert webhook secret",
+        "pass" if os.getenv("ALERT_WEBHOOK_SECRET") else "warn",
+        "Configured" if os.getenv("ALERT_WEBHOOK_SECRET") else "Not configured",
+        "Set ALERT_WEBHOOK_SECRET before connecting Alertmanager.",
+    ))
+
+    checks.append(_preflight_item(
+        "telegram",
+        "Telegram alerts",
+        "pass" if deps.telegram_service.running else "warn",
+        "Connected" if deps.telegram_service.running else "Not connected",
+        "Configure Telegram in Settings if beta testers need push alerts.",
+    ))
+
+    counts = {
+        "pass": sum(1 for check in checks if check["status"] == "pass"),
+        "warn": sum(1 for check in checks if check["status"] == "warn"),
+        "fail": sum(1 for check in checks if check["status"] == "fail"),
+    }
+    ready_to_trade = counts["fail"] == 0
+    return {
+        "ready_to_trade": ready_to_trade,
+        "summary": counts,
+        "checks": checks,
+        "context": {
+            "running": deps.engine.running,
+            "paused": deps.engine.paused,
+            "market_open": deps.engine.is_market_open(),
+            "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
+            "account_balance": round(account_balance, 2),
+            "allocated": allocated,
+            "available": round(account_balance - allocated, 2),
+            "enabled_tickers": len(enabled_tickers),
+            "connected_brokers": connected_brokers,
+            "global_daily_drawdown": global_daily_drawdown,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

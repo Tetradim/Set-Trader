@@ -1596,6 +1596,66 @@ class TradingEngine:
                 deps.logger.info(f"COMPOUND: {symbol} buy power increased by ${pnl:.2f} to ${doc.get('base_power', 0):.2f}")
         if pnl < 0:
             await self._check_auto_stop(symbol)
+            await self._check_global_daily_drawdown()
+
+    async def _check_global_daily_drawdown(self):
+        cfg_doc = await deps.db.settings.find_one({"key": "global_daily_drawdown"}, {"_id": 0})
+        cfg = cfg_doc.get("value", {}) if cfg_doc else {}
+        if not cfg.get("enabled"):
+            return
+
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        pipeline = [
+            {"$match": {"pnl": {"$lt": 0}, "timestamp": {"$gte": today_start}}},
+            {"$group": {"_id": None, "total_loss": {"$sum": "$pnl"}}},
+        ]
+        result = await deps.db.trades.aggregate(pipeline).to_list(1)
+        daily_loss = abs(result[0]["total_loss"]) if result else 0
+        if daily_loss <= 0:
+            return
+
+        limit = float(cfg.get("limit", 0) or 0)
+        if cfg.get("type") == "percent":
+            balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+            account_balance = float(balance_doc.get("value", 0) if balance_doc else 0)
+            threshold = account_balance * (limit / 100) if account_balance > 0 else 0
+        else:
+            threshold = limit
+
+        if threshold <= 0 or daily_loss < threshold:
+            return
+
+        self.running = False
+        self.paused = True
+        await self.save_state()
+        reason = f"GLOBAL_DAILY_DRAWDOWN: daily loss ${daily_loss:.2f} exceeded limit ${threshold:.2f}"
+        await deps.db.settings.update_one(
+            {"key": "global_daily_drawdown_status"},
+            {"$set": {
+                "value": {
+                    "tripped": True,
+                    "reason": reason,
+                    "daily_loss": round(daily_loss, 2),
+                    "threshold": round(threshold, 2),
+                    "tripped_at": datetime.now(timezone.utc).isoformat(),
+                }
+            }},
+            upsert=True,
+        )
+        await deps.ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": True})
+        await deps.ws_manager.broadcast({
+            "type": "RISK_ALERT",
+            "scope": "global",
+            "code": "GLOBAL_DAILY_DRAWDOWN",
+            "message": reason,
+        })
+        deps.logger.warning(reason)
+        try:
+            await deps.telegram_service._broadcast_alert(
+                f"GLOBAL DAILY DRAWDOWN\n{reason}\nBot stopped. Review risk before restarting."
+            )
+        except Exception:
+            pass
 
     async def _check_auto_stop(self, symbol: str):
         ticker_doc = await deps.db.tickers.find_one({"symbol": symbol}, {"_id": 0})

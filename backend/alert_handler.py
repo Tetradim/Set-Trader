@@ -5,6 +5,10 @@ Receives alerts from Alertmanager and executes corresponding Pulse actions.
 from fastapi import APIRouter, Request
 from typing import Any
 import logging
+import os
+import secrets
+
+from fastapi import Header, HTTPException, status
 
 
 router = APIRouter()
@@ -22,9 +26,18 @@ ALERT_ACTIONS = {
 }
 
 
-@router.post("/api/alerts/webhook")
-async def receive_alert(request: Request):
+@router.post("/alerts/webhook")
+async def receive_alert(request: Request, x_webhook_secret: str = Header("", alias="X-Webhook-Secret")):
     """Receive Alertmanager webhook and dispatch to appropriate handlers."""
+    expected_secret = os.getenv("ALERT_WEBHOOK_SECRET", "")
+    if not expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Alert webhook secret is not configured",
+        )
+    if not secrets.compare_digest(x_webhook_secret, expected_secret):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook secret")
+
     body: dict[str, Any] = await request.json()
     alerts = body.get("alerts", [])
     

@@ -4,9 +4,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 import deps
+from auth import verify_token
 from default_tickers import ensure_default_tickers
 from schemas import TickerConfig
 from strategies import PRESET_STRATEGIES
@@ -16,7 +17,16 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket):
+async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
+        return
+    try:
+        verify_token(token)
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        return
+
     await deps.ws_manager.connect(websocket)
     try:
         tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
@@ -70,14 +80,27 @@ async def ws_endpoint(websocket: WebSocket):
                 if sym:
                     from markets import detect_market_from_symbol
                     market = msg.get("market") or detect_market_from_symbol(sym)
+                    existing = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+                    if existing:
+                        await deps.ws_manager.broadcast({
+                            "type": "TICKER_ERROR",
+                            "error": f"{sym} already exists",
+                            "symbol": sym,
+                        })
+                        continue
                     t = TickerConfig(symbol=sym, base_power=msg.get("base_power", 100.0), market=market)
                     doc = t.model_dump()
                     try:
                         await deps.db.tickers.insert_one(doc)
                         doc.pop("_id", None)
                         await deps.ws_manager.broadcast({"type": "TICKER_ADDED", "ticker": doc})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.exception("Failed to add ticker over WebSocket: %s", sym)
+                        await deps.ws_manager.broadcast({
+                            "type": "TICKER_ERROR",
+                            "error": f"Failed to add {sym}: {e}",
+                            "symbol": sym,
+                        })
 
             elif action == "DELETE_TICKER":
                 sym = msg.get("symbol", "").upper()

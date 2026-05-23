@@ -66,7 +66,7 @@ You agree that you shall NOT, directly or indirectly:
 
 5.1 The Company may collect registration information, usage data, performance metrics, error reports, and other diagnostic data to improve the Software. By accepting this Agreement, you consent to such collection.
 
-5.2 Personal information collected during registration (name, partial SSN, address, email) will be stored securely and used solely for identification, legal compliance, and communication regarding the Software.
+5.2 Personal information collected during registration (name, address, email, and optional phone) will be stored securely and used solely for identification, legal compliance, and communication regarding the Software.
 
 5.3 The Company will not sell your personal information to third parties.
 
@@ -131,7 +131,6 @@ export function BetaRegistrationModal({ onRegistered }: Props) {
     last_name: '',
     email: '',
     phone: '',
-    ssn_last4: '',
     address_street: '',
     address_city: '',
     address_state: '',
@@ -156,10 +155,6 @@ export function BetaRegistrationModal({ onRegistered }: Props) {
     }
     if (!form.first_name || !form.last_name || !form.email) {
       setError('First name, last name, and email are required.');
-      return;
-    }
-    if (form.ssn_last4.length !== 4 || !/^\d{4}$/.test(form.ssn_last4)) {
-      setError('Last 4 of SSN must be exactly 4 digits.');
       return;
     }
     if (!form.address_street || !form.address_city || !form.address_state || !form.address_zip) {
@@ -214,17 +209,6 @@ export function BetaRegistrationModal({ onRegistered }: Props) {
             <Field label="Email Address *" testId="beta-email" type="email" value={form.email} onChange={(v) => update('email', v)} />
             <Field label="Phone (optional)" testId="beta-phone" type="tel" value={form.phone} onChange={(v) => update('phone', v)} />
           </div>
-
-          {/* SSN */}
-          <Field
-            label="Last 4 of SSN *"
-            testId="beta-ssn4"
-            value={form.ssn_last4}
-            maxLength={4}
-            pattern="\d{4}"
-            placeholder="0000"
-            onChange={(v) => { if (/^\d{0,4}$/.test(v)) update('ssn_last4', v); }}
-          />
 
           {/* Address */}
           <Field label="Street Address *" testId="beta-street" value={form.address_street} onChange={(v) => update('address_street', v)} />

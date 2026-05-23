@@ -86,6 +86,15 @@ async def update_settings(body: SettingsUpdate):
             "allocated": allocated,
             "available": round(body.account_balance - allocated, 2),
         })
+    if body.global_daily_drawdown is not None:
+        drawdown_doc = body.global_daily_drawdown.model_dump()
+        if drawdown_doc["limit"] < 0 or drawdown_doc["limit"] > 100_000_000:
+            raise HTTPException(400, "Global daily drawdown limit is outside the allowed range.")
+        await deps.db.settings.update_one(
+            {"key": "global_daily_drawdown"},
+            {"$set": {"value": drawdown_doc}},
+            upsert=True,
+        )
     if body.telegram:
         doc = body.telegram.model_dump()
         await deps.db.settings.update_one({"key": "telegram"}, {"$set": {"value": doc}}, upsert=True)
@@ -106,6 +115,7 @@ async def get_settings():
     dec_doc = await deps.db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
     cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
     balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    drawdown_doc = await deps.db.settings.find_one({"key": "global_daily_drawdown"}, {"_id": 0})
     
     # Pattern detection settings
     pattern_enabled_doc = await deps.db.settings.find_one({"key": "pattern_detection_enabled"}, {"_id": 0})
@@ -130,6 +140,7 @@ async def get_settings():
         "account_balance": round(account_balance, 2),
         "allocated": round(allocated, 2),
         "available": round(account_balance - allocated, 2),
+        "global_daily_drawdown": drawdown_doc.get("value", {"enabled": False, "limit": 3, "type": "percent"}) if drawdown_doc else {"enabled": False, "limit": 3, "type": "percent"},
         # Pattern detection settings
         "pattern_detection_enabled": pattern_enabled_doc.get("value", True) if pattern_enabled_doc else True,
         "pattern_min_confidence": pattern_min_conf_doc.get("value", 0.65) if pattern_min_conf_doc else 0.65,

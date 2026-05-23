@@ -12,28 +12,21 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import hashlib
+from runtime_secrets import get_or_create_secret
 
 logger = logging.getLogger("SentinelPulse")
 
 # Generate a secure key from the environment or create a new one
 def _get_encryption_key() -> bytes:
     """Get or create a secure encryption key."""
-    key_env = os.environ.get("CREDENTIAL_KEY")
-    if key_env:
-        # Use the environment key to derive a proper Fernet key
-        # PBKDF2 with high iterations for security
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=b"sentinel_pulse_salt_v1",  # Static salt for deterministic key derivation
-            iterations=480000,
-        )
-        key = base64.urlsafe_b64encode(kdf.derive(key_env.encode()))
-        return key
-    else:
-        # Generate a new random key - this should be stored securely!
-        logger.warning("No CREDENTIAL_KEY set - generating random key. Set CREDENTIAL_KEY env var for production!")
-        return Fernet.generate_key()
+    key_env = get_or_create_secret("CREDENTIAL_KEY")
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"sentinel_pulse_salt_v1",
+        iterations=480000,
+    )
+    return base64.urlsafe_b64encode(kdf.derive(key_env.encode()))
 
 # Initialize Fernet with the derived key
 _FERNET_KEY = _get_encryption_key()

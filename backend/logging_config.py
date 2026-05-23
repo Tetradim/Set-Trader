@@ -4,7 +4,7 @@ Adds:
 - Correlation IDs for request tracing
 - Structured JSON logging
 - Error context enrichment
-- Colored console output in dev
+- Colored console output
 - File logging with centralized setup
 """
 import json
@@ -116,7 +116,7 @@ def setup_logging(
     is_frozen = getattr(sys, 'frozen', False)
     
     # Determine log path - use absolute path for reliability
-    # In dev: logs/sentinel_pulse.log (relative to where app is)
+    # In local source runs: logs/sentinel_pulse.log (relative to where app is)
     # In frozen: sentinel_pulse.log in CWD where exe was launched
     log_path = Path(log_file)
     if is_frozen:

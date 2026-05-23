@@ -3,7 +3,6 @@ Also provides volume tracking and z-score calculations for signal analysis.
 """
 import asyncio
 import math
-import random
 from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -44,17 +43,6 @@ class PriceMetrics:
         total = self.yfinance_success + self.yfinance_failure
         return self.yfinance_success / total if total > 0 else 0.0
 
-
-# Demo tickers for testing without real data
-DEMO_TICKERS = {
-    "AAPL": {"price": 178.50, "change": 2.35, "volume": 52340000},
-    "GOOGL": {"price": 141.20, "change": -0.85, "volume": 21500000},
-    "MSFT": {"price": 378.90, "change": 4.12, "volume": 18900000},
-    "TSLA": {"price": 248.75, "change": -3.25, "volume": 98700000},
-    "NVDA": {"price": 875.30, "change": 12.50, "volume": 45600000},
-    "SPY": {"price": 502.15, "change": 1.80, "volume": 78500000},
-    "QQQ": {"price": 438.60, "change": 2.25, "volume": 42100000},
-}
 
 class PriceService:
     def __init__(self):
@@ -146,8 +134,7 @@ class PriceService:
 
         if cached and last and (now - last).total_seconds() < 15:
             self.record_cache_hit(symbol)
-            noise = cached["price"] * random.uniform(-0.001, 0.001)
-            return round(cached["price"] + noise, 2)
+            return round(cached["price"], 2)
         
         # Rate limit yfinance calls
         await self._rate_limit_yfinance(symbol)
@@ -170,19 +157,13 @@ class PriceService:
                 deps.logger.warning(f"yfinance error for {symbol}: {e}")
                 self.record_yfinance_failure(symbol, str(e))
 
-        # Fallback to cached with drift
+        # Fallback to the most recent real cached quote.
         if cached:
-            drift = cached["price"] * random.uniform(-0.005, 0.005)
-            new_price = max(0.01, cached["price"] + drift)
-            self._cache[symbol] = {"price": round(new_price, 2)}
             self._price_source[symbol] = "cache"
-            return round(new_price, 2)
+            return round(cached["price"], 2)
 
-        # Last resort: random price
-        base = random.uniform(50, 500)
-        self._cache[symbol] = {"price": round(base, 2)}
-        self._price_source[symbol] = "simulated"
-        return round(base, 2)
+        self._price_source[symbol] = "unavailable"
+        raise RuntimeError(f"No live or cached price available for {symbol}")
     
     async def _rate_limit_yfinance(self, symbol: str):
         """Apply rate limiting to yfinance calls per symbol."""

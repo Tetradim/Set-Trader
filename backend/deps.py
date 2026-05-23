@@ -12,7 +12,7 @@ from pathlib import Path
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-# Find .env in bundled app or development
+# Find .env in bundled app or source checkout
 if getattr(sys, 'frozen', False):
     # Running as bundled PyInstaller app
     BASE_DIR = Path(sys._MEIPASS)
@@ -33,13 +33,13 @@ _level_map = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.W
 logging.basicConfig(level=_level_map.get(_log_level, logging.INFO), format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("SentinelPulse")
 
-# MongoDB - lazy initialization with optional connection
+# MongoDB - lazy initialization; application startup requires a successful ping.
 _mongo_client = None
 _db = None
 _mongo_connecting = False
 
 def _ensure_db():
-    """Lazily connect to MongoDB - returns None if not available."""
+    """Lazily create the MongoDB client."""
     global _mongo_client, _db, _mongo_connecting
     if _db is not None:
         return _db
@@ -96,7 +96,7 @@ try:
     import yfinance as yf  # noqa: F401
     YF_AVAILABLE = True
 except ImportError:
-    logger.warning("yfinance not installed. Using simulated prices only.")
+    logger.warning("yfinance not installed. Broker feeds or cached prices are required.")
 
 # Telegram library
 TG_AVAILABLE = False

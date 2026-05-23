@@ -82,7 +82,6 @@ def send_registration_email(reg: dict) -> bool:
       <tr><td style="padding: 6px; color: #8b949e;">Name</td><td style="padding: 6px;">{reg.get('first_name', '')} {reg.get('last_name', '')}</td></tr>
       <tr><td style="padding: 6px; color: #8b949e;">Email</td><td style="padding: 6px;">{reg.get('email', '')}</td></tr>
       <tr><td style="padding: 6px; color: #8b949e;">Phone</td><td style="padding: 6px;">{reg.get('phone', 'N/A')}</td></tr>
-      <tr><td style="padding: 6px; color: #8b949e;">SSN Last 4</td><td style="padding: 6px;">****{reg.get('ssn_last4', '')}</td></tr>
       <tr><td style="padding: 6px; color: #8b949e;">Address</td><td style="padding: 6px;">{reg.get('address_street', '')}, {reg.get('address_city', '')}, {reg.get('address_state', '')} {reg.get('address_zip', '')}, {reg.get('address_country', '')}</td></tr>
       <tr><td style="padding: 6px; color: #8b949e;">Jurisdiction</td><td style="padding: 6px;">{reg.get('jurisdiction', '')}</td></tr>
       <tr><td style="padding: 6px; color: #8b949e;">Agreement Version</td><td style="padding: 6px;">{reg.get('agreement_version', '')}</td></tr>

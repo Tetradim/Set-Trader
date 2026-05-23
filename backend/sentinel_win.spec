@@ -52,7 +52,7 @@ a = Analysis(
         ("email_service.py",   "."),
         ("ws_manager.py",      "."),
         ("telemetry.py",       "."),
-        # Env — use .env if exists (created by workflow for demo mode)
+        # Env - use .env if exists (created by workflow for packaged builds)
         (".env", "."),
         *pymongo_d,
         *bson_d,

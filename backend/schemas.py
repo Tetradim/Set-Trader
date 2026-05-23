@@ -168,12 +168,19 @@ class TelegramConfig(BaseModel):
     chat_ids: List[str] = []
 
 
+class GlobalDailyDrawdownConfig(BaseModel):
+    enabled: bool = False
+    limit: float = Field(3.0, ge=0)
+    type: str = Field("percent", pattern="^(percent|cash)$")
+
+
 class SettingsUpdate(BaseModel):
     telegram: Optional[TelegramConfig] = None
     simulate_24_7: Optional[bool] = None
     increment_step: Optional[float] = None
     decrement_step: Optional[float] = None
     account_balance: Optional[float] = None
+    global_daily_drawdown: Optional[GlobalDailyDrawdownConfig] = None
     market_hours_only: Optional[bool] = None
     # Auto mode switching
     live_during_market_hours: Optional[bool] = None
@@ -189,12 +196,11 @@ class BetaRegistration(BaseModel):
     last_name: str
     email: str
     phone: str = ""
-    ssn_last4: str
-    address_street: str
-    address_city: str
-    address_state: str
-    address_zip: str
-    address_country: str
+    address_street: str = ""
+    address_city: str = ""
+    address_state: str = ""
+    address_zip: str = ""
+    address_country: str = ""
     agreement_accepted: bool
     agreement_version: str = "1.0"
     jurisdiction: str = ""

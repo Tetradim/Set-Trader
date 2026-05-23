@@ -1,4 +1,5 @@
 """Notification management routes."""
+import logging
 from typing import Optional, List
 from fastapi import APIRouter, Query, Body
 from pydantic import BaseModel
@@ -129,10 +130,18 @@ async def test_notification_channel(req: TestNotificationRequest):
         logger.error(f"Test notification error: {e}")
 
     if success:
-        await audit_service.log_event("TEST_NOTIFICATION_SENT", success=True, channel=channel)
+        await audit_service.log_setting_change(
+            "test_notification",
+            None,
+            {"channel": channel, "success": True},
+        )
         return {"ok": True, "message": f"Test notification sent to {channel}"}
     else:
-        await audit_service.log_event("TEST_NOTIFICATION_FAILED", success=False, channel=channel, error=error)
+        await audit_service.log_setting_change(
+            "test_notification",
+            None,
+            {"channel": channel, "success": False, "error": error},
+        )
         return {"ok": False, "error": error}
 
 
