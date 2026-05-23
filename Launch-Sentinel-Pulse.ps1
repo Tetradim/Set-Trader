@@ -1,134 +1,214 @@
 # Sentinel Pulse Launcher
-# Starts MongoDB + Sentinel Pulse with a single click
+# Starts MongoDB and Sentinel Pulse from an installed package or source checkout.
 
 param(
-    [string]$MongoPath = "C:\Program Files\MongoDB\Server\8.2\bin",
-    [string]$DataPath = "C:\data\db",
-    [string]$LogPath = "logs",
-    [int]$Port = 27017,
-    [int]$AppPort = 8002
+    [string]$MongoPath = "",
+    [string]$DataPath = "",
+    [string]$LogPath = "",
+    [string]$SettingsPath = "",
+    [int]$MongoPort = 27017,
+    [int]$AppPort = 8002,
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
+$ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
 
-function Write-Step([string]$Message, [string]$Status = "OK") {
-    $colors = @{
-        "OK" = "Green"
-        "SKIP" = "Yellow"
-        "FAIL" = "Red"
+if (-not $DataPath) { $DataPath = Join-Path $ProjectRoot "data\db" }
+if (-not $LogPath) { $LogPath = Join-Path $ProjectRoot "logs" }
+if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-settings.ini" }
+
+$OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
+$LogFile = Join-Path $LogPath "launcher.log"
+
+function Write-Status {
+    param([string]$Message, [string]$Level = "INFO")
+    $color = switch ($Level) {
+        "OK" { "Green" }
+        "WARN" { "Yellow" }
+        "ERROR" { "Red" }
+        default { "Cyan" }
     }
-    $color = $colors[$Status]
-    Write-Host "[$Status] $Message" -ForegroundColor $color
+    Write-Host "[$Level] $Message" -ForegroundColor $color
+    if (Test-Path $LogPath) {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+        Add-Content -Path $LogFile -Value "$timestamp [$Level] $Message" -Encoding UTF8
+    }
 }
 
-# Banner
-Write-Host ""
-Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "  Sentinel Pulse v1.0.0 - Launcher" -ForegroundColor Cyan
-Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host ""
-
-# ---------------------------------------------------
-# 1. Check MongoDB
-# ---------------------------------------------------
-Write-Step "Checking MongoDB..." "OK"
-$mongoExe = Join-Path $MongoPath "mongod.exe"
-if (-not (Test-Path $mongoExe)) {
-    Write-Host ""
-    Write-Host "ERROR: MongoDB not found at:" -ForegroundColor Red
-    Write-Host "  $mongoExe" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Please install MongoDB Server 8.2 from:" -ForegroundColor Yellow
-    Write-Host "  https://www.mongodb.com/try/download/community" -ForegroundColor Yellow
-    Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+function Test-PortOpen {
+    param([int]$Port)
+    try {
+        $client = New-Object Net.Sockets.TcpClient
+        $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        $connected = $async.AsyncWaitHandle.WaitOne(750, $false)
+        if ($connected) { $client.EndConnect($async) }
+        $client.Close()
+        return $connected
+    } catch {
+        return $false
+    }
 }
 
-# ---------------------------------------------------
-# 2. Create directories
-# ---------------------------------------------------
-Write-Step "Preparing directories..." "OK"
-if (-not (Test-Path $DataPath)) {
+function Wait-Port {
+    param([int]$Port, [int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-PortOpen -Port $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Find-Mongo {
+    if ($MongoPath) {
+        $candidate = Join-Path $MongoPath "mongod.exe"
+        if (Test-Path $candidate) { return $candidate }
+        if (Test-Path $MongoPath) { return $MongoPath }
+    }
+
+    $candidates = @(
+        "C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe",
+        "C:\Program Files\MongoDB\Server\8.0\bin\mongod.exe",
+        "C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe",
+        "C:\Program Files\MongoDB\Server\6.0\bin\mongod.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+
+    $cmd = Get-Command mongod.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Find-Python {
+    $candidates = @(
+        (Join-Path $ProjectRoot "backend\.venv\Scripts\python.exe"),
+        (Join-Path $ProjectRoot "backend\venv\Scripts\python.exe"),
+        (Join-Path $ProjectRoot ".venv\Scripts\python.exe")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+
+    foreach ($name in @("python.exe", "py.exe")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+
+    return $null
+}
+
+function Start-OwnedProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory
+    )
+    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -PassThru -WindowStyle Hidden
+    $OwnedProcesses.Add($process)
+    return $process
+}
+
+function Stop-OwnedProcesses {
+    for ($i = $OwnedProcesses.Count - 1; $i -ge 0; $i--) {
+        $process = $OwnedProcesses[$i]
+        try {
+            $current = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
+            if ($current) {
+                Write-Status "Stopping process $($current.ProcessName) ($($current.Id))" "INFO"
+                Stop-Process -Id $current.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+    }
+}
+
+try {
     New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
-}
-if (-not (Test-Path $LogPath)) {
     New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
-}
 
-# ---------------------------------------------------
-# 3. Check if MongoDB already running
-# ---------------------------------------------------
-Write-Step "Checking MongoDB status..." "OK"
-$connection = Test-NetConnection -ComputerName "localhost" -Port $Port -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-if ($connection.TcpTestSucceeded) {
-    Write-Step "MongoDB already running on port $Port" "SKIP"
-    $mongoRunning = $true
-} else {
-    Write-Step "Starting MongoDB..." "OK"
-    $mongoLog = Join-Path $LogPath "mongod.log"
-    
-    # Start MongoDB as background process
-    Start-Process -FilePath $mongoExe -ArgumentList "--dbpath", $DataPath, "--port", $Port, "--logpath", $mongoLog, "--quiet" -NoNewWindow -PassThru | Out-Null
-    
-    # Wait for startup
-    Start-Sleep -Seconds 3
-    
-    # Verify
-    $connection = Test-NetConnection -ComputerName "localhost" -Port $Port -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-    if ($connection.TcpTestSucceeded) {
-        Write-Step "MongoDB started on port $Port" "OK"
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  Sentinel Pulse Launcher" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Status "Project root: $ProjectRoot"
+    Write-Status "Logs: $LogPath"
+
+    if (-not (Test-PortOpen -Port $MongoPort)) {
+        $mongoExe = Find-Mongo
+        if (-not $mongoExe) {
+            throw "MongoDB was not found. Install MongoDB Community Server or pass -MongoPath."
+        }
+        Write-Status "Starting MongoDB on port $MongoPort"
+        $mongoLog = Join-Path $LogPath "mongod.log"
+        Start-OwnedProcess -FilePath $mongoExe -ArgumentList @("--dbpath", $DataPath, "--port", "$MongoPort", "--logpath", $mongoLog, "--quiet") -WorkingDirectory $ProjectRoot | Out-Null
+        if (-not (Wait-Port -Port $MongoPort -Seconds 20)) {
+            throw "MongoDB did not open port $MongoPort. Check $mongoLog."
+        }
+        Write-Status "MongoDB is ready" "OK"
     } else {
-        Write-Host "WARNING: Could not verify MongoDB started" -ForegroundColor Yellow
+        Write-Status "MongoDB already running on port $MongoPort" "WARN"
     }
-}
 
-# ---------------------------------------------------
-# 4. Check backend dependencies
-# ---------------------------------------------------
-Write-Step "Checking backend dependencies..." "OK"
-$requirements = "backend\requirements.txt"
-if (-not (Test-Path $requirements)) {
-    Write-Host "WARNING: $requirements not found" -ForegroundColor Yellow
-} else {
-    # Check if virtual env exists
-    $venv = "backend\venv"
-    if (-not (Test-Path $venv)) {
-        Write-Host "NOTE: No virtual environment - will use system Python" -ForegroundColor Yellow
+    if (-not (Test-PortOpen -Port $AppPort)) {
+        $rootExe = Join-Path $ProjectRoot "SentinelPulse.exe"
+        $backendExe = Join-Path $ProjectRoot "backend\SentinelPulse.exe"
+        $serverPy = Join-Path $ProjectRoot "backend\server.py"
+
+        if (Test-Path $rootExe) {
+            Write-Status "Starting packaged SentinelPulse.exe"
+            Start-OwnedProcess -FilePath $rootExe -ArgumentList @() -WorkingDirectory $ProjectRoot | Out-Null
+        } elseif (Test-Path $backendExe) {
+            Write-Status "Starting backend packaged SentinelPulse.exe"
+            Start-OwnedProcess -FilePath $backendExe -ArgumentList @() -WorkingDirectory (Split-Path -Parent $backendExe) | Out-Null
+        } elseif (Test-Path $serverPy) {
+            $python = Find-Python
+            if (-not $python) {
+                throw "Python was not found. Install Python 3.11+ or create backend\.venv."
+            }
+            Write-Status "Starting backend server on port $AppPort"
+            $env:PORT = "$AppPort"
+            Start-OwnedProcess -FilePath $python -ArgumentList @("server.py") -WorkingDirectory (Join-Path $ProjectRoot "backend") | Out-Null
+        } else {
+            throw "No Sentinel Pulse server was found. Expected SentinelPulse.exe or backend\server.py."
+        }
+
+        if (-not (Wait-Port -Port $AppPort -Seconds 30)) {
+            throw "Sentinel Pulse did not open port $AppPort. Check $LogFile and backend logs."
+        }
+        Write-Status "Sentinel Pulse is ready on port $AppPort" "OK"
+    } else {
+        Write-Status "Sentinel Pulse already running on port $AppPort" "WARN"
     }
+
+    $url = "http://localhost:$AppPort"
+    if (-not $NoBrowser) {
+        Write-Status "Opening $url"
+        Start-Process $url | Out-Null
+    }
+
+    Write-Host ""
+    Write-Host "Ready: $url" -ForegroundColor Green
+    Write-Host "Close this window or press Ctrl+C to stop processes started by this launcher." -ForegroundColor Gray
+    Write-Host ""
+
+    while ($true) {
+        foreach ($process in @($OwnedProcesses)) {
+            if ($process.HasExited) {
+                throw "Process $($process.Id) exited unexpectedly."
+            }
+        }
+        Start-Sleep -Seconds 1
+    }
+} catch {
+    Write-Status $_.Exception.Message "ERROR"
+    exit 1
+} finally {
+    Stop-OwnedProcesses
 }
-
-# ---------------------------------------------------
-# 5. Start Sentinel Pulse
-# ---------------------------------------------------
-Write-Step "Starting Sentinel Pulse..." "OK"
-
-# Check if already running
-$appRunning = Test-NetConnection -ComputerName "localhost" -Port $AppPort -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
-if ($appRunning.TcpTestSucceeded) {
-    Write-Step "Sentinel Pulse already running on port $AppPort" "SKIP"
-} else {
-    # Start backend server
-    $serverCmd = "cd backend; uvicorn server:app --host 0.0.0.0 --port $AppPort"
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $serverCmd -NoNewWindow -PassThru | Out-Null
-    Start-Sleep -Seconds 2
-    Write-Step "Sentinel Pulse API started on port $AppPort" "OK"
-}
-
-# ---------------------------------------------------
-# 6. Open browser
-# ---------------------------------------------------
-Write-Host ""
-Write-Host "==================================================" -ForegroundColor Green
-Write-Host "  Ready!" -ForegroundColor Green
-Write-Host "==================================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "Dashboard: http://localhost:3000" -ForegroundColor Cyan
-Write-Host "API Docs:   http://localhost:$AppPort/docs" -ForegroundColor Gray
-Write-Host ""
-
-Start-Sleep -Seconds 2
-Start-Process "http://localhost:$AppPort"
-
-Write-Host "Press any key to exit..." -ForegroundColor Gray
-Read-Host ""
