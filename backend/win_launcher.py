@@ -46,8 +46,25 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = Path(__file__).parent
 
+def get_default_mongo_data_dir() -> Path:
+    """Return the machine-level MongoDB dbpath used by the Windows launcher."""
+    drive = os.environ.get("SystemDrive", "C:")
+    return Path(f"{drive}\\") / "data" / "db"
+
+
+def get_log_path():
+    """Return the easy-access desktop log used for launcher and backend logs."""
+    desktop = Path.home() / "Desktop"
+    try:
+        desktop.mkdir(parents=True, exist_ok=True)
+        return desktop / "Sentinel-Pulse.log"
+    except Exception:
+        return BASE_DIR / "Sentinel-Pulse.log"
+
+
 # DATA_DIR for MongoDB database storage
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = get_default_mongo_data_dir()
+os.environ.setdefault("LOG_FILE", str(get_log_path()))
 
 sys.path.insert(0, str(BASE_DIR))
 
@@ -67,9 +84,6 @@ def _get_stream_handler():
     handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
     return handler
 
-def get_log_path():
-    return BASE_DIR / "sentinel_pulse.log"
-
 logging.basicConfig(
     level=logging.INFO, 
     format="%(asctime)s %(message)s",
@@ -82,8 +96,7 @@ logger = logging.getLogger("SentinelPulse")
 
 # Simple file logger for debugging packaged app (on desktop for easy access)
 try:
-    desktop = Path.home() / "Desktop"
-    log_file = desktop / "sentinel_pulse.log"
+    log_file = get_log_path()
     
     # Use utf-8-sig to add BOM for Windows Notepad compatibility
     fh = logging.FileHandler(str(log_file), encoding="utf-8-sig")
@@ -282,19 +295,24 @@ def start_mongodb_path(mongo_exe: Path):
         logger.info("MongoDB already running on port 27017")
         return
     
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    logger.info("Preparing MongoDB working directory: %s", mongo_exe.parent)
+    time.sleep(3)
     logger.info("Starting MongoDB from: %s", mongo_exe)
     _mongo_process = subprocess.Popen(
-        [str(mongo_exe), "--dbpath", str(DATA_DIR / "db")],
+        [str(mongo_exe), "--dbpath", str(DATA_DIR)],
+        cwd=str(mongo_exe.parent),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     )
-    # Wait for MongoDB to start
-    for _ in range(20):
+    # Wait for MongoDB to start; check every 3 seconds, 3 times.
+    for attempt in range(1, 4):
+        time.sleep(3)
         if is_port_in_use(27017):
-            logger.info("MongoDB started")
+            logger.info("MongoDB started on check %d of 3", attempt)
             return
-        time.sleep(0.5)
+        logger.warning("MongoDB port 27017 not open yet; check %d of 3", attempt)
     logger.error("MongoDB failed to start")
 
 

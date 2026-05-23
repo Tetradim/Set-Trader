@@ -15,12 +15,16 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
 
-if (-not $DataPath) { $DataPath = Join-Path $ProjectRoot "data\db" }
-if (-not $LogPath) { $LogPath = Join-Path $ProjectRoot "logs" }
+$DesktopPath = [Environment]::GetFolderPath("Desktop")
+if (-not $DesktopPath) { $DesktopPath = Join-Path $HOME "Desktop" }
+
+if (-not $DataPath) { $DataPath = Join-Path $env:SystemDrive "data\db" }
+if (-not $LogPath) { $LogPath = $DesktopPath }
 if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-settings.ini" }
 
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
-$LogFile = Join-Path $LogPath "launcher.log"
+$LogFile = Join-Path $LogPath "Sentinel-Pulse.log"
+$TranscriptStarted = $false
 $serverWillOpenBrowser = $false
 $BrowserProcess = $null
 
@@ -59,6 +63,19 @@ function Wait-Port {
     while ((Get-Date) -lt $deadline) {
         if (Test-PortOpen -Port $Port) { return $true }
         Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Wait-PortAttempts {
+    param([int]$Port, [int]$Attempts = 3, [int]$IntervalSeconds = 3)
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        Start-Sleep -Seconds $IntervalSeconds
+        if (Test-PortOpen -Port $Port) {
+            Write-Status "Port $Port opened on check $attempt of $Attempts" "OK"
+            return $true
+        }
+        Write-Status "Port $Port not open yet; check $attempt of $Attempts" "WARN"
     }
     return $false
 }
@@ -186,6 +203,12 @@ function Stop-BrowserWindow {
 try {
     New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
     New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
+    try {
+        Start-Transcript -Path $LogFile -Append | Out-Null
+        $TranscriptStarted = $true
+    } catch {
+        $TranscriptStarted = $false
+    }
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
@@ -193,17 +216,22 @@ try {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Status "Project root: $ProjectRoot"
-    Write-Status "Logs: $LogPath"
+    Write-Status "App log: $LogFile"
+    Write-Status "MongoDB data path: $DataPath"
+    $env:LOG_FILE = $LogFile
 
     if (-not (Test-PortOpen -Port $MongoPort)) {
         $mongoExe = Find-Mongo
         if (-not $mongoExe) {
             throw "MongoDB was not found. Install MongoDB Community Server or pass -MongoPath."
         }
+        $mongoBin = Split-Path -Parent $mongoExe
+        Write-Status "Preparing MongoDB working directory: $mongoBin"
+        Start-Sleep -Seconds 3
         Write-Status "Starting MongoDB on port $MongoPort"
-        $mongoLog = Join-Path $LogPath "mongod.log"
-        Start-OwnedProcess -FilePath $mongoExe -ArgumentList @("--dbpath", $DataPath, "--port", "$MongoPort", "--logpath", $mongoLog, "--quiet") -WorkingDirectory $ProjectRoot | Out-Null
-        if (-not (Wait-Port -Port $MongoPort -Seconds 20)) {
+        $mongoLog = Join-Path $LogPath "Sentinel-Pulse-MongoDB.log"
+        Start-OwnedProcess -FilePath $mongoExe -ArgumentList @("--dbpath", $DataPath, "--port", "$MongoPort", "--logpath", $mongoLog, "--quiet") -WorkingDirectory $mongoBin | Out-Null
+        if (-not (Wait-PortAttempts -Port $MongoPort -Attempts 3 -IntervalSeconds 3)) {
             throw "MongoDB did not open port $MongoPort. Check $mongoLog."
         }
         Write-Status "MongoDB is ready" "OK"
@@ -272,4 +300,7 @@ try {
 } finally {
     Stop-BrowserWindow
     Stop-OwnedProcesses
+    if ($TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+    }
 }

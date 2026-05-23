@@ -48,6 +48,8 @@ class SignalRequest(BaseModel):
     confidence: float = 1.0
     bracket: Optional[dict] = None
     decision: str = "hold"  # Legacy field
+    price: Optional[float] = None
+    trailing_percent: Optional[float] = None
     
     # Signal fields
     rsi: Optional[float] = None
@@ -66,6 +68,7 @@ class SignalResponse(BaseModel):
     action: str = "signal"
     decision: str = "hold"
     confidence: float = 1.0
+    order_id: Optional[str] = None
     message: str = ""
 
 
@@ -100,13 +103,19 @@ def _check_rate_limit(client_ip: str) -> bool:
     return True
 
 
-async def validate_api_key(x_api_key: Optional[str] = Header(None)) -> bool:
-    """Validate the Edge integration API key."""
+async def validate_api_key(
+    x_api_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+) -> bool:
+    """Validate the Edge integration API key from X-API-Key or Authorization."""
     expected = await deps.db.settings.find_one({"key": "edge_api_key"}, {"_id": 0})
     expected_key = expected.get("value", "") if expected else ""
     if not expected_key:
         raise HTTPException(503, "Edge API key is not configured")
-    if not x_api_key or not secrets.compare_digest(x_api_key, expected_key):
+    provided_key = x_api_key or ""
+    if not provided_key and authorization:
+        provided_key = authorization.removeprefix("Bearer ").strip()
+    if not provided_key or not secrets.compare_digest(provided_key, expected_key):
         raise HTTPException(401, "Invalid API key")
     return True
 
@@ -131,16 +140,21 @@ class TrailingRequest(BaseModel):
     trailing_percent: float
 
 
-class SignalResponse(BaseModel):
-    """Response for signal submission."""
-    status: str
-    symbol: str
-    action: str
-    order_id: Optional[str] = None
-    message: str
-
-
 # --- Endpoints ---
+
+
+@router.get("/status", dependencies=[Depends(validate_api_key)])
+async def get_edge_status():
+    """Return Edge communication health for setup and beta diagnostics."""
+    expected = await deps.db.settings.find_one({"key": "edge_api_key"}, {"_id": 0})
+    expected_key = expected.get("value", "") if expected else ""
+    return {
+        "api_key_configured": bool(expected_key),
+        "signals_cached": len(_signal_cache),
+        "max_retry_attempts": edge_client.max_retry_attempts,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mongo": edge_client.status_snapshot(),
+    }
 
 
 @router.post("/tickers/{symbol}/decision", dependencies=[Depends(validate_api_key)])
@@ -251,9 +265,10 @@ async def post_decision(symbol: str, body: DecisionRequest):
                 current_price=current_price,
                 trading_mode=trading_mode,
             )
-            await edge_client.send_position_update(pos_update)
-        except Exception:
-            pass
+            result["edge_update_sent"] = await edge_client.send_position_update(pos_update)
+        except Exception as e:
+            result["edge_update_sent"] = False
+            result["edge_update_error"] = str(e)
     
     return result
 
@@ -299,9 +314,23 @@ async def submit_signal(symbol: str, body: SignalRequest) -> SignalResponse:
     
     # Legacy action handling - convert to decision
     if body.action.lower() not in ("signal", "hold"):
-        decision_map = {"buy": "buy", "sell": "sell", "stop": "stop"}
-        body.decision = decision_map.get(body.action.lower(), "hold")
-        return await post_decision(symbol, body)
+        decision_map = {
+            "buy": "buy",
+            "sell": "sell",
+            "stop": "stop",
+            "enable_trailing_stop": "enable_trailing_stop",
+            "trailing": "enable_trailing_stop",
+            "stop_buying": "stop_buying",
+            "emergency_stop": "emergency_stop",
+        }
+        decision_body = DecisionRequest(
+            symbol=sym,
+            decision=decision_map.get(body.action.lower(), "hold"),
+            price=body.price,
+            trailing_percent=body.trailing_percent,
+            confidence=body.confidence,
+        )
+        return await post_decision(symbol, decision_body)
     
     # Update signal cache for Prometheus metrics
     sig_data = {

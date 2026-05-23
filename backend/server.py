@@ -271,7 +271,12 @@ async def lifespan(application: FastAPI):
         deps.logger.warning(f"Broker auto-connect failed: {e}")
 
     # Initialize Edge MongoDB client (for Edge ↔ Pulse integration)
-    from shared import init_edge_client, start_edge_heartbeat
+    from shared import edge_client, init_edge_client, start_edge_heartbeat
+    try:
+        edge_retry_doc = await deps.db.settings.find_one({"key": "edge_retry_max_attempts"}, {"_id": 0})
+        edge_client.set_max_retry_attempts(edge_retry_doc.get("value", 10) if edge_retry_doc else 10)
+    except Exception as e:
+        deps.logger.warning(f"Failed to load Edge retry settings: {e}")
     await init_edge_client()
     await start_edge_heartbeat()
     
@@ -433,17 +438,21 @@ api.include_router(portfolio_router, dependencies=[Depends(get_current_user)])
 app.include_router(api)
 
 # --- Log streaming endpoints ---
+def get_runtime_log_path() -> Path:
+    """Return the active runtime log path used by launcher/backend logging."""
+    configured = os.getenv("LOG_FILE")
+    if configured:
+        return Path(configured)
+    if getattr(sys, 'frozen', False):
+        return Path.home() / "Desktop" / "Sentinel-Pulse.log"
+    return Path("logs") / "sentinel_pulse.log"
+
+
 @app.get("/api/logs/stream")
 async def stream_logs():
     """Stream logs in real-time via SSE."""
     import asyncio
-    from pathlib import Path
-    
-    # Always use desktop path for packaged app
-    if getattr(sys, 'frozen', False):
-        log_path = Path.home() / "Desktop" / "sentinel_pulse.log"
-    else:
-        log_path = Path("logs") / "sentinel_pulse.log"
+    log_path = get_runtime_log_path()
     
     if not log_path.exists():
         return {"error": "Log file not found"}
@@ -466,13 +475,7 @@ async def stream_logs():
 async def recent_logs(lines: int = 200, level: str = "DEBUG"):
     """Get recent log entries."""
     import json
-    from pathlib import Path
-    
-    # Always use desktop path for packaged app
-    if getattr(sys, 'frozen', False):
-        log_path = Path.home() / "Desktop" / "sentinel_pulse.log"
-    else:
-        log_path = Path("logs") / "sentinel_pulse.log"
+    log_path = get_runtime_log_path()
     
     if not log_path.exists():
         return {"logs": []}
@@ -497,8 +500,77 @@ async def recent_logs(lines: int = 200, level: str = "DEBUG"):
 async def log_client_error(request: Request):
     """Receive frontend errors."""
     body = await request.json()
-    logger.error("Frontend error: %s", body.get("message"), extra={"extra": body})
+    event = sanitize_client_log_payload(body)
+    logger.error("Frontend event error: %s", event.get("message"), extra={"extra_fields": event})
     return {"ok": True}
+
+
+SENSITIVE_CLIENT_LOG_KEYS = {
+    "authorization",
+    "api_key",
+    "apikey",
+    "bearer",
+    "bot_token",
+    "chat_id",
+    "credential",
+    "password",
+    "secret",
+    "token",
+}
+
+
+def sanitize_client_log_payload(value, depth: int = 0):
+    """Remove secrets and cap payload size before writing browser logs."""
+    if depth > 4:
+        return "[max-depth]"
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in list(value.items())[:80]:
+            key_text = str(key)
+            lowered = key_text.lower()
+            if any(sensitive in lowered for sensitive in SENSITIVE_CLIENT_LOG_KEYS):
+                clean[key_text] = "[redacted]"
+            else:
+                clean[key_text] = sanitize_client_log_payload(item, depth + 1)
+        return clean
+    if isinstance(value, list):
+        return [sanitize_client_log_payload(item, depth + 1) for item in value[:50]]
+    if isinstance(value, str):
+        return value[:1000]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:1000]
+
+
+@app.post("/api/logs/client-events")
+async def log_client_events(request: Request):
+    """Receive batched browser UI, API, WebSocket, and error events."""
+    try:
+        body = await request.json()
+    except Exception as exc:
+        logger.warning("Frontend event parse failure: %s", exc)
+        return {"ok": False, "error": "invalid_json"}
+
+    raw_events = body.get("events", [body]) if isinstance(body, dict) else []
+    if not isinstance(raw_events, list):
+        raw_events = [raw_events]
+
+    logged = 0
+    for raw_event in raw_events[:50]:
+        event = sanitize_client_log_payload(raw_event)
+        if not isinstance(event, dict):
+            event = {"event": event}
+        event_type = event.get("type", "unknown")
+        level = str(event.get("level", "info")).lower()
+        message = event.get("message") or event.get("action") or event_type
+        if level in {"error", "critical"} or "error" in str(event_type).lower():
+            logger.error("Frontend event [%s]: %s", event_type, message, extra={"extra_fields": event})
+        elif level in {"warn", "warning"}:
+            logger.warning("Frontend event [%s]: %s", event_type, message, extra={"extra_fields": event})
+        else:
+            logger.info("Frontend event [%s]: %s", event_type, message, extra={"extra_fields": event})
+        logged += 1
+    return {"ok": True, "logged": logged}
 
 # --- Static file serving (for packaged desktop builds) ---
 _static_dir = Path(__file__).parent / "static"

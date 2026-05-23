@@ -75,6 +75,9 @@ This document describes how Sentinel Pulse communicates with Sentinel Edge and e
 | `/api/edge/metrics` | GET | Prometheus metrics |
 | `/api/edge/tickers/{symbol}/decision` | POST | Buy/sell/stop decisions |
 | `/api/edge/positions/{symbol}` | GET | Get position |
+| `/api/edge/status` | GET | Edge API key and Mongo command-channel health |
+
+All Edge API endpoints require the configured `edge_api_key`. Pulse accepts either `X-API-Key: <key>` or `Authorization: Bearer <key>` so Edge clients can use either shared-secret convention.
 
 #### Signal Submission
 
@@ -175,6 +178,10 @@ groups:
 
 **Environment Variables:**
 - `EDGE_MONGO_URL` - Edge MongoDB connection string
+
+Pulse startup does not require Sentinel Edge to be running. If the Edge MongoDB endpoint is unavailable at Pulse startup, Pulse logs the connection error, leaves the integration configured, and continues normal bot startup. Exponential retry backoff is only applied after Pulse has successfully connected to the Edge command channel at least once during the current process; this avoids turning a missing Edge process into a Pulse startup failure.
+
+The retry attempt limit is controlled from Settings as `edge_retry_max_attempts` and defaults to `10`. A value of `0` disables retries after the first post-connection Edge failure.
 
 **Commands Sent to Edge:**
 

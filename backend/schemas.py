@@ -189,6 +189,7 @@ class SettingsUpdate(BaseModel):
     pattern_detection_enabled: Optional[bool] = None
     pattern_min_confidence: Optional[float] = None
     pattern_send_to_edge: Optional[bool] = None
+    edge_retry_max_attempts: Optional[int] = Field(None, ge=0, le=100)
 
 
 class BetaRegistration(BaseModel):

@@ -572,20 +572,23 @@ Pulse inserts commands to the `commands` collection in MongoDB:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/tickers` | GET | List all configured tickers |
-| `/api/tickers/{symbol}/decision` | POST | Submit buy/sell/stop decision |
-| `/api/tickers/{symbol}/trailing` | POST | Enable trailing stop |
-| `/api/positions/{symbol}` | GET | Get position with P&L & drawdown |
-| `/api/account/status` | GET | Account balance and positions |
-| `/api/signals/evaluate` | POST | Signal strength scoring |
+| `/api/edge/tickers` | GET | List all configured tickers |
+| `/api/edge/tickers/{symbol}/decision` | POST | Submit buy/sell/stop decision |
+| `/api/edge/tickers/{symbol}/trailing` | POST | Enable trailing stop |
+| `/api/edge/positions/{symbol}` | GET | Get position with P&L & drawdown |
+| `/api/edge/account/status` | GET | Account balance and positions |
+| `/api/edge/signals/evaluate` | POST | Signal strength scoring |
+| `/api/edge/status` | GET | Edge API key and Mongo command-channel health |
 | `/api/health` | GET | Pulse health status |
+
+Edge REST calls require the configured `edge_api_key` and can send it as either `X-API-Key: <key>` or `Authorization: Bearer <key>`.
 
 ### Signal Evaluation Endpoint
 
-The `/api/signals/evaluate` endpoint calculates Edge-style signal strength:
+The `/api/edge/signals/evaluate` endpoint calculates Edge-style signal strength:
 
 ```json
-POST /api/signals/evaluate
+POST /api/edge/signals/evaluate
 {
   "symbol": "TSLA",
   "price": 250.00,
@@ -616,6 +619,10 @@ EDGE_API_KEY=your_api_key  # optional
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=sentinel_pulse
 ```
+
+If Sentinel Edge is not running when Pulse starts, Pulse continues normal startup. The Edge command client keeps the integration configured and only applies capped exponential retry backoff after Pulse has successfully connected to the Edge Mongo command channel at least once during the current process.
+
+The Edge retry attempt limit is configurable in Settings and is stored as `edge_retry_max_attempts`. The default is `10`; setting it to `0` stops retries after the first post-connection Edge failure.
 
 ### Files
 
@@ -778,7 +785,7 @@ Use this map to quickly locate the code behind any feature.
 | `routes/system.py` | `/api` | `GET /audit-logs` (filterable), `GET /audit-logs/event-types`, `GET /rate-limits` (all broker resilience statuses), `GET /rate-limits/{id}`, `POST /rate-limits/{id}` (update config), `POST /circuit/{id}/reset`, `GET /price-sources`, `POST /price-sources/toggle` |
 | `routes/markets.py` | `/api` | `GET /markets` (all 7 markets with live status), `GET /markets/{code}`, `GET /fx-rates`, `GET /settings/currency-display`, `POST /settings/currency-display` |
 | `routes/strategies.py` | `/api/strategies` | `GET /registry` (all signal strategies with metadata + JSON schema), `GET /registry/{name}`, `GET /presets` (bracket templates), `POST /reload` (hot-reload from disk) |
-| `routes/edge.py` | `/api` | Edge integration endpoints: `GET /tickers`, `GET /positions/{symbol}`, `POST /tickers/{symbol}/decision`, `POST /tickers/{symbol}/trailing`, `GET /account/status`, `POST /signals/evaluate` |
+| `routes/edge.py` | `/api/edge` | Edge integration endpoints: `GET /status`, `GET /tickers`, `GET /positions/{symbol}`, `POST /tickers/{symbol}/decision`, `POST /tickers/{symbol}/trailing`, `GET /account/status`, `POST /signals/evaluate` |
 
 ### Tests
 

@@ -48,6 +48,8 @@ export function SettingsTab() {
   const [drawdownLimitText, setDrawdownLimitText] = useState('3');
   const [drawdownLimitValue, setDrawdownLimitValue] = useState(3);
   const [drawdownType, setDrawdownType] = useState<'percent' | 'cash'>('percent');
+  const [edgeRetryAttempts, setEdgeRetryAttempts] = useState(10);
+  const [edgeRetryAttemptsText, setEdgeRetryAttemptsText] = useState('10');
 
   useEffect(() => {
     apiFetch('/api/settings')
@@ -64,6 +66,8 @@ export function SettingsTab() {
           setBalanceText(String(data.account_balance));
         }
         setAllocated(data.allocated ?? 0);
+        setEdgeRetryAttempts(data.edge_retry_max_attempts ?? 10);
+        setEdgeRetryAttemptsText(String(data.edge_retry_max_attempts ?? 10));
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
         useStore.getState().setLiveDuringMarketHours(data.live_during_market_hours || false);
         useStore.getState().setPaperAfterHours(data.paper_after_hours || false);
@@ -107,6 +111,7 @@ export function SettingsTab() {
             limit: drawdownLimitValue,
             type: drawdownType,
           },
+          edge_retry_max_attempts: edgeRetryAttempts,
         }),
       });
       // Update store with new step values
@@ -312,6 +317,48 @@ export function SettingsTab() {
             </p>
           </div>
         )}
+      </section>
+
+      {/* Sentinel Edge Retry Policy */}
+      <section className="glass rounded-xl border border-border p-6 space-y-5">
+        <div className="flex items-center gap-2 mb-2">
+          <Plug size={18} className="text-primary" />
+          <h3 className="text-sm font-bold text-foreground">Sentinel Edge Retry Policy</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Limits how many exponential backoff retries Pulse attempts after Edge has been connected and then stops responding.
+          If Edge is not running when Pulse starts, Pulse still starts normally and this limit is not consumed.
+        </p>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
+            <Plug size={10} className="text-primary" /> Backoff Attempts
+          </label>
+          <input
+            data-testid="edge-retry-attempts-input"
+            type="text"
+            inputMode="numeric"
+            value={edgeRetryAttemptsText}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (/^\d*$/.test(raw)) {
+                setEdgeRetryAttemptsText(raw);
+              }
+            }}
+            onBlur={() => {
+              const num = parseInt(edgeRetryAttemptsText, 10);
+              if (!isNaN(num) && num >= 0 && num <= 100) {
+                setEdgeRetryAttempts(num);
+              } else {
+                setEdgeRetryAttemptsText(String(edgeRetryAttempts));
+              }
+            }}
+            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
+            placeholder="10"
+          />
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            Default is 10. Use 0 to stop retrying after the first post-connection Edge failure.
+          </p>
+        </div>
       </section>
 
       {/* Broker Allocations per Ticker */}

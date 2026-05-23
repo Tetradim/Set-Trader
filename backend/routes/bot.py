@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException
 
 import deps
 from schemas import SettingsUpdate
+from shared import edge_client
 
 router = APIRouter()
 
@@ -70,6 +71,15 @@ async def update_settings(body: SettingsUpdate):
             {"$set": {"value": body.pattern_send_to_edge}},
             upsert=True
         )
+    if body.edge_retry_max_attempts is not None:
+        if body.edge_retry_max_attempts < 0 or body.edge_retry_max_attempts > 100:
+            raise HTTPException(400, "Edge retry attempts must be between 0 and 100.")
+        edge_client.set_max_retry_attempts(body.edge_retry_max_attempts)
+        await deps.db.settings.update_one(
+            {"key": "edge_retry_max_attempts"},
+            {"$set": {"value": body.edge_retry_max_attempts}},
+            upsert=True,
+        )
     if body.increment_step is not None:
         await deps.db.settings.update_one({"key": "increment_step"}, {"$set": {"value": body.increment_step}}, upsert=True)
     if body.decrement_step is not None:
@@ -121,6 +131,7 @@ async def get_settings():
     pattern_enabled_doc = await deps.db.settings.find_one({"key": "pattern_detection_enabled"}, {"_id": 0})
     pattern_min_conf_doc = await deps.db.settings.find_one({"key": "pattern_min_confidence"}, {"_id": 0})
     pattern_edge_doc = await deps.db.settings.find_one({"key": "pattern_send_to_edge"}, {"_id": 0})
+    edge_retry_doc = await deps.db.settings.find_one({"key": "edge_retry_max_attempts"}, {"_id": 0})
     
     tickers = await deps.db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
     allocated = sum(t.get("base_power", 0) for t in tickers)
@@ -145,6 +156,7 @@ async def get_settings():
         "pattern_detection_enabled": pattern_enabled_doc.get("value", True) if pattern_enabled_doc else True,
         "pattern_min_confidence": pattern_min_conf_doc.get("value", 0.65) if pattern_min_conf_doc else 0.65,
         "pattern_send_to_edge": pattern_edge_doc.get("value", True) if pattern_edge_doc else True,
+        "edge_retry_max_attempts": edge_retry_doc.get("value", 10) if edge_retry_doc else 10,
     }
 
 

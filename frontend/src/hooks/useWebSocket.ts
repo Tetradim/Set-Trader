@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react';
 import { useStore } from '@/stores/useStore';
 import { getAuthToken } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { wsLog } from '@/lib/wsLogger';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
@@ -18,6 +19,7 @@ function getWsUrl(): string {
   const wsUrl = new URL(`${proto}//${url}/api/ws`);
   wsUrl.searchParams.set('token', token);
   console.log('[WS] getWsUrl:', wsUrl);
+  uiLog.ws('url_created', { host: wsUrl.host, path: wsUrl.pathname });
   return wsUrl.toString();
 }
 
@@ -34,6 +36,7 @@ function handleMessage(event: MessageEvent) {
   try {
     const data = JSON.parse(event.data);
     wsLog.in(data.type, data);
+    uiLog.ws('message_in', { message_type: data.type });
     console.log('[WS] onmessage:', data.type, data);
 
     if (data.type === 'INITIAL_STATE') {
@@ -135,6 +138,7 @@ function handleMessage(event: MessageEvent) {
     }
   } catch (err) {
     console.error('WS parse error:', err);
+    uiLog.error('ws.parse_error', err, { payload_size: event.data?.length || 0 });
   }
 }
 
@@ -147,14 +151,19 @@ function connect() {
   if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
 
   const wsUrl = getWsUrl();
-  if (!wsUrl) return;
+  if (!wsUrl) {
+    uiLog.ws('connect_skipped', { reason: 'missing_auth_token' }, 'warn');
+    return;
+  }
 
   const ws = new WebSocket(wsUrl);
   socket = ws;
   intentionalClose = false;
+  uiLog.ws('connecting', {});
 
   ws.onopen = () => {
     console.log('[WS] onopen - WebSocket connected');
+    uiLog.ws('open', {});
     reconnectDelay = 3000;
     useStore.getState().setConnected(true);
   };
@@ -163,6 +172,7 @@ function connect() {
 
   ws.onclose = (event) => {
     console.log('[WS] onclose:', event.code, event.reason);
+    uiLog.ws('close', { code: event.code, reason: event.reason, intentional: intentionalClose }, intentionalClose ? 'info' : 'warn');
     if (socket === ws) socket = null;
     useStore.getState().setConnected(false);
     if (subscribers === 0) return;
@@ -170,12 +180,14 @@ function connect() {
     const delay = Math.min(reconnectDelay, 300000);
     reconnectDelay = Math.min(reconnectDelay * 2, 300000);
     console.log('[WS] reconnect in:', delay, 'ms');
+    uiLog.ws('reconnect_scheduled', { delay_ms: delay, next_delay_ms: reconnectDelay }, 'warn');
     reconnect = setTimeout(connect, delay);
   };
 
   ws.onerror = (event) => {
     if (!intentionalClose) {
       console.error('[WS] onerror:', event);
+      uiLog.error('ws.error', 'WebSocket error event');
     }
     ws.close();
   };
@@ -207,11 +219,13 @@ export function useWebSocket() {
     const msg = { action, ...payload };
     console.log('[WS] send:', action, payload);
     wsLog.out(action, payload);
+    uiLog.ws('message_out', { action });
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(msg));
     } else {
       console.warn('[WS] send failed - socket not open:', socket?.readyState);
       wsLog.error(action, 'Socket not open - message dropped');
+      uiLog.ws('message_drop', { action, ready_state: socket?.readyState }, 'warn');
     }
   }, []);
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { uiLog } from '@/lib/clientLogger';
 
 interface Props {
   children: React.ReactNode;
@@ -24,9 +25,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('ErrorBoundary caught:', error, info.componentStack);
+    uiLog.reactError(error, info.componentStack, this.props.fallbackLabel);
   }
 
   handleRetry = () => {
+    uiLog.event('react.error_boundary_retry', { label: this.props.fallbackLabel });
     // Increment key to force full remount of children
     this.setState((s) => ({ hasError: false, error: '', retryKey: s.retryKey + 1 }));
   };
