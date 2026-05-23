@@ -64,7 +64,12 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
         self.assertIn("function Join-ProcessArguments", text)
         self.assertIn("$escaped = $arg.Replace('\"', '\\\"')", text)
-        self.assertIn("-ArgumentList (Join-ProcessArguments -Arguments $ArgumentList)", text)
+        self.assertIn("$startParams.ArgumentList = Join-ProcessArguments -Arguments $ArgumentList", text)
+
+    def test_root_launcher_omits_empty_process_argument_list(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("if ($ArgumentList -and $ArgumentList.Count -gt 0)", text)
+        self.assertIn("$process = Start-Process @startParams", text)
 
     def test_packaged_windows_launcher_allows_browser_open_suppression(self):
         text = (ROOT / "backend" / "win_launcher.py").read_text(encoding="utf-8")

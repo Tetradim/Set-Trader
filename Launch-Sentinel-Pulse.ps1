@@ -181,7 +181,16 @@ function Start-OwnedProcess {
         [string[]]$ArgumentList,
         [string]$WorkingDirectory
     )
-    $process = Start-Process -FilePath $FilePath -ArgumentList (Join-ProcessArguments -Arguments $ArgumentList) -WorkingDirectory $WorkingDirectory -PassThru -WindowStyle Hidden
+    $startParams = @{
+        FilePath = $FilePath
+        WorkingDirectory = $WorkingDirectory
+        PassThru = $true
+        WindowStyle = "Hidden"
+    }
+    if ($ArgumentList -and $ArgumentList.Count -gt 0) {
+        $startParams.ArgumentList = Join-ProcessArguments -Arguments $ArgumentList
+    }
+    $process = Start-Process @startParams
     $OwnedProcesses.Add($process)
     return $process
 }
