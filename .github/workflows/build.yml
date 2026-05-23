@@ -17,7 +17,7 @@ on:
         default: ''
 
 concurrency:
-  group: build-sentinel-pulse-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
