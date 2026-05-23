@@ -22,6 +22,7 @@ if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-setti
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $LogFile = Join-Path $LogPath "launcher.log"
 $serverWillOpenBrowser = $false
+$BrowserProcess = $null
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -104,6 +105,42 @@ function Find-Python {
     return $null
 }
 
+function Find-BrowserExecutable {
+    $candidates = @(
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+        "$env:LOCALAPPDATA\Microsoft\Edge\Application\msedge.exe",
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+
+    foreach ($name in @("msedge.exe", "chrome.exe")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+    }
+
+    return $null
+}
+
+function Start-BrowserWindow {
+    param([string]$Url)
+
+    $browserExe = Find-BrowserExecutable
+    if ($browserExe) {
+        Write-Status "Opening dedicated browser window"
+        return Start-Process -FilePath $browserExe -ArgumentList @("--new-window", "--app=$Url") -PassThru
+    }
+
+    Write-Status "Opening default browser without close monitoring" "WARN"
+    Start-Process $Url | Out-Null
+    return $null
+}
+
 function Start-OwnedProcess {
     param(
         [string]$FilePath,
@@ -126,6 +163,23 @@ function Stop-OwnedProcesses {
             }
         } catch {
         }
+    }
+}
+
+function Stop-BrowserWindow {
+    if (-not $BrowserProcess) { return }
+    try {
+        $current = Get-Process -Id $BrowserProcess.Id -ErrorAction SilentlyContinue
+        if ($current) {
+            Write-Status "Closing browser window ($($current.Id))" "INFO"
+            $current.CloseMainWindow() | Out-Null
+            Start-Sleep -Milliseconds 500
+            $current = Get-Process -Id $BrowserProcess.Id -ErrorAction SilentlyContinue
+            if ($current) {
+                Stop-Process -Id $current.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
     }
 }
 
@@ -164,11 +218,11 @@ try {
 
         if (Test-Path $rootExe) {
             Write-Status "Starting packaged SentinelPulse.exe"
-            $serverWillOpenBrowser = $true
+            $env:SENTINEL_OPEN_BROWSER = "0"
             Start-OwnedProcess -FilePath $rootExe -ArgumentList @() -WorkingDirectory $ProjectRoot | Out-Null
         } elseif (Test-Path $backendExe) {
             Write-Status "Starting backend packaged SentinelPulse.exe"
-            $serverWillOpenBrowser = $true
+            $env:SENTINEL_OPEN_BROWSER = "0"
             Start-OwnedProcess -FilePath $backendExe -ArgumentList @() -WorkingDirectory (Split-Path -Parent $backendExe) | Out-Null
         } elseif (Test-Path $serverPy) {
             $python = Find-Python
@@ -177,6 +231,7 @@ try {
             }
             Write-Status "Starting backend server on port $AppPort"
             $env:PORT = "$AppPort"
+            $env:SENTINEL_OPEN_BROWSER = "0"
             Start-OwnedProcess -FilePath $python -ArgumentList @("server.py") -WorkingDirectory (Join-Path $ProjectRoot "backend") | Out-Null
         } else {
             throw "No Sentinel Pulse server was found. Expected SentinelPulse.exe or backend\server.py."
@@ -191,9 +246,8 @@ try {
     }
 
     $url = "http://localhost:$AppPort"
-    if ((-not $NoBrowser) -and (-not $serverWillOpenBrowser)) {
-        Write-Status "Opening $url"
-        Start-Process $url | Out-Null
+    if (-not $NoBrowser) {
+        $BrowserProcess = Start-BrowserWindow -Url $url
     }
 
     Write-Host ""
@@ -207,11 +261,15 @@ try {
                 throw "Process $($process.Id) exited unexpectedly."
             }
         }
+        if ($BrowserProcess -and $BrowserProcess.HasExited) {
+            throw "Browser window closed."
+        }
         Start-Sleep -Seconds 1
     }
 } catch {
     Write-Status $_.Exception.Message "ERROR"
     exit 1
 } finally {
+    Stop-BrowserWindow
     Stop-OwnedProcesses
 }

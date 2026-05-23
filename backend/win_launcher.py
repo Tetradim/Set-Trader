@@ -314,6 +314,9 @@ def open_browser():
     """Open the dashboard in the default browser."""
     import webbrowser
     import os
+    if os.environ.get("SENTINEL_OPEN_BROWSER", "1").lower() in {"0", "false", "no"}:
+        logger.info("Browser auto-open suppressed by SENTINEL_OPEN_BROWSER")
+        return
     port = int(os.environ.get("PORT", "8002"))
     webbrowser.open(f"http://localhost:{port}")
 

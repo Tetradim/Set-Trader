@@ -26,8 +26,21 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
     def test_root_launcher_does_not_duplicate_packaged_browser_open(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
         self.assertIn("$serverWillOpenBrowser = $false", text)
-        self.assertIn("$serverWillOpenBrowser = $true", text)
-        self.assertIn("if ((-not $NoBrowser) -and (-not $serverWillOpenBrowser))", text)
+        self.assertIn('$env:SENTINEL_OPEN_BROWSER = "0"', text)
+        self.assertIn("$BrowserProcess = Start-BrowserWindow -Url $url", text)
+
+    def test_root_launcher_tracks_browser_window(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("$BrowserProcess = $null", text)
+        self.assertIn("function Start-BrowserWindow", text)
+        self.assertIn("function Stop-BrowserWindow", text)
+        self.assertIn("Browser window closed.", text)
+        self.assertIn("SENTINEL_OPEN_BROWSER", text)
+
+    def test_packaged_windows_launcher_allows_browser_open_suppression(self):
+        text = (ROOT / "backend" / "win_launcher.py").read_text(encoding="utf-8")
+        self.assertIn('SENTINEL_OPEN_BROWSER', text)
+        self.assertIn('webbrowser.open', text)
 
 
 if __name__ == "__main__":
