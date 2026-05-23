@@ -543,7 +543,7 @@ def sanitize_client_log_payload(value, depth: int = 0):
 
 
 @app.post("/api/logs/client-events")
-async def log_client_events(request: Request):
+async def log_client_events(request: Request, _current_user=Depends(get_current_user)):
     """Receive batched browser UI, API, WebSocket, and error events."""
     try:
         body = await request.json()

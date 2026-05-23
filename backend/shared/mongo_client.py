@@ -49,7 +49,10 @@ class EdgeMongoClient:
             db_name: Database name for commands. Defaults to "edge".
             commands_collection: Collection name for commands. Defaults to "commands".
         """
-        self.mongo_url = mongo_url or os.environ.get("EDGE_MONGO_URL", os.environ.get("MONGO_URL", ""))
+        # Do not fall back to Pulse's own MongoDB URL here. A local Pulse MongoDB
+        # ping only proves Pulse storage exists; it does not prove Sentinel Edge is
+        # running or consuming the command channel.
+        self.mongo_url = mongo_url if mongo_url is not None else os.environ.get("EDGE_MONGO_URL", "")
         self.db_name = db_name
         self.commands_collection = commands_collection
         self.base_retry_delay = base_retry_delay
@@ -183,6 +186,7 @@ class EdgeMongoClient:
         """Return Edge communication health without exposing credentials."""
         return {
             "configured": bool(self.mongo_url),
+            "identity": "explicit_edge_mongo_url" if self.mongo_url else "not_configured",
             "enabled": self.is_enabled,
             "connected": self.is_connected,
             "has_ever_connected": self.has_ever_connected,

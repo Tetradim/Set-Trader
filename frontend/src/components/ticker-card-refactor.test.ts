@@ -9,6 +9,8 @@ const bracketsPath = path.join(root, 'src', 'components', 'ticker-card', 'Ticker
 const resizePath = path.join(root, 'src', 'components', 'ticker-card', 'TickerResizeHandles.tsx');
 
 const tickerCardSource = fs.readFileSync(tickerCardPath, 'utf8');
+const chartSource = fs.readFileSync(chartPath, 'utf8');
+const resizeSource = fs.readFileSync(resizePath, 'utf8');
 
 assert.ok(
   tickerCardSource.split(/\r?\n/).length <= 260,
@@ -18,3 +20,7 @@ assert.ok(
 assert.ok(fs.existsSync(chartPath), 'Ticker sparkline rendering should live in ticker-card/TickerSparkline.tsx');
 assert.ok(fs.existsSync(bracketsPath), 'Ticker quick bracket editing should live in ticker-card/TickerQuickBrackets.tsx');
 assert.ok(fs.existsSync(resizePath), 'Ticker resize handles should live in ticker-card/TickerResizeHandles.tsx');
+assert.match(chartSource, /type PricePoint/);
+assert.match(chartSource, /priceHistory: PricePoint\[\]/);
+assert.match(resizeSource, /tabIndex=\{0\}/);
+assert.doesNotMatch(resizeSource, /pointerEvents:\s*'none'/);

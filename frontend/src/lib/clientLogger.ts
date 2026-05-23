@@ -3,6 +3,9 @@ const AUTH_TOKEN_KEY = 'sentinel_auth_token';
 const CLIENT_LOG_ENDPOINT = `${BACKEND_URL}/api/logs/client-events`;
 const MAX_QUEUE = 250;
 const FLUSH_INTERVAL_MS = 2000;
+const LOG_TYPED_VALUES =
+  import.meta.env.VITE_LOG_TYPED_VALUES === 'true' ||
+  localStorage.getItem('sentinel_log_typed_values') === 'true';
 
 type ClientLogLevel = 'info' | 'warn' | 'error';
 
@@ -94,6 +97,7 @@ function isSensitiveElement(el: Element) {
 }
 
 function readElementValue(el: Element) {
+  if (!LOG_TYPED_VALUES) return '[disabled]';
   if (isSensitiveElement(el)) return '[redacted]';
   if (el instanceof HTMLInputElement) {
     if (el.type === 'checkbox' || el.type === 'radio') return el.checked;
@@ -148,10 +152,6 @@ function flushUiLogsWithBeacon() {
   if (!queue.length) return;
   const events = queue.splice(0, queue.length);
   const payload = JSON.stringify({ events });
-  if (navigator.sendBeacon) {
-    const sent = navigator.sendBeacon(CLIENT_LOG_ENDPOINT, new Blob([payload], { type: 'application/json' }));
-    if (sent) return;
-  }
   fetch(CLIENT_LOG_ENDPOINT, { method: 'POST', headers: authHeaders(), body: payload, keepalive: true }).catch(() => {});
 }
 

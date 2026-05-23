@@ -58,6 +58,13 @@ class _ConnectedThenFailingClient:
 
 
 class EdgeMongoClientResilienceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_edge_client_does_not_fall_back_to_pulse_mongo_url(self):
+        with patch.dict("os.environ", {"MONGO_URL": "mongodb://pulse"}, clear=True):
+            client = EdgeMongoClient()
+
+        self.assertFalse(client.is_enabled)
+        self.assertEqual(client.status_snapshot()["identity"], "not_configured")
+
     async def test_startup_connection_failure_keeps_edge_configured_without_backoff(self):
         client = EdgeMongoClient(mongo_url="mongodb://edge")
 

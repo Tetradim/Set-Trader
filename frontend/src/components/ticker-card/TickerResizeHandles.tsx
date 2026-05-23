@@ -18,19 +18,12 @@ export function TickerResizeHandles({ symbol, onResizeStart, onResizeKeyDown }: 
           key={handle.direction}
           className={handle.className}
           role="separator"
+          tabIndex={0}
           aria-label={`${handle.label} ${symbol}`}
           onMouseDown={(e) => onResizeStart(e, handle.direction)}
+          onKeyDown={onResizeKeyDown}
         />
       ))}
-
-      <div
-        className="sp-resize-handle-keyboard"
-        role="separator"
-        tabIndex={0}
-        aria-label={`Resize ${symbol} card. Use arrow keys to resize.`}
-        onKeyDown={onResizeKeyDown}
-        style={{ position: 'absolute', right: 4, bottom: 4, width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
-      />
     </>
   );
 }

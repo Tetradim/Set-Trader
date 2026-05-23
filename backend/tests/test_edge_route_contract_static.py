@@ -32,6 +32,36 @@ class EdgeRouteContractStaticTest(unittest.TestCase):
         self.assertIn('"api_key_configured"', text)
         self.assertIn('"max_retry_attempts"', text)
 
+    def test_edge_get_routes_do_not_write_back_to_edge(self):
+        text = self.read_edge()
+
+        position_route = re.search(
+            r'@router\.get\("/positions/\{symbol\}".*?return \{',
+            text,
+            re.DOTALL,
+        )
+        account_route = re.search(
+            r'@router\.get\("/account/status".*?return \{',
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(position_route)
+        self.assertIsNotNone(account_route)
+        self.assertNotIn("send_position_update", position_route.group(0))
+        self.assertNotIn("send_account_update", account_route.group(0))
+
+    def test_decision_route_refreshes_position_before_edge_update(self):
+        text = self.read_edge()
+
+        self.assertIn("def _current_position", text)
+        decision_update = re.search(
+            r"# Send position update to Edge if enabled.*?build_position_update",
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(decision_update)
+        self.assertIn("position = _current_position(sym)", decision_update.group(0))
+
     def test_signal_request_supports_legacy_decision_fields(self):
         text = self.read_edge()
 

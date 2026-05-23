@@ -11,12 +11,13 @@ import {
   buildTickerChartData,
   getChartDomain,
   hasMeaningfulChartMovement,
+  type PricePoint,
 } from '@/lib/ticker-card-utils';
 
 interface TickerSparklineProps {
   symbol: string;
   price: number;
-  priceHistory: number[];
+  priceHistory: PricePoint[];
   isPositive: boolean;
 }
 

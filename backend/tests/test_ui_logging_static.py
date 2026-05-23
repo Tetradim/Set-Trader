@@ -16,6 +16,7 @@ class UiLoggingStaticTest(unittest.TestCase):
         self.assertIn("def get_runtime_log_path", server)
         self.assertIn('os.getenv("LOG_FILE"', server)
         self.assertIn('@app.post("/api/logs/client-events")', server)
+        self.assertIn("async def log_client_events(request: Request, _current_user=Depends(get_current_user))", server)
         self.assertIn("sanitize_client_log_payload", server)
         self.assertIn("token", server)
         self.assertIn("password", server)
@@ -32,7 +33,8 @@ class UiLoggingStaticTest(unittest.TestCase):
         self.assertIn("document.addEventListener('click'", logger)
         self.assertIn("document.addEventListener('submit'", logger)
         self.assertIn("document.addEventListener('change'", logger)
-        self.assertIn("navigator.sendBeacon", logger)
+        self.assertIn("LOG_TYPED_VALUES", logger)
+        self.assertNotIn("navigator.sendBeacon", logger)
         self.assertIn("/api/logs/client-events", logger)
 
     def test_api_and_websocket_paths_report_client_events(self):

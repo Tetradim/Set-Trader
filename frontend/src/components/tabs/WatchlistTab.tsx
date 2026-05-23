@@ -84,6 +84,7 @@ export function WatchlistTab() {
   const accountBalance = useStore((s) => s.accountBalance);
   const allocated      = useStore((s) => s.allocated);
   const available      = useStore((s) => s.available);
+  const positions      = useStore((s) => s.positions);
 
   const [configSymbol, setConfigSymbol] = useState<string | null>(null);
   const [activePanel, setActivePanel]   = useState<'trades'|'positions'|'controls'|'broker'>('trades');
@@ -101,6 +102,7 @@ export function WatchlistTab() {
   const localAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
   const effectiveAllocated = localAllocated || allocated;
   const effectiveAvailable = accountBalance - effectiveAllocated;
+  const openPositionCount = Object.values(positions).filter((position) => (position.quantity ?? 0) > 0).length;
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -155,10 +157,10 @@ export function WatchlistTab() {
       {/* ── STAT CARDS ── */}
       <div className="sp-stat-grid">
         {[
-          { label: 'Account Balance', value: `$${accountBalance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`, variant: 'gold',   sub: '↑ +$312.50 today', subVariant: 'green'  },
+          { label: 'Account Balance', value: `$${accountBalance.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`, variant: 'gold',   sub: running ? 'Bot running' : 'Bot idle', subVariant: running ? 'green' : 'dim'  },
           { label: 'Allocated',       value: `$${effectiveAllocated.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`, variant: 'silver', sub: `${accountBalance > 0 ? ((effectiveAllocated/accountBalance)*100).toFixed(1) : 0}% deployed`, subVariant: 'silver' },
           { label: 'Available Cash',  value: `$${effectiveAvailable.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`, variant: 'green',  sub: 'Cash reserve', subVariant: 'dim'  },
-          { label: 'Total P&L',       value: `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}`, variant: 'green', sub: 'Win rate 68%', subVariant: 'green' },
+          { label: 'Total P&L',       value: `${totalPnl >= 0 ? '+' : ''}$${Math.abs(totalPnl).toFixed(2)}`, variant: 'green', sub: `${openPositionCount} open position${openPositionCount === 1 ? '' : 's'}`, subVariant: openPositionCount ? 'green' : 'dim' },
         ].map(({ label, value, variant, sub, subVariant }) => (
           <div className="sp-stat-card" key={label}>
             <div className="sp-stat-bg" />

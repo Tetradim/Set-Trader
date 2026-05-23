@@ -78,6 +78,11 @@ _RATE_LIMIT = 60        # requests per minute
 _RATE_WINDOW = 60        # seconds
 
 
+def _current_position(symbol: str) -> dict:
+    """Return the latest in-memory position snapshot for a symbol."""
+    return deps.engine._positions.get(symbol, {})
+
+
 def _check_rate_limit(client_ip: str) -> bool:
     """Check if client is within rate limit."""
     import time
@@ -179,7 +184,7 @@ async def post_decision(symbol: str, body: DecisionRequest):
     if not ticker:
         raise HTTPException(404, f"{sym} not found")
     
-    position = deps.engine._positions.get(sym, {})
+    position = _current_position(sym)
     position_qty = position.get("qty", 0)
     
     trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
@@ -254,9 +259,12 @@ async def post_decision(symbol: str, body: DecisionRequest):
     else:
         result["message"] = f"unknown decision: {decision}"
     
-    # Send position update to Edge if enabled
+    # Send position update to Edge if enabled. Refresh after the decision so Edge
+    # gets the post-execution position rather than the stale pre-decision state.
     if edge_client.is_enabled and edge_client.is_connected:
         try:
+            position = _current_position(sym)
+            position_qty = position.get("qty", 0)
             current_price = await deps.price_service.get_price(sym)
             pos_update = build_position_update(
                 symbol=sym,
@@ -359,7 +367,7 @@ async def get_position(symbol: str):
     """
     sym = symbol.upper()
     
-    position = deps.engine._positions.get(sym, {})
+    position = _current_position(sym)
     qty = position.get("qty", 0)
     avg_entry = position.get("avg_entry", 0)
     
@@ -386,17 +394,6 @@ async def get_position(symbol: str):
             high = position.get("high", current_price)
             if high > 0:
                 drawdown_pct = round(((high - current_price) / high) * 100, 2)
-    
-    # Send to Edge if enabled
-    if edge_client.is_enabled:
-        pos_update = build_position_update(
-            symbol=sym,
-            quantity=qty,
-            avg_entry=avg_entry,
-            current_price=current_price,
-            trading_mode="paper" if deps.engine.simulate_24_7 else "live",
-        )
-        await edge_client.send_position_update(pos_update)
     
     return {
         "symbol": sym,
@@ -464,21 +461,6 @@ async def get_account_status():
     total_realized_pnl = round(sum(p.get("total_pnl", 0) for p in profits_list), 2)
     
     trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
-    
-    # Build account update for Edge
-    if edge_client.is_enabled:
-        acc_update = build_account_update(
-            account_balance=account_balance,
-            allocated=allocated,
-            available=available,
-            cash_reserve=cash_reserve,
-            total_realized_pnl=total_realized_pnl,
-            total_unrealized_pnl=total_unrealized_pnl,
-            positions=positions,
-            trading_mode=trading_mode,
-        )
-        # Send to Edge
-        await edge_client.send_account_update(acc_update)
     
     return {
         "account_balance": account_balance,
