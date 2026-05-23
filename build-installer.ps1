@@ -67,6 +67,20 @@ del /q "$env:PUBLIC\Desktop\Sentinel Pulse.lnk" 2>nul
 del /q "$env:PUBLIC\Desktop\Uninstall Sentinel Pulse.lnk" 2>nul
 del /q "$env:PUBLIC\Desktop\Sentinel Pulse.url" 2>nul
 del /q "$env:PUBLIC\Desktop\Uninstall Sentinel Pulse.url" 2>nul
+del /q "%USERPROFILE%\Desktop\Sentinel-Pulse.log" 2>nul
+del /q "%USERPROFILE%\Desktop\Sentinel-Pulse-Transcript.log" 2>nul
+del /q "%USERPROFILE%\Desktop\Sentinel-Pulse-MongoDB.log" 2>nul
+del /q "%USERPROFILE%\Desktop\sentinel_pulse.log" 2>nul
+del /q "%USERPROFILE%\Desktop\SentinelPulse-Setup*.exe" 2>nul
+del /q "%USERPROFILE%\Desktop\Sentinel Pulse-Setup*.exe" 2>nul
+del /q "%USERPROFILE%\Desktop\Sentinel Pulse Setup*.exe" 2>nul
+del /q "$env:PUBLIC\Desktop\Sentinel-Pulse.log" 2>nul
+del /q "$env:PUBLIC\Desktop\Sentinel-Pulse-Transcript.log" 2>nul
+del /q "$env:PUBLIC\Desktop\Sentinel-Pulse-MongoDB.log" 2>nul
+del /q "$env:PUBLIC\Desktop\sentinel_pulse.log" 2>nul
+del /q "$env:PUBLIC\Desktop\SentinelPulse-Setup*.exe" 2>nul
+del /q "$env:PUBLIC\Desktop\Sentinel Pulse-Setup*.exe" 2>nul
+del /q "$env:PUBLIC\Desktop\Sentinel Pulse Setup*.exe" 2>nul
 del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse\*.lnk" 2>nul
 del /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse\*.url" 2>nul
 rmdir /s /q "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse" 2>nul

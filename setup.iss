@@ -72,12 +72,25 @@ Filename: "{app}\Setup-And-Launch.bat"; Description: "Launch {#MyAppName}"; Flag
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+Type: files; Name: "{userdesktop}\Sentinel-Pulse.log"
+Type: files; Name: "{userdesktop}\Sentinel-Pulse-Transcript.log"
+Type: files; Name: "{userdesktop}\Sentinel-Pulse-MongoDB.log"
+Type: files; Name: "{userdesktop}\sentinel_pulse.log"
+Type: files; Name: "{userdesktop}\SentinelPulse-Setup*.exe"
+Type: files; Name: "{userdesktop}\Sentinel Pulse-Setup*.exe"
+Type: files; Name: "{userdesktop}\Sentinel Pulse Setup*.exe"
+Type: files; Name: "{commondesktop}\Sentinel-Pulse.log"
+Type: files; Name: "{commondesktop}\Sentinel-Pulse-Transcript.log"
+Type: files; Name: "{commondesktop}\Sentinel-Pulse-MongoDB.log"
+Type: files; Name: "{commondesktop}\sentinel_pulse.log"
+Type: files; Name: "{commondesktop}\SentinelPulse-Setup*.exe"
+Type: files; Name: "{commondesktop}\Sentinel Pulse-Setup*.exe"
+Type: files; Name: "{commondesktop}\Sentinel Pulse Setup*.exe"
 
 [Code]
 // Kill Sentinel Pulse processes on uninstall
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  DesktopPath, LogFile: String;
   ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
@@ -87,12 +100,6 @@ begin
     
     // Kill mongod.exe if started by us (running under current user)
     Exec('taskkill', '/F /IM mongod.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-    
-    // Delete desktop log file
-    DesktopPath := ExpandConstant('{userdesktop}');
-    LogFile := DesktopPath + '\sentinel_pulse.log';
-    if FileExists(LogFile) then
-      DeleteFile(LogFile);
   end;
 end;
 
