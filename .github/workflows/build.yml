@@ -27,41 +27,9 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
-  # Test Job - runs on Ubuntu (requires external backend)
-  # ---------------------------------------------------------------------
-  test:
-    runs-on: ubuntu-latest
-    name: Run Tests
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install Python deps
-        run: |
-          echo "=== Installing test dependencies ==="
-          pip install pytest requests pytest-asyncio
-
-      - name: Run tests (integration - requires running backend)
-        run: |
-          echo "=== Running integration tests ==="
-          echo "NOTE: These tests require a running backend server with MongoDB"
-          echo "Skipping in CI since no server available"
-          # Tests would run against live server - skip in CI
-          # cd backend
-          # python -m pytest tests/ -v --ignore=coverage 2>&1 || echo "Tests require running backend"
-          echo "Tests skipped (integration tests need running backend)"
-          echo "Run tests manually: cd backend && pytest tests/ -v"
-
-  # ---------------------------------------------------------------------
   # Build Job - runs on Windows
   # ---------------------------------------------------------------------
   build:
-    needs: test
     runs-on: windows-latest
     timeout-minutes: 90
     name: Build Windows Installer
