@@ -33,7 +33,7 @@ logger = logging.getLogger("SentinelPulse")
 logger.info("=" * 80)
 logger.info("🚀 Sentinel Pulse STARTING UP")
 logger.info(f"PID: {os.getpid()} | Frozen: {getattr(sys, 'frozen', False)} | Python: {sys.version.split()[0]}")
-logger.info(f"ENV: {os.getenv('ENVIRONMENT', 'development')}")
+logger.info(f"ENV: {os.getenv('ENVIRONMENT', 'production')}")
 logger.info(f"LOG_LEVEL: {os.getenv('LOG_LEVEL', 'INFO')} | LOG_JSON: {os.getenv('LOG_JSON', 'false')}")
 
 # Load .env file early so env vars are available
@@ -59,7 +59,7 @@ if getattr(sys, 'frozen', False):
 else:
     load_dotenv()
 
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import FastAPI, APIRouter, Request, Depends
 from starlette.middleware.cors import CORSMiddleware
 
 # Shared state (must be imported first — populates db, logger, etc.)
@@ -367,7 +367,7 @@ deps.tracer = get_tracer()
 # Set CORS_ORIGINS env var in production to limit access
 _cors_origins = os.environ.get("CORS_ORIGINS", "")
 if _cors_origins == "*":
-    # WARNING: Wildcard allowed only in development
+    # WARNING: Wildcard origins should only be used on trusted local networks.
     import logging
     logging.getLogger("SentinelPulse").warning(
         "CORS set to wildcard - this is insecure for production! "
@@ -406,32 +406,29 @@ from routes.analytics import router as analytics_router
 from routes.slo import router as slo_router
 from routes.notifications import router as notifications_router
 from routes.portfolio import router as portfolio_router
-from routes.developer import router as developer_router
-from routes.auth import router as auth_router
+from auth import get_current_user
 
 api.include_router(health_router)
-api.include_router(brokers_router)
-api.include_router(tickers_router)
-api.include_router(trades_router)
-api.include_router(bot_router)
+api.include_router(brokers_router, dependencies=[Depends(get_current_user)])
+api.include_router(tickers_router, dependencies=[Depends(get_current_user)])
+api.include_router(trades_router, dependencies=[Depends(get_current_user)])
+api.include_router(bot_router, dependencies=[Depends(get_current_user)])
 api.include_router(ws_router)
-api.include_router(system_router)
-api.include_router(markets_router)
-api.include_router(strategies_router)
+api.include_router(system_router, dependencies=[Depends(get_current_user)])
+api.include_router(markets_router, dependencies=[Depends(get_current_user)])
+api.include_router(strategies_router, dependencies=[Depends(get_current_user)])
 api.include_router(edge_router)
-api.include_router(risk_router)
+api.include_router(risk_router, dependencies=[Depends(get_current_user)])
 api.include_router(auth_router)
-api.include_router(orders_router)
-api.include_router(reconciliation_router)
-api.include_router(audit_router)
+api.include_router(orders_router, dependencies=[Depends(get_current_user)])
+api.include_router(reconciliation_router, dependencies=[Depends(get_current_user)])
+api.include_router(audit_router, dependencies=[Depends(get_current_user)])
 api.include_router(alert_router)
-api.include_router(ops_router)
-api.include_router(analytics_router)
-api.include_router(slo_router)
-api.include_router(notifications_router)
-api.include_router(portfolio_router)
-api.include_router(developer_router)
-api.include_router(auth_router)
+api.include_router(ops_router, dependencies=[Depends(get_current_user)])
+api.include_router(analytics_router, dependencies=[Depends(get_current_user)])
+api.include_router(slo_router, dependencies=[Depends(get_current_user)])
+api.include_router(notifications_router, dependencies=[Depends(get_current_user)])
+api.include_router(portfolio_router, dependencies=[Depends(get_current_user)])
 
 app.include_router(api)
 

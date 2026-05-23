@@ -15,6 +15,7 @@ async def list_brokers():
         entry = {
             "id": info.id, "name": info.name, "description": info.description,
             "supported": info.supported, "auth_fields": info.auth_fields,
+            "readiness": info.readiness, "readiness_note": info.readiness_note,
             "docs_url": info.docs_url, "color": info.color, "risk_warning": None,
         }
         if info.risk_warning:
@@ -42,6 +43,7 @@ async def get_broker(broker_id: str):
     entry = {
         "id": info.id, "name": info.name, "description": info.description,
         "supported": info.supported, "auth_fields": info.auth_fields,
+        "readiness": info.readiness, "readiness_note": info.readiness_note,
         "docs_url": info.docs_url, "color": info.color, "risk_warning": None,
     }
     if info.risk_warning:

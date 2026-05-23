@@ -31,7 +31,6 @@ class TestBetaRegistration:
             "first_name": "",
             "last_name": "",
             "email": "",
-            "ssn_last4": "1234",
             "address_street": "123 Test St",
             "address_city": "TestCity",
             "address_state": "CA",
@@ -44,13 +43,13 @@ class TestBetaRegistration:
         assert "detail" in data
         assert "required" in data["detail"].lower() or "name" in data["detail"].lower()
 
-    def test_beta_register_invalid_ssn(self):
-        """POST /api/beta/register with invalid SSN should fail."""
+    def test_beta_register_does_not_store_sensitive_identity_data(self):
+        """POST /api/beta/register should ignore sensitive identity fields if provided."""
         response = requests.post(f"{BASE_URL}/api/beta/register", json={
             "first_name": "Test",
             "last_name": "User",
             "email": "test@example.com",
-            "ssn_last4": "123",  # Only 3 digits
+            "ssn_last4": "1234",
             "address_street": "123 Test St",
             "address_city": "TestCity",
             "address_state": "CA",
@@ -58,10 +57,9 @@ class TestBetaRegistration:
             "address_country": "United States",
             "agreement_accepted": True
         })
-        assert response.status_code == 400
+        assert response.status_code == 200
         data = response.json()
-        assert "detail" in data
-        assert "4 digits" in data["detail"] or "SSN" in data["detail"]
+        assert "ssn_last4" not in data["registration"]
 
     def test_beta_register_agreement_not_accepted(self):
         """POST /api/beta/register without agreement should fail."""
@@ -69,7 +67,6 @@ class TestBetaRegistration:
             "first_name": "Test",
             "last_name": "User",
             "email": "test@example.com",
-            "ssn_last4": "1234",
             "address_street": "123 Test St",
             "address_city": "TestCity",
             "address_state": "CA",
@@ -89,7 +86,6 @@ class TestBetaRegistration:
             "last_name": "User",
             "email": "test@example.com",
             "phone": "5551234567",
-            "ssn_last4": "1234",
             "address_street": "123 Test St",
             "address_city": "TestCity",
             "address_state": "CA",
@@ -106,7 +102,7 @@ class TestBetaRegistration:
         assert reg["first_name"] == "Test"
         assert reg["last_name"] == "User"
         assert reg["email"] == "test@example.com"
-        assert reg["ssn_last4"] == "1234"
+        assert "ssn_last4" not in reg
 
     def test_beta_status_after_registration(self):
         """GET /api/beta/status should return registered: true after registration."""

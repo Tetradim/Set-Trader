@@ -2,7 +2,7 @@
 
 **Automated bracket-trading bot — multi-broker, multi-market, production-grade dark-mode dashboard.**
 
-Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, **Demo Mode (runs without MongoDB)**, and a Windows `.exe` installer.
+Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, MongoDB-backed persistence, and a Windows `.exe` installer.
 
 ---
 
@@ -130,12 +130,12 @@ yarn dev
 
 Dashboard: `http://localhost:8002`
 
-### Demo Mode (No MongoDB Required)
+### Runtime Requirements
 
-- **Default tickers** seeded automatically: SPY, QQQ, AAPL, NVDA
-- **In-memory storage** — data not persisted
-- **Paper trading** enforced
-- **WebSocket** works fully
+- **MongoDB is required** for startup and persistence.
+- **Default tickers** are seeded automatically for fresh databases.
+- **Broker feeds or yfinance** are required for new market prices; cached prices are used only after a real quote has been stored.
+- **Paper trading** remains available as a trading safety mode, but it is not a demo runtime.
 
 ---
 
@@ -1088,7 +1088,7 @@ details      object   — event-specific payload
 | Collection | Purpose |
 |-----------|---------|
 | `profits` | `{symbol, total_pnl, trade_count, updated_at}` — cumulative realized P&L per ticker |
-| `broker_credentials` | Encrypted broker credentials (XOR + base64, keyed by `CREDENTIAL_KEY` env var) |
+| `broker_credentials` | Encrypted broker credentials, keyed by `CREDENTIAL_KEY` or a per-device runtime secret |
 | `feedback` | Submitted bug reports and suggestions |
 | `beta_registrations` | Beta tester personal data + agreement |
 | `cash_ledger` | Append-only log of take-profit events |
@@ -1102,7 +1102,7 @@ details      object   — event-specific payload
 |----------|----------|-------------|
 | `MONGO_URL` | Yes | MongoDB connection string (e.g. `mongodb://localhost:27017`) |
 | `DB_NAME` | Yes | Database name |
-| `CREDENTIAL_KEY` | No | XOR key for broker credential encryption (defaults to a built-in key) |
+| `CREDENTIAL_KEY` | No | Broker credential encryption secret. Leave blank for desktop beta installs to generate a per-device runtime secret. |
 | `SMTP_HOST` | No | SMTP server hostname |
 | `SMTP_PORT` | No | SMTP port (default 587) |
 | `SMTP_USER` | No | SMTP username |
@@ -1110,7 +1110,6 @@ details      object   — event-specific payload
 | `SMTP_RECIPIENT` | No | Admin email for feedback/beta notifications |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins (default `*`) |
 | `PORT` | No | Server port (default `8002`) |
-| `DEMO_MODE` | No | Set `true` to run without MongoDB (seeds default tickers) |
 | `PULSE_API_URL` | No | Sentinel Edge URL for OTel auto-discovery |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector URL (e.g. Jaeger, Grafana Tempo) |
 | `OTEL_CONSOLE_EXPORT` | No | Set `true` to print spans to console |
@@ -1294,7 +1293,7 @@ This section tracks the implementation status of all features documented in this
 | Feature | Status | Implementation |
 |---------|--------|--------------|
 | Environment Config | ✅ Implemented | `backend/config.py` |
-| Demo Mode | ✅ Implemented | `DEMO_MODE=true` |
+| MongoDB-backed runtime | ✅ Implemented | Startup requires a reachable database |
 | Docker Support | ✅ Implemented | `docker-compose.yml` |
 | Windows Installer | ✅ Implemented | PyInstaller + Inno Setup |
 | GitHub Actions CI/CD | ✅ Implemented | `.github/workflows/` |
@@ -1309,16 +1308,16 @@ This section tracks the implementation status of all features documented in this
 | WebSocket Connectivity | 🔵 Partial | Defined, needs metrics |
 | Price Feed Latency | 🔵 Partial | Defined, needs metrics |
 
-### Demo vs Production Endpoints
+### Production Endpoint Status
 
-The following endpoints include **demo/sample data** for UI testing and need **live broker/integration integration** for production:
+The beta-facing endpoints below are backed by live application state or persisted records:
 
-1. **`/api/reconciliation/records`** - Returns demo reconciliation records; needs broker statement sync
-2. **`/api/audit/events`** - Includes demo audit events; uses existing audit_service
-3. **`/api/ops/services`** - Returns demo service health; needs observability integration
-4. **`/api/ops/incidents`** - Returns demo incidents; needs alerting integration
-5. **`/api/analytics/*`** - Returns demo analytics; needs real metrics
-6. **`/api/slo/*`** - SLO definitions in place; needs metric collection
+1. **`/api/reconciliation/records`** - Reads persisted reconciliation records and broker statement sync results.
+2. **`/api/audit/events`** - Reads structured audit records from `audit_logs`.
+3. **`/api/ops/services`** - Reports live API, database, engine, and WebSocket health.
+4. **`/api/ops/incidents`** - Reads and writes persisted incident records.
+5. **`/api/analytics/*`** - Calculates values from persisted trades, profits, and engine positions.
+6. **`/api/slo/*`** - SLO definitions in place; metric collection still depends on deployment telemetry.
 
 ### Build & Runtime Status
 
@@ -1327,7 +1326,7 @@ The following endpoints include **demo/sample data** for UI testing and need **l
 | Backend starts | ✅ Verified |
 | Frontend builds | ✅ Verified |
 | WebSocket connects | ✅ Verified |
-| Demo mode runs | ✅ Verified |
+| MongoDB-required runtime | ✅ Verified |
 | MongoDB integration | ✅ Verified |
 | Multi-broker execution | ✅ Verified |
 | Paper/live trading | ✅ Verified |

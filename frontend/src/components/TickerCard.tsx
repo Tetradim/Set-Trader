@@ -1,4 +1,4 @@
-import React, { memo, useState, useCallback, useEffect, useRef } from 'react';
+import React, { memo, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Switch } from '@/components/ui/switch';
@@ -9,6 +9,17 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getMarketMeta, formatPrice } from '@/lib/market-utils';
 import { TunnelSVG } from './TunnelSVG';
+import {
+  buildTickerChartData,
+  computeResizeState,
+  getChartDomain,
+  hasMeaningfulChartMovement,
+  RESIZE_HANDLES,
+  ResizeDirection,
+  TICKER_CARD_MIN_HEIGHT,
+  TICKER_CARD_MIN_WIDTH,
+  TICKER_CARD_SNAP_GRID,
+} from '@/lib/ticker-card-utils';
 import {
   AreaChart,
   Area,
@@ -33,11 +44,9 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
   const { send }           = useWebSocket();
   const price              = useStore((s) => s.prices[ticker.symbol] ?? 0);
   const pnl                = useStore((s) => s.profits[ticker.symbol] ?? 0);
-  const position           = useStore((s) => s.positions[ticker.symbol]);
   const priceHistory       = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
   const currencyDisplay    = useStore((s) => s.currencyDisplay);
   const fxRates            = useStore((s) => s.fxRates);
-  const failedBrokers      = useStore((s) => s.failedBrokers);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmTP,     setConfirmTP]     = useState(false);
@@ -58,58 +67,29 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
     onConfigOpen(ticker.symbol);
   }, [onConfigOpen, ticker.symbol]);
 
-  // Enhanced resize - supports 8 directions + optional snap-to-grid + Windows-like move
-  const handleResizeStart = useCallback((e: React.MouseEvent, direction: 'n'|'s'|'e'|'w'|'ne'|'nw'|'se'|'sw'|'move') => {
+  const handleResizeStart = useCallback((e: React.MouseEvent, direction: ResizeDirection) => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    const startWidth = resizeRef.current?.offsetWidth || 200;
-    const startHeight = resizeRef.current?.offsetHeight || 215;
-    const startLeft = resizeRef.current?.offsetLeft || 0;
-    const startTop = resizeRef.current?.offsetTop || 0;
-    
-    // Optional snap grid size
-    const SNAP_GRID = 10;
-    const snapToGrid = (value: number) => Math.round(value / SNAP_GRID) * SNAP_GRID;
+    const startWidth = resizeRef.current?.offsetWidth || TICKER_CARD_MIN_WIDTH;
+    const startHeight = resizeRef.current?.offsetHeight || TICKER_CARD_MIN_HEIGHT;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!resizeRef.current) return;
-      
-      const deltaX = moveEvent.clientX - startX;
-      const deltaY = moveEvent.clientY - startY;
-      
-      let newWidth = startWidth;
-      let newHeight = startHeight;
-      let newLeft = startLeft;
-      let newTop = startTop;
-      
-      if (direction.includes('e')) {
-        newWidth = startWidth + deltaX;
-      }
-      if (direction.includes('w')) {
-        newWidth = startWidth - deltaX;
-        newLeft = startLeft + deltaX;
-      }
-      if (direction.includes('s')) {
-        newHeight = startHeight + deltaY;
-      }
-      if (direction.includes('n')) {
-        newHeight = startHeight - deltaY;
-        newTop = startTop + deltaY;
-      }
-      
-      // Apply minimum constraints
-      if (newWidth >= 200) {
-        // Snap-to-grid when shift held (Windows-like behavior)
-        const finalWidth = e.shiftKey ? snapToGrid(newWidth) : newWidth;
-        setCardSize(prev => ({ ...prev, width: finalWidth }));
-      }
-      if (newHeight >= 215) {
-        const finalHeight = e.shiftKey ? snapToGrid(newHeight) : newHeight;
-        setCardSize(prev => ({ ...prev, height: finalHeight }));
-      }
+      const nextSize = computeResizeState({
+        direction,
+        startWidth,
+        startHeight,
+        deltaX: moveEvent.clientX - startX,
+        deltaY: moveEvent.clientY - startY,
+        minWidth: TICKER_CARD_MIN_WIDTH,
+        minHeight: TICKER_CARD_MIN_HEIGHT,
+        snap: moveEvent.shiftKey,
+        snapGrid: TICKER_CARD_SNAP_GRID,
+      });
+
+      setCardSize(nextSize);
     };
 
     const handleMouseUp = () => {
@@ -129,10 +109,10 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
     setCardSize((current) => {
       const width = current.width || resizeRef.current?.offsetWidth || 0;
       const height = current.height || resizeRef.current?.offsetHeight || 0;
-      if (e.key === 'ArrowRight') return { width: Math.max(200, width + step), height };
-      if (e.key === 'ArrowLeft') return { width: Math.max(200, width - step), height };
-      if (e.key === 'ArrowDown') return { width, height: Math.max(215, height + step) };
-      return { width, height: Math.max(215, height - step) };
+      if (e.key === 'ArrowRight') return { width: Math.max(TICKER_CARD_MIN_WIDTH, width + step), height };
+      if (e.key === 'ArrowLeft') return { width: Math.max(TICKER_CARD_MIN_WIDTH, width - step), height };
+      if (e.key === 'ArrowDown') return { width, height: Math.max(TICKER_CARD_MIN_HEIGHT, height + step) };
+      return { width, height: Math.max(TICKER_CARD_MIN_HEIGHT, height - step) };
     });
   }, []);
 
@@ -188,44 +168,11 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
     zIndex:     isDragging ? 50 : undefined,
   };
 
-  // Build sparkline points from price history
-  const sparkPoints = (() => {
-    if (priceHistory.length < 2) return null;
-    const pts  = priceHistory.slice(-60);
-    const vals = pts.map((p) => p.price);
-    const min  = Math.min(...vals);
-    const max  = Math.max(...vals);
-    const range = max - min || 1;
-    const w = 180, h = 26;
-    const coords = pts.map((p, i) => {
-      const x = (i / (pts.length - 1)) * w;
-      const y = h - ((p.price - min) / range) * h;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
-    return coords.join(' ');
-  })();
-
   const sparkColor = isPositive ? '#2dd4a0' : '#e03040';
-  const sparkId    = `spark-${ticker.symbol}`;
 
-  // Build chart data from price history
-  const chartData = (() => {
-    if (priceHistory.length < 2) return [];
-    return priceHistory.slice(-120).map((p) => ({
-      time: p.time,
-      price: p.price,
-    }));
-  })();
-
-  // Min/max for YAxis domain
-  const chartDomain = (() => {
-    if (chartData.length === 0) return [0, 1];
-    const prices = chartData.map((d) => d.price);
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    const padding = (max - min) * 0.1 || 1;
-    return [min - padding, max + padding];
-  })();
+  const chartData = useMemo(() => buildTickerChartData(priceHistory, price), [priceHistory, price]);
+  const chartDomain = useMemo(() => getChartDomain(chartData), [chartData]);
+  const hasChartMovement = useMemo(() => hasMeaningfulChartMovement(chartData), [chartData]);
 
   // Sheen class based on mode
   const modeSheen = (() => {
@@ -237,6 +184,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
 
   const modeLabel = !isActive ? 'PAUSED' : ticker.strategy === 'paper' ? 'PAPER' : 'LIVE';
   const modeClass = !isActive ? 'sp-mode-paused' : ticker.strategy === 'paper' ? 'sp-mode-paper' : 'sp-mode-live';
+  const chartGradientId = `chartGrad-${ticker.symbol.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
   return (
     <div
@@ -247,9 +195,9 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
       style={{
         ...dndStyle,
         ...(cardSize.width > 0 ? { width: cardSize.width, minWidth: cardSize.width } : {}),
-        ...(cardSize.height > 0 ? { minHeight: cardSize.height } : {}),
+        ...(cardSize.height > 0 ? { height: cardSize.height, minHeight: cardSize.height } : {}),
       }}
-      className={cardClass}
+      className={`${cardClass} ${isResizing ? 'resizing' : ''}`}
       data-testid={`ticker-card-${ticker.symbol}`}
       onDoubleClick={handleCardDoubleClick}
     >
@@ -305,59 +253,42 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
           )}
         </div>
 
-        {/* Chart - Recharts AreaChart for price history */}
-        {chartData.length >= 2 ? (
-          <div className="sp-chart-container" style={{ width: '100%', height: 60 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                <defs>
-                  <linearGradient id={`chartGrad-${ticker.symbol}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={sparkColor} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={sparkColor} stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="time" hide />
-                <YAxis domain={chartDomain} hide />
-                <Tooltip
-                  contentStyle={{
-                    background: '#1a1a24',
-                    border: '1px solid rgba(220,168,40,0.3)',
-                    borderRadius: 4,
-                    fontSize: 11,
-                  }}
-                  labelStyle={{ display: 'none' }}
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, 'Price']}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="price"
-                  stroke={sparkColor}
-                  strokeWidth={1.5}
-                  fill={`url(#chartGrad-${ticker.symbol})`}
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          /* Fallback when insufficient data - show sparkline */
-          <svg className="sp-sparkline" viewBox="0 0 180 26" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id={sparkId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor={sparkColor} stopOpacity={0.25} />
-                <stop offset="100%" stopColor={sparkColor} stopOpacity={0}    />
-              </linearGradient>
-            </defs>
-            {sparkPoints ? (
-              <>
-                <polyline points={sparkPoints} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="round" />
-                <polyline points={`${sparkPoints} 180,26 0,26`} fill={`url(#${sparkId})`} />
-              </>
-            ) : (
-              <line x1="0" y1="13" x2="180" y2="13" stroke={sparkColor} strokeWidth="1" strokeOpacity="0.2" strokeDasharray="4 3" />
-            )}
-          </svg>
-        )}
+        <div className={`sp-chart-container ${hasChartMovement ? '' : 'flat'}`}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+              <defs>
+                <linearGradient id={chartGradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={sparkColor} stopOpacity={0.3} />
+                  <stop offset="100%" stopColor={sparkColor} stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="time" hide />
+              <YAxis domain={chartDomain} hide />
+              <Tooltip
+                contentStyle={{
+                  background: '#1a1a24',
+                  border: '1px solid rgba(220,168,40,0.3)',
+                  borderRadius: 4,
+                  fontSize: 11,
+                }}
+                labelStyle={{ display: 'none' }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, 'Price']}
+              />
+              <Area
+                type="monotone"
+                dataKey="price"
+                stroke={sparkColor}
+                strokeWidth={1.5}
+                fill={`url(#${chartGradientId})`}
+                isAnimationActive={false}
+                dot={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+          {!hasChartMovement && (
+            <div className="sp-chart-flat-label">Live trace pending</div>
+          )}
+        </div>
 
         {/* Buy / Sell brackets — quick editable */}
         <div className="sp-bracket-row">
@@ -446,18 +377,15 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
         </div>
       </div>
 
-      {/* Multi-directional resize handles - Windows-like resizing */}
-      {/* Corner handles */}
-      <div className="sp-resize-handle se" role="separator" aria-label="Resize SE" onMouseDown={(e) => handleResizeStart(e, 'se')} style={{ cursor: 'se-resize', position: 'absolute', right: 0, bottom: 0, width: 12, height: 12 }} />
-      <div className="sp-resize-handle sw" role="separator" aria-label="Resize SW" onMouseDown={(e) => handleResizeStart(e, 'sw')} style={{ cursor: 'sw-resize', position: 'absolute', left: 0, bottom: 0, width: 12, height: 12 }} />
-      <div className="sp-resize-handle ne" role="separator" aria-label="Resize NE" onMouseDown={(e) => handleResizeStart(e, 'ne')} style={{ cursor: 'ne-resize', position: 'absolute', right: 0, top: 0, width: 12, height: 12 }} />
-      <div className="sp-resize-handle nw" role="separator" aria-label="Resize NW" onMouseDown={(e) => handleResizeStart(e, 'nw')} style={{ cursor: 'nw-resize', position: 'absolute', left: 0, top: 0, width: 12, height: 12 }} />
-      
-      {/* Edge handles */}
-      <div className="sp-resize-handle e" role="separator" aria-label="Resize East" onMouseDown={(e) => handleResizeStart(e, 'e')} style={{ cursor: 'e-resize', position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', width: 8, height: 40 }} />
-      <div className="sp-resize-handle w" role="separator" aria-label="Resize West" onMouseDown={(e) => handleResizeStart(e, 'w')} style={{ cursor: 'w-resize', position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 8, height: 40 }} />
-      <div className="sp-resize-handle s" role="separator" aria-label="Resize South" onMouseDown={(e) => handleResizeStart(e, 's')} style={{ cursor: 's-resize', position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: 40, height: 8 }} />
-      <div className="sp-resize-handle n" role="separator" aria-label="Resize North" onMouseDown={(e) => handleResizeStart(e, 'n')} style={{ cursor: 'n-resize', position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 40, height: 8 }} />
+      {RESIZE_HANDLES.map((handle) => (
+        <div
+          key={handle.direction}
+          className={handle.className}
+          role="separator"
+          aria-label={`${handle.label} ${ticker.symbol}`}
+          onMouseDown={(e) => handleResizeStart(e, handle.direction)}
+        />
+      ))}
       
       {/* Keyboard accessible resize handle (alternative) */}
       <div

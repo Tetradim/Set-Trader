@@ -1,6 +1,88 @@
 import React, { useState, useEffect } from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Minus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Plus, Minus, Plug } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
+
+interface BrokerOption {
+  id: string;
+  name: string;
+  color: string;
+  supported: boolean;
+  readiness?: 'production' | 'beta' | 'experimental' | 'unavailable';
+  risk_warning?: { level: string; message: string } | null;
+}
+
+export function BrokerSelector({
+  selectedBrokerIds,
+  onChange,
+}: {
+  selectedBrokerIds: string[];
+  onChange: (brokerIds: string[]) => void;
+}) {
+  const [brokers, setBrokers] = useState<BrokerOption[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/brokers')
+      .then((data: BrokerOption[]) => {
+        if (!cancelled) setBrokers(data.filter((broker) => broker.supported));
+      })
+      .catch(() => {
+        if (!cancelled) setBrokers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function toggleBroker(brokerId: string) {
+    const next = selectedBrokerIds.includes(brokerId)
+      ? selectedBrokerIds.filter((id) => id !== brokerId)
+      : [...selectedBrokerIds, brokerId];
+    onChange(next);
+  }
+
+  return (
+    <div className="space-y-2" data-testid="config-broker-selector">
+      {brokers.map((broker) => {
+        const selected = selectedBrokerIds.includes(broker.id);
+        const experimental = broker.readiness === 'experimental' || broker.risk_warning?.level === 'high';
+        return (
+          <button
+            type="button"
+            key={broker.id}
+            onClick={() => toggleBroker(broker.id)}
+            className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
+              selected
+                ? 'bg-primary/10 border-primary/50'
+                : 'bg-secondary/30 border-border hover:border-primary/30'
+            }`}
+            data-testid={`config-broker-option-${broker.id}`}
+          >
+            <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: broker.color }} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <Plug size={12} className="text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">{broker.name}</span>
+                {selected && <CheckCircle2 size={14} className="text-primary" />}
+              </div>
+              {experimental && (
+                <div className="flex items-center gap-1 text-[10px] text-amber-400 mt-0.5">
+                  <AlertTriangle size={10} />
+                  <span>Experimental or high restriction risk</span>
+                </div>
+              )}
+            </div>
+            <Checkbox checked={selected} className="shrink-0 pointer-events-none" />
+          </button>
+        );
+      })}
+      {brokers.length === 0 && (
+        <p className="text-xs text-muted-foreground">No supported brokers available.</p>
+      )}
+    </div>
+  );
+}
 
 /* ========= useDecimalInput ========= */
 export function useDecimalInput(externalValue: number, commit: (v: number) => void) {

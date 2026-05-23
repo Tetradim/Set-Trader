@@ -51,25 +51,22 @@ Replace the values with your actual credentials.
 
 ---
 
-## Option 3: In-Memory (Testing Only, Data Lost on Restart)
+## Option 3: Fresh Local Data Directory
 
-The app attempts this automatically when MongoDB is unavailable, but it may fail if:
-- MongoDB is partially detected
-- A previous config exists
+Use a fresh local MongoDB data directory when you want a clean beta-test database without touching existing data.
 
-### Force In-Memory Mode
+### Use a Local MongoDB URL
 Create or edit the `.env` file in the app folder:
 
 ```
-MONGO_URL=
-DEMO_MODE=true
-CREDENTIAL_KEY=any-secret-key
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=sentinelpulse_beta
 ```
 
 ### Important Notes
-- All data is lost when you close the app
-- No historical data, trades, or settings persist
-- Good for UI testing only
+- Data persists in MongoDB until you drop the database
+- Runtime JWT and credential encryption secrets are generated per device if not set
+- Good for isolated beta testing
 
 ---
 
@@ -90,4 +87,4 @@ CREDENTIAL_KEY=any-secret-key
 |-------|-----|
 | "No connection could be made" | MongoDB not running - start mongod |
 | "Auth failed" | Check username/password in .env |
-| "Demo mode" issues | Ensure MONGO_URL is empty for Option 3 |
+| "Clean database" needed | Set a new DB_NAME or drop the existing MongoDB database |

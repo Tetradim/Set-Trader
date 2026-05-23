@@ -13,6 +13,8 @@ interface BrokerData {
   name: string;
   description: string;
   supported: boolean;
+  readiness?: 'production' | 'beta' | 'experimental' | 'unavailable';
+  readiness_note?: string;
   auth_fields: string[];
   docs_url: string;
   color: string;
@@ -61,6 +63,20 @@ const CHECK_STATUS_STYLES: Record<string, string> = {
   pass: 'text-emerald-400',
   fail: 'text-red-400',
   warn: 'text-amber-400',
+};
+
+const READINESS_STYLES: Record<NonNullable<BrokerData['readiness']>, string> = {
+  production: 'bg-emerald-500/15 text-emerald-400',
+  beta: 'bg-sky-500/15 text-sky-400',
+  experimental: 'bg-amber-500/15 text-amber-400',
+  unavailable: 'bg-secondary text-muted-foreground',
+};
+
+const READINESS_LABELS: Record<NonNullable<BrokerData['readiness']>, string> = {
+  production: 'Official API',
+  beta: 'Beta',
+  experimental: 'Experimental',
+  unavailable: 'Unavailable',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -152,6 +168,8 @@ export function BrokersTab() {
 function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; onTestClick: () => void; accountInfo?: { buyingPower: number; balance: number } }) {
   const risk = broker.risk_warning;
   const colors = risk ? RISK_COLORS[risk.level] || RISK_COLORS.medium : RISK_COLORS.low;
+  const readiness = broker.readiness || (broker.supported ? 'beta' : 'unavailable');
+  const readinessClass = READINESS_STYLES[readiness];
   const [showConfig, setShowConfig] = useState(false);
   const [rateLimitStatus, setRateLimitStatus] = useState<RateLimitStatus | null>(null);
   const [useBrokerPrices, setUseBrokerPrices] = useState(false);
@@ -174,15 +192,10 @@ function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h3 className="text-sm font-semibold text-foreground">{broker.name}</h3>
-            {broker.supported ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400" data-testid={`broker-status-${broker.id}`}>
-                <CheckCircle2 size={10} /> Available
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full bg-secondary text-muted-foreground" data-testid={`broker-status-${broker.id}`}>
-                <Lock size={10} /> Coming Soon
-              </span>
-            )}
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${readinessClass}`} data-testid={`broker-status-${broker.id}`}>
+              {broker.supported ? <CheckCircle2 size={10} /> : <Lock size={10} />}
+              {READINESS_LABELS[readiness]}
+            </span>
             {risk && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full ${colors.badge}`} data-testid={`broker-risk-badge-${broker.id}`}>
                 Risk: {risk.level.toUpperCase()}
@@ -195,6 +208,11 @@ function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; 
             )}
           </div>
           <p className="text-xs text-muted-foreground mb-2">{broker.description}</p>
+          {broker.readiness_note && (
+            <p className="text-[11px] text-muted-foreground mb-2" data-testid={`broker-readiness-note-${broker.id}`}>
+              {broker.readiness_note}
+            </p>
+          )}
           {risk && (
             <div className={`flex items-start gap-2 text-xs leading-relaxed px-3 py-2 rounded-lg border ${colors.border} ${colors.bg}`} data-testid={`broker-warning-${broker.id}`}>
               <AlertTriangle size={14} className={`shrink-0 mt-0.5 ${colors.text}`} />
@@ -223,7 +241,7 @@ function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; 
             }`}
             data-testid={`broker-connect-${broker.id}`}
           >
-            {broker.supported ? 'Connect' : 'Unavailable'}
+            {broker.supported && readiness === 'experimental' ? 'Connect Experimental' : broker.supported ? 'Connect' : 'Unavailable'}
           </button>
           {accountInfo && (
             <button

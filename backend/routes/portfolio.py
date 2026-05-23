@@ -1,4 +1,6 @@
 """Portfolio analytics routes."""
+import math
+import statistics
 from typing import Optional
 from fastapi import APIRouter, Query
 from datetime import datetime, timedelta
@@ -10,7 +12,7 @@ router = APIRouter(tags=["Portfolio"])
 
 
 @router.get("/portfolio/stats")
-async def get_portfolio_stats(period: str = Query("month", regex="^(today|week|month|all)$")):
+async def get_portfolio_stats(period: str = Query("month", pattern="^(today|week|month|all)$")):
     """Get portfolio performance statistics."""
     now = datetime.utcnow()
     
@@ -51,9 +53,30 @@ async def get_portfolio_stats(period: str = Query("month", regex="^(today|week|m
     total_pnl = sum(t.get("pnl", 0) for t in trades)
     total_pnl_pct = (total_pnl / account_balance * 100) if account_balance > 0 else 0
     
-    # Mock values for sharpe/mdd (would require historical data)
-    sharpe_ratio = 1.5
-    max_drawdown = -5.2
+    daily_pnl = defaultdict(float)
+    for trade in trades:
+        ts = str(trade.get("timestamp", ""))
+        if ts:
+            daily_pnl[ts.split("T")[0]] += trade.get("pnl", 0)
+
+    daily_returns = [
+        (pnl / account_balance) if account_balance > 0 else 0
+        for pnl in daily_pnl.values()
+    ]
+    if len(daily_returns) > 1 and statistics.pstdev(daily_returns) > 0:
+        sharpe_ratio = (statistics.mean(daily_returns) / statistics.pstdev(daily_returns)) * math.sqrt(252)
+    else:
+        sharpe_ratio = 0
+
+    equity = account_balance
+    peak = account_balance
+    max_drawdown = 0.0
+    for date in sorted(daily_pnl):
+        equity += daily_pnl[date]
+        peak = max(peak, equity)
+        if peak > 0:
+            drawdown_pct = ((equity - peak) / peak) * 100
+            max_drawdown = min(max_drawdown, drawdown_pct)
     
     return {
         "stats": {
@@ -64,8 +87,8 @@ async def get_portfolio_stats(period: str = Query("month", regex="^(today|week|m
             "avgWin": avg_win,
             "avgLoss": avg_loss,
             "profitFactor": profit_factor,
-            "maxDrawdown": max_drawdown,
-            "sharpeRatio": sharpe_ratio,
+            "maxDrawdown": round(max_drawdown, 2),
+            "sharpeRatio": round(sharpe_ratio, 2),
         }
     }
 
@@ -119,7 +142,7 @@ async def get_positions_by_broker():
 
 
 @router.get("/portfolio/daily-returns")
-async def get_daily_returns(period: str = Query("month", regex="^(today|week|month|all)$")):
+async def get_daily_returns(period: str = Query("month", pattern="^(today|week|month|all)$")):
     """Get daily returns for charting."""
     now = datetime.utcnow()
     
@@ -165,7 +188,7 @@ async def get_daily_returns(period: str = Query("month", regex="^(today|week|mon
 
 
 @router.get("/portfolio/export")
-async def export_portfolio(format: str = Query("csv", regex="^(csv|json)$"), period: str = Query("month")):
+async def export_portfolio(format: str = Query("csv", pattern="^(csv|json)$"), period: str = Query("month")):
     """Export portfolio data."""
     now = datetime.utcnow()
     

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class Environment(str, Enum):
     """Deployment environments."""
-    DEVELOPMENT = "development"
+    LOCAL = "local"
     STAGING = "staging"
     PRODUCTION = "production"
 
@@ -86,12 +86,12 @@ def load_config() -> EnvironmentConfig:
     # Load base config
     _config = EnvironmentConfig(
         environment=env,
-        debug=env == Environment.DEVELOPMENT,
-        log_level="DEBUG" if env == Environment.DEVELOPMENT else "INFO",
+        debug=False,
+        log_level="INFO",
     )
     
     # Environment-specific overrides
-    if env == Environment.DEVELOPMENT:
+    if env == Environment.LOCAL:
         _config.db_host = "localhost"
         _config.redis_host = "localhost"
         _config.features["live_trading"] = False

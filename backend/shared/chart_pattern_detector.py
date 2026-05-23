@@ -437,32 +437,3 @@ class ChartPatternDetector:
         patterns = self.detect_all(df)
         return patterns[0] if patterns else None
 
-
-# Example usage for Pulse integration
-if __name__ == "__main__":
-    import sys
-    
-    # Demo with sample data
-    np.random.seed(42)
-    n = 100
-    
-    # Generate double bottom pattern
-    prices = 100 + np.cumsum(np.random.randn(n) * 0.5)
-    # Inject W shape
-    prices[40:45] = [98, 95, 97, 95, 98]
-    prices[55:60] = [98, 94, 97, 95, 99]
-    
-    df = pd.DataFrame({
-        "open": prices + np.random.randn(n) * 0.2,
-        "high": prices + np.abs(np.random.randn(n)),
-        "low": prices - np.abs(np.random.randn(n)),
-        "close": prices,
-        "volume": np.random.randint(1000000, 5000000, n),
-    })
-    
-    detector = ChartPatternDetector()
-    patterns = detector.detect_all(df)
-    
-    print("Detected patterns:")
-    for p in patterns:
-        print(f"  {p['pattern']}: {p['confidence']:.2%}")

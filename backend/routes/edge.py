@@ -10,10 +10,11 @@ Edge calls these endpoints to:
 
 This matches what sentinel-edge's pulse_client.py expects.
 """
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
@@ -25,7 +26,7 @@ from shared import (
     build_account_update,
 )
 
-router = APIRouter()
+router = APIRouter(prefix="/edge")
 
 # In-memory signal cache (reset on restart)
 # Key = symbol, Value = latest signal dict
@@ -99,14 +100,14 @@ def _check_rate_limit(client_ip: str) -> bool:
     return True
 
 
-# --- API Key validation (optional) ---
 async def validate_api_key(x_api_key: Optional[str] = Header(None)) -> bool:
-    """Validate API key if configured."""
-    expected = deps.db.settings.find_one({"key": "edge_api_key"})
-    if expected:
-        expected_key = expected.get("value", "")
-        if expected_key and x_api_key != expected_key:
-            raise HTTPException(401, "Invalid API key")
+    """Validate the Edge integration API key."""
+    expected = await deps.db.settings.find_one({"key": "edge_api_key"}, {"_id": 0})
+    expected_key = expected.get("value", "") if expected else ""
+    if not expected_key:
+        raise HTTPException(503, "Edge API key is not configured")
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected_key):
+        raise HTTPException(401, "Invalid API key")
     return True
 
 
@@ -142,7 +143,7 @@ class SignalResponse(BaseModel):
 # --- Endpoints ---
 
 
-@router.post("/tickers/{symbol}/decision")
+@router.post("/tickers/{symbol}/decision", dependencies=[Depends(validate_api_key)])
 async def post_decision(symbol: str, body: DecisionRequest):
     """Process decision from Edge.
     
@@ -257,7 +258,7 @@ async def post_decision(symbol: str, body: DecisionRequest):
     return result
 
 
-@router.post("/tickers/{symbol}/trailing")
+@router.post("/tickers/{symbol}/trailing", dependencies=[Depends(validate_api_key)])
 async def enable_trailing(symbol: str, body: TrailingRequest):
     """Enable trailing stop for a symbol."""
     sym = symbol.upper()
@@ -274,7 +275,7 @@ async def enable_trailing(symbol: str, body: TrailingRequest):
     return {"status": "ok", "symbol": sym, "trailing_enabled": True, "trailing_percent": body.trailing_percent}
 
 
-@router.post("/signals/{symbol}")
+@router.post("/signals/{symbol}", dependencies=[Depends(validate_api_key)])
 async def submit_signal(symbol: str, body: SignalRequest) -> SignalResponse:
     """Receive signals from Edge and update metrics cache.
     
@@ -320,7 +321,7 @@ async def submit_signal(symbol: str, body: SignalRequest) -> SignalResponse:
     return SignalResponse(status="ok", symbol=sym, action="signal", message="signal cached")
 
 
-@router.get("/positions/{symbol}")
+@router.get("/positions/{symbol}", dependencies=[Depends(validate_api_key)])
 async def get_position(symbol: str):
     """Get position for a symbol.
     
@@ -382,7 +383,7 @@ async def get_position(symbol: str):
     }
 
 
-@router.get("/account/status")
+@router.get("/account/status", dependencies=[Depends(validate_api_key)])
 async def get_account_status():
     """Get account status.
     
@@ -463,7 +464,7 @@ async def get_account_status():
     }
 
 
-@router.get("/tickers")
+@router.get("/tickers", dependencies=[Depends(validate_api_key)])
 async def get_tickers():
     """Get all configured tickers.
     
@@ -499,7 +500,7 @@ class SignalEvalResponse(BaseModel):
     observation_applied: bool = False  # Whether pattern observation was used
 
 
-@router.post("/signals/evaluate")
+@router.post("/signals/evaluate", dependencies=[Depends(validate_api_key)])
 async def evaluate_signal(body: SignalEvalRequest):
     """Evaluate trading signal using Edge-style scoring.
     
@@ -556,7 +557,7 @@ async def evaluate_signal(body: SignalEvalRequest):
 
 
 # --- Prometheus metrics for Edge integration ---
-@router.get("/metrics", response_class=PlainTextResponse)
+@router.get("/metrics", response_class=PlainTextResponse, dependencies=[Depends(validate_api_key)])
 async def edge_prometheus_metrics():
     """Expose Edge signals as Prometheus metrics.
     

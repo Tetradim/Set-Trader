@@ -142,9 +142,9 @@ jobs:
           MONGO_URL=mongodb://localhost:27017
           DB_NAME=sentinelpulse
           CORS_ORIGINS=http://localhost:8002,http://127.0.0.1:8002
-          DEMO_MODE=true
           PORT=8002
-          LOG_LEVEL=DEBUG
+          LOG_LEVEL=INFO
+          SIMULATE_24_7=false
           "@ | Out-File -Encoding UTF8 backend/.env
 
       # ---------------------------------------------------------------------

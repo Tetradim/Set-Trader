@@ -1,13 +1,21 @@
 import { useWebSocket } from './hooks/useWebSocket';
 import { Dashboard } from './components/Dashboard';
+import { AuthGate } from './components/AuthGate';
 import { Toaster } from 'sonner';
 
-function App() {
+function AuthedApp() {
   useWebSocket();
+
+  return <Dashboard />;
+}
+
+function App() {
 
   return (
     <>
-      <Dashboard />
+      <AuthGate>
+        <AuthedApp />
+      </AuthGate>
       <Toaster
         position="bottom-right"
         theme="dark"

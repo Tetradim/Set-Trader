@@ -1,22 +1,16 @@
-"""Operations API routes.
+"""Operations API routes for service health, incidents, and runbooks."""
+from datetime import datetime, timezone
+from typing import Optional
 
-Provides endpoints for service health monitoring, incidents, and runbooks.
-"""
-from typing import List, Optional
-from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
+from pymongo import ReturnDocument
 from pydantic import BaseModel
 
-from auth import get_current_user, TokenData, require_roles, Role
+import deps
+from auth import Role, TokenData, get_current_user, require_roles
 
 
-router = APIRouter(prefix="/api/ops", tags=["ops"])
-
-
-# In-memory storage
-_services_db = []
-_incidents_db = []
-_runbooks_db = []
+router = APIRouter(prefix="/ops", tags=["ops"])
 
 
 class Service(BaseModel):
@@ -25,7 +19,7 @@ class Service(BaseModel):
     status: str
     uptime: float
     last_check: str
-    dependencies: List[str] = []
+    dependencies: list[str] = []
     metrics: dict = {}
 
 
@@ -46,152 +40,133 @@ class Runbook(BaseModel):
     title: str
     service: str
     description: str
-    steps: List[str] = []
+    steps: list[str] = []
 
 
-@router.get("/services", response_model=List[Service])
-async def get_services(
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Get all services and their health status."""
-    return _services_db or [
-        {
-            "service_id": "api",
-            "name": "API Server",
-            "status": "healthy",
-            "uptime": 99.99,
-            "last_check": datetime.utcnow().isoformat(),
-            "dependencies": ["db", "cache"],
-            "metrics": {"requests_per_sec": 150, "latency_ms": 25}
-        },
-        {
-            "service_id": "engine",
-            "name": "Trading Engine",
-            "status": "healthy",
-            "uptime": 99.95,
-            "last_check": datetime.utcnow().isoformat(),
-            "dependencies": ["api", "broker"],
-            "metrics": {"orders_per_min": 10, "fills_per_min": 8}
-        },
-        {
-            "service_id": "ws",
-            "name": "WebSocket",
-            "status": "healthy",
-            "uptime": 99.98,
-            "last_check": datetime.utcnow().isoformat(),
-            "dependencies": ["api"],
-            "metrics": {"connections": 25, "messages_per_sec": 50}
-        },
-        {
-            "service_id": "db",
-            "name": "Database",
-            "status": "healthy",
-            "uptime": 99.99,
-            "last_check": datetime.utcnow().isoformat(),
-            "dependencies": [],
-            "metrics": {"connections": 10, "query_latency_ms": 5}
-        }
+async def _database_status() -> str:
+    try:
+        await deps.db.command("ping")
+        return "healthy"
+    except Exception:
+        return "unhealthy"
+
+
+@router.get("/services", response_model=list[Service])
+async def get_services(current_user: TokenData = Depends(get_current_user)):
+    """Get live service health."""
+    now = datetime.now(timezone.utc).isoformat()
+    database_status = await _database_status()
+    websocket_connections = len(getattr(deps.ws_manager, "active_connections", []) or []) if deps.ws_manager else 0
+
+    engine_running = bool(getattr(deps.engine, "running", False)) if deps.engine else False
+    engine_paused = bool(getattr(deps.engine, "paused", True)) if deps.engine else True
+
+    return [
+        Service(
+            service_id="api",
+            name="API Server",
+            status="healthy",
+            uptime=0,
+            last_check=now,
+            dependencies=["db"],
+            metrics={},
+        ),
+        Service(
+            service_id="db",
+            name="Database",
+            status=database_status,
+            uptime=0,
+            last_check=now,
+            dependencies=[],
+            metrics={},
+        ),
+        Service(
+            service_id="engine",
+            name="Trading Engine",
+            status="running" if engine_running and not engine_paused else "paused",
+            uptime=0,
+            last_check=now,
+            dependencies=["db", "broker"],
+            metrics={
+                "positions": len(getattr(deps.engine, "_positions", {}) or {}) if deps.engine else 0,
+                "pending_sells": len(getattr(deps.engine, "_pending_sells", {}) or {}) if deps.engine else 0,
+            },
+        ),
+        Service(
+            service_id="ws",
+            name="WebSocket",
+            status="healthy",
+            uptime=0,
+            last_check=now,
+            dependencies=["api"],
+            metrics={"connections": websocket_connections},
+        ),
     ]
 
 
-@router.get("/incidents", response_model=List[Incident])
+@router.get("/incidents", response_model=list[Incident])
 async def get_incidents(
     status: Optional[str] = None,
     severity: Optional[str] = None,
-    current_user: TokenData = Depends(get_current_user)
+    current_user: TokenData = Depends(get_current_user),
 ):
-    """Get incidents."""
-    incidents = _incidents_db or [
-        {
-            "incident_id": "INC001",
-            "severity": "warning",
-            "title": "High latency detected",
-            "description": "API latency above 100ms for the last 5 minutes",
-            "status": "investigating",
-            "service": "api",
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "owner": "oncall"
-        }
-    ]
-    
+    """Get incidents from the database."""
+    query = {}
     if status:
-        incidents = [i for i in incidents if i["status"] == status]
+        query["status"] = status
     if severity:
-        incidents = [i for i in incidents if i["severity"] == severity]
-    
-    return incidents
+        query["severity"] = severity
+    return await deps.db.incidents.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
-@router.get("/runbooks", response_model=List[Runbook])
-async def get_runbooks(
-    current_user: TokenData = Depends(get_current_user)
-):
-    """Get runbooks."""
-    return _runbooks_db or [
-        {
-            "runbook_id": "RB001",
-            "title": "Broker reconnection procedure",
-            "service": "broker",
-            "description": "Steps to reconnect a broker after disconnection",
-            "steps": [
-                "1. Check broker status in dashboard",
-                "2. Verify credentials are valid",
-                "3. Restart broker connection",
-                "4. Verify positions sync"
-            ]
-        },
-        {
-            "runbook_id": "RB002",
-            "title": "Database backup procedure",
-            "service": "db",
-            "description": "Steps to perform a database backup",
-            "steps": [
-                "1. Stop trading engine",
-                "2. Create backup snapshot",
-                "3. Verify backup integrity",
-                "4. Restart trading engine"
-            ]
-        }
-    ]
+@router.get("/runbooks", response_model=list[Runbook])
+async def get_runbooks(current_user: TokenData = Depends(get_current_user)):
+    """Get configured runbooks."""
+    return await deps.db.runbooks.find({}, {"_id": 0}).sort("title", 1).to_list(200)
 
 
-@router.post("/incidents")
+@router.post("/incidents", response_model=Incident)
 async def create_incident(
     severity: str,
     title: str,
     description: str,
     service: str,
-    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
+    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER])),
 ):
     """Create a new incident."""
+    now = datetime.now(timezone.utc).isoformat()
+    count = await deps.db.incidents.count_documents({})
     incident = {
-        "incident_id": f"INC{len(_incidents_db) + 1:03d}",
+        "incident_id": f"INC{count + 1:06d}",
         "severity": severity,
         "title": title,
         "description": description,
         "status": "active",
         "service": service,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "owner": current_user.username
+        "created_at": now,
+        "updated_at": now,
+        "owner": current_user.username,
     }
-    _incidents_db.append(incident)
+    await deps.db.incidents.insert_one(incident)
     return incident
 
 
-@router.post("/incidents/{incident_id}/resolve")
+@router.post("/incidents/{incident_id}/resolve", response_model=Incident)
 async def resolve_incident(
     incident_id: str,
-    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
+    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER])),
 ):
     """Resolve an incident."""
-    for incident in _incidents_db:
-        if incident["incident_id"] == incident_id:
-            incident["status"] = "resolved"
-            incident["updated_at"] = datetime.utcnow().isoformat()
-            return incident
-    return {"error": "Incident not found"}
+    now = datetime.now(timezone.utc).isoformat()
+    result = await deps.db.incidents.find_one_and_update(
+        {"incident_id": incident_id},
+        {"$set": {"status": "resolved", "updated_at": now, "owner": current_user.username}},
+        projection={"_id": 0},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return result
 
 
 __all__ = ["router"]

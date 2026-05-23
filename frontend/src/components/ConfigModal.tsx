@@ -1,7 +1,7 @@
 import React, { memo, useState, useCallback, useEffect } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers, RefreshCw, ChevronDown, ChevronUp, Brain } from 'lucide-react';
+import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers, RefreshCw, ChevronDown, ChevronUp, Brain, Plug } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
@@ -15,6 +15,7 @@ import {
   SteppedInput,
   OffsetInput,
   OrderTypeToggle,
+  BrokerSelector,
 } from './ticker-card/ConfigWidgets';
 
 /* Strategy config section */
@@ -23,6 +24,7 @@ import { StrategyConfigSection } from './ticker-card/StrategyConfigSection';
 const CONFIG_TABS = [
   { id: 'strategy', label: 'Strategy', icon: Brain },
   { id: 'rules', label: 'Rules', icon: TrendingDown },
+  { id: 'brokers', label: 'Brokers', icon: Plug },
   { id: 'partial', label: 'Partial Fills', icon: Layers },
   { id: 'risk', label: 'Risk', icon: ShieldAlert },
   { id: 'rebracket', label: 'Rebracket', icon: Activity },
@@ -32,15 +34,18 @@ const CONFIG_TABS = [
 type ConfigTabId = (typeof CONFIG_TABS)[number]['id'];
 
 interface Props {
-  ticker: TickerConfig;
+  symbol: string;
   onClose: () => void;
 }
 
-export const ConfigModal = memo(function ConfigModal({ ticker, onClose }: Props) {
+export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props) {
   const { send } = useWebSocket();
   const incrementStep = useStore((s) => s.incrementStep);
   const decrementStep = useStore((s) => s.decrementStep);
+  const ticker = useStore((s) => s.tickers[symbol]);
   const [activeTab, setActiveTab] = useState<ConfigTabId>('rules');
+
+  if (!ticker) return null;
 
   const handleFieldChange = useCallback(
     (field: string, value: any) => {
@@ -156,6 +161,17 @@ export const ConfigModal = memo(function ConfigModal({ ticker, onClose }: Props)
 
             {activeTab === 'rules' && (
               <RulesTab ticker={ticker} onChange={handleFieldChange} incStep={incrementStep} decStep={decrementStep} />
+            )}
+            {activeTab === 'brokers' && (
+              <div className="space-y-4 py-2">
+                <p className="text-xs text-muted-foreground">
+                  Select which broker connections can trade this ticker. Broker-specific allocation amounts remain in Settings.
+                </p>
+                <BrokerSelector
+                  selectedBrokerIds={ticker.broker_ids || []}
+                  onChange={(broker_ids) => send('UPDATE_TICKER', { symbol: ticker.symbol, broker_ids })}
+                />
+              </div>
             )}
             {activeTab === 'partial' && (
               <PartialFillsTab ticker={ticker} onChange={handleFieldChange} send={send} />

@@ -13,7 +13,7 @@ from risk_controls import (
 )
 
 
-router = APIRouter(prefix="/api/risk", tags=["risk"])
+router = APIRouter(prefix="/risk", tags=["risk"])
 
 
 # Request/Response models

@@ -97,7 +97,6 @@ if (-not $SkipMongo) {
 # 2. Start Sentinel Pulse ----------------
 Write-Host "[2/3] Starting Sentinel Pulse..." -ForegroundColor Yellow
 
-$env:CREDENTIAL_KEY = "sentinel-$(Get-Random -Maximum 9999)"
 $env:PORT = "8002"
 
 # Start the app

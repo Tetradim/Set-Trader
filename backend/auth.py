@@ -15,6 +15,7 @@ from functools import wraps
 from fastapi import HTTPException, Request, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 from pydantic import BaseModel
+from runtime_secrets import get_or_create_secret
 
 
 logger = logging.getLogger(__name__)
@@ -60,13 +61,12 @@ class Session(BaseModel):
     user_agent: Optional[str] = None
 
 
-# In-memory user store (in production, replace with actual database)
-_users: Dict[str, User] = {}
+# Session and API-key stores are process-local. User accounts are stored in MongoDB.
 _sessions: Dict[str, Session] = {}
 _api_keys: Dict[str, Dict[str, Any]] = {}
 
-# JWT secret (in production, load from vault)
-JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
+# JWT secret. Environment wins; desktop beta installs persist a generated one.
+JWT_SECRET = get_or_create_secret("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -199,7 +199,7 @@ def require_roles(required_roles: List[Role]):
 def require_broker_access(broker_id: str):
     """Dependency factory for broker-level access control."""
     def broker_checker(token_data: TokenData = Depends(get_current_user)):
-        if broker_id not in token_data.broker_access and "admin" in token_data.roles:
+        if broker_id not in token_data.broker_access and "*" not in token_data.broker_access and "admin" not in token_data.roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"No access to broker: {broker_id}"
@@ -249,25 +249,6 @@ async def get_current_active_user(
 ) -> TokenData:
     """Get current active user."""
     return current_user
-
-
-# Initialize default admin user (in production, load from vault/config)
-def init_default_users():
-    """Initialize default admin user."""
-    admin_user = User(
-        id="admin",
-        username="admin",
-        email="admin@example.com",
-        roles=[Role.ADMIN, Role.RISK_OFFICER, Role.TRADER],
-        broker_access=["*"],  # Access to all brokers
-        is_active=True
-    )
-    _users[admin_user.id] = admin_user
-    logger.info("Initialized default admin user")
-
-
-# Initialize on import
-init_default_users()
 
 
 # Public exports

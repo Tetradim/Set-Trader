@@ -80,6 +80,8 @@ class BrokerInfo:
     name: str
     description: str
     supported: bool = False
+    readiness: str = "unavailable"
+    readiness_note: str = ""
     auth_fields: list = field(default_factory=list)
     risk_warning: Optional[BrokerRiskWarning] = None
     docs_url: str = ""

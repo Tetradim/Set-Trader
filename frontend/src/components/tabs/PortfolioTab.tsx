@@ -99,7 +99,6 @@ export function PortfolioTab() {
     const totalPnl = posValues.reduce((sum, p) => sum + (p.unrealized_pnl ?? 0), 0);
     const totalPnLPct = accountBalance > 0 ? (totalPnl / accountBalance) * 100 : 0;
 
-    // Mock stats for now (would come from API)
     setStats({
       totalValue,
       totalPnl,
@@ -112,7 +111,6 @@ export function PortfolioTab() {
       sharpeRatio: 0,
     });
 
-    // Group positions by broker (mock for now)
     setPositionGroups([{
       brokerId: 'all',
       brokerName: 'All Accounts',
@@ -121,17 +119,7 @@ export function PortfolioTab() {
       positions: posValues,
     }]);
 
-    // Mock daily returns
-    const returns: DailyReturn[] = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      returns.push({
-        date: date.toISOString().split('T')[0],
-        return: (Math.random() - 0.5) * 2,
-      });
-    }
-    setDailyReturns(returns);
+    setDailyReturns([]);
   }, [positions, profits, accountBalance]);
 
   useEffect(() => {

@@ -1,22 +1,18 @@
-"""Orders API routes.
+"""Orders API routes backed by MongoDB."""
+from datetime import datetime, timezone
+from typing import Optional
 
-Provides endpoints for order management and execution analytics.
-"""
-from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pymongo import ReturnDocument
 from pydantic import BaseModel
 
-from auth import get_current_user, TokenData
+import deps
+from auth import TokenData, get_current_user
 
 
-router = APIRouter(prefix="/api/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-# In-memory order storage (replace with database in production)
-_orders_db = []
-
-
-# Models
 class Order(BaseModel):
     order_id: str
     symbol: str
@@ -33,6 +29,7 @@ class Order(BaseModel):
     broker: Optional[str] = None
     external_id: Optional[str] = None
     execution_lag_ms: Optional[int] = None
+    slippage_bps: Optional[float] = None
 
 
 class OrderStats(BaseModel):
@@ -45,95 +42,81 @@ class OrderStats(BaseModel):
     fill_rate: float
 
 
-@router.get("", response_model=List[Order])
+def _order_filter(status_value: Optional[str] = None, symbol: Optional[str] = None) -> dict:
+    query = {}
+    if status_value:
+        query["status"] = status_value
+    if symbol:
+        query["symbol"] = symbol.upper()
+    return query
+
+
+@router.get("", response_model=list[Order])
 async def get_orders(
     limit: int = Query(100, ge=1, le=1000),
-    status: Optional[str] = None,
+    status_value: Optional[str] = Query(None, alias="status"),
     symbol: Optional[str] = None,
-    current_user: TokenData = Depends(get_current_user)
+    current_user: TokenData = Depends(get_current_user),
 ):
     """Get list of orders."""
-    orders = _orders_db
-    
-    if status:
-        orders = [o for o in orders if o["status"] == status]
-    if symbol:
-        orders = [o for o in orders if o["symbol"] == symbol]
-    
-    # Sort by created_at descending
-    orders = sorted(orders, key=lambda x: x["created_at"], reverse=True)
-    
-    return orders[:limit]
+    return await deps.db.orders.find(
+        _order_filter(status_value, symbol),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(limit)
 
 
 @router.get("/stats", response_model=OrderStats)
-async def get_order_stats(
-    current_user: TokenData = Depends(get_current_user)
-):
+async def get_order_stats(current_user: TokenData = Depends(get_current_user)):
     """Get order execution statistics."""
-    orders = _orders_db
-    
+    orders = await deps.db.orders.find({}, {"_id": 0}).to_list(5000)
     total = len(orders)
-    filled = len([o for o in orders if o["status"] == "filled"])
-    rejected = len([o for o in orders if o["status"] == "rejected"])
-    pending = len([o for o in orders if o["status"] == "pending"])
-    
-    # Calculate average slippage (in bps)
-    filled_orders = [o for o in orders if o["status"] == "filled" and o.get("slippage_bps")]
-    avg_slippage = 0
-    if filled_orders:
-        avg_slippage = sum(o.get("slippage_bps", 0) for o in filled_orders) / len(filled_orders)
-    
-    # Calculate average execution lag
-    orders_with_lag = [o for o in orders if o.get("execution_lag_ms")]
-    avg_lag = 0
-    if orders_with_lag:
-        avg_lag = sum(o.get("execution_lag_ms", 0) for o in orders_with_lag) / len(orders_with_lag)
-    
-    fill_rate = (filled / total * 100) if total > 0 else 0
-    
+    filled = sum(1 for order in orders if order.get("status") == "filled")
+    rejected = sum(1 for order in orders if order.get("status") == "rejected")
+    pending = sum(1 for order in orders if order.get("status") == "pending")
+
+    slippage_values = [float(order.get("slippage_bps", 0)) for order in orders if order.get("slippage_bps") is not None]
+    lag_values = [float(order.get("execution_lag_ms", 0)) for order in orders if order.get("execution_lag_ms") is not None]
+    fill_rate = (filled / total * 100) if total else 0
+
     return OrderStats(
         total_orders=total,
         filled_orders=filled,
         rejected_orders=rejected,
         pending_orders=pending,
-        avg_slippage=round(avg_slippage, 2),
-        avg_execution_lag_ms=round(avg_lag, 0),
-        fill_rate=round(fill_rate, 1)
+        avg_slippage=round(sum(slippage_values) / len(slippage_values), 2) if slippage_values else 0,
+        avg_execution_lag_ms=round(sum(lag_values) / len(lag_values), 0) if lag_values else 0,
+        fill_rate=round(fill_rate, 1),
     )
 
 
 @router.get("/{order_id}", response_model=Order)
-async def get_order(
-    order_id: str,
-    current_user: TokenData = Depends(get_current_user)
-):
+async def get_order(order_id: str, current_user: TokenData = Depends(get_current_user)):
     """Get a specific order."""
-    for order in _orders_db:
-        if order["order_id"] == order_id:
-            return order
-    
-    from fastapi import HTTPException, status
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Order not found"
-    )
+    order = await deps.db.orders.find_one({"order_id": order_id}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    return order
 
 
-# Helper function to add orders from trading engine
-def add_order(order_data: dict):
-    """Add an order to the database."""
-    _orders_db.append(order_data)
+async def add_order(order_data: dict):
+    """Add an order from the trading engine."""
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {**order_data}
+    doc.setdefault("created_at", now)
+    doc.setdefault("updated_at", now)
+    await deps.db.orders.update_one({"order_id": doc["order_id"]}, {"$set": doc}, upsert=True)
+    return doc
 
 
-# Helper function to update order status
-def update_order(order_id: str, **updates):
+async def update_order(order_id: str, **updates):
     """Update an order."""
-    for order in _orders_db:
-        if order["order_id"] == order_id:
-            order.update(updates)
-            return order
-    return None
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return await deps.db.orders.find_one_and_update(
+        {"order_id": order_id},
+        {"$set": updates},
+        projection={"_id": 0},
+        return_document=ReturnDocument.AFTER,
+    )
 
 
 __all__ = ["router", "add_order", "update_order"]

@@ -45,6 +45,8 @@
   "scripts": {
     "start": "vite --port 3000 --host 0.0.0.0",
     "dev": "vite",
+    "test:unit": "node scripts/run-unit-tests.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -53,9 +55,11 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "playwright": "^1.60.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
-    "vite": "^6.4.2"
+    "vite": "^6.4.2",
+    "ws": "^8.21.0"
   }
 }

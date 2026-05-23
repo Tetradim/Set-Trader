@@ -78,9 +78,8 @@ async def beta_register(body: BetaRegistration):
         raise HTTPException(400, "You must accept the Beta Tester Agreement to proceed.")
     if not body.first_name or not body.last_name or not body.email:
         raise HTTPException(400, "Name and email are required.")
-    if len(body.ssn_last4) != 4 or not body.ssn_last4.isdigit():
-        raise HTTPException(400, "Last 4 of SSN must be exactly 4 digits.")
     doc = body.model_dump()
+    doc.pop("ssn_last4", None)
     doc["ip_address"] = ""
     await deps.db.beta_registrations.delete_many({})
     await deps.db.beta_registrations.insert_one(doc)

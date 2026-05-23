@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/stores/useStore';
 import {
@@ -47,6 +47,17 @@ export function AddTickerDialog() {
   const wouldExceed = accountBalance > 0 && basePower > currentAvailable;
 
   const selectedMarket = MARKET_OPTIONS.find((m) => m.code === market) ?? MARKET_OPTIONS[0];
+
+  useEffect(() => {
+    function handleTickerError(event: Event) {
+      const detail = (event as CustomEvent<{ error?: string; symbol?: string }>).detail;
+      setError(detail?.error || 'Failed to add ticker');
+      setOpen(true);
+    }
+
+    window.addEventListener('ticker-error', handleTickerError);
+    return () => window.removeEventListener('ticker-error', handleTickerError);
+  }, []);
 
   // Auto-detect market from typed symbol suffix
   const handleSymbolChange = (val: string) => {
