@@ -17,6 +17,14 @@ export default defineConfig({
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash].[ext]',
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('recharts')) return 'charts';
+          if (id.includes('@radix-ui')) return 'radix-ui';
+          if (id.includes('lucide-react')) return 'icons';
+          if (id.includes('framer-motion')) return 'motion';
+          return 'vendor';
+        },
       },
     },
   },
