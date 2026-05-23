@@ -21,6 +21,7 @@ if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-setti
 
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $LogFile = Join-Path $LogPath "launcher.log"
+$serverWillOpenBrowser = $false
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -163,9 +164,11 @@ try {
 
         if (Test-Path $rootExe) {
             Write-Status "Starting packaged SentinelPulse.exe"
+            $serverWillOpenBrowser = $true
             Start-OwnedProcess -FilePath $rootExe -ArgumentList @() -WorkingDirectory $ProjectRoot | Out-Null
         } elseif (Test-Path $backendExe) {
             Write-Status "Starting backend packaged SentinelPulse.exe"
+            $serverWillOpenBrowser = $true
             Start-OwnedProcess -FilePath $backendExe -ArgumentList @() -WorkingDirectory (Split-Path -Parent $backendExe) | Out-Null
         } elseif (Test-Path $serverPy) {
             $python = Find-Python
@@ -188,7 +191,7 @@ try {
     }
 
     $url = "http://localhost:$AppPort"
-    if (-not $NoBrowser) {
+    if ((-not $NoBrowser) -and (-not $serverWillOpenBrowser)) {
         Write-Status "Opening $url"
         Start-Process $url | Out-Null
     }

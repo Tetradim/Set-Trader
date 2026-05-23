@@ -23,6 +23,12 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("launcher-settings.ini", gitignore)
 
+    def test_root_launcher_does_not_duplicate_packaged_browser_open(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("$serverWillOpenBrowser = $false", text)
+        self.assertIn("$serverWillOpenBrowser = $true", text)
+        self.assertIn("if ((-not $NoBrowser) -and (-not $serverWillOpenBrowser))", text)
+
 
 if __name__ == "__main__":
     unittest.main()
