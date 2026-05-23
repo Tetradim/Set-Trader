@@ -24,6 +24,7 @@ if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-setti
 
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $LogFile = Join-Path $LogPath "Sentinel-Pulse.log"
+$TranscriptFile = Join-Path $LogPath "Sentinel-Pulse-Transcript.log"
 $TranscriptStarted = $false
 $serverWillOpenBrowser = $false
 $BrowserProcess = $null
@@ -204,7 +205,7 @@ try {
     New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
     New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
     try {
-        Start-Transcript -Path $LogFile -Append | Out-Null
+        Start-Transcript -Path $TranscriptFile -Append | Out-Null
         $TranscriptStarted = $true
     } catch {
         $TranscriptStarted = $false
@@ -217,6 +218,7 @@ try {
     Write-Host ""
     Write-Status "Project root: $ProjectRoot"
     Write-Status "App log: $LogFile"
+    Write-Status "Launcher transcript: $TranscriptFile"
     Write-Status "MongoDB data path: $DataPath"
     $env:LOG_FILE = $LogFile
 

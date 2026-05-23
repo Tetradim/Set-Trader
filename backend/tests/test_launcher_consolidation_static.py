@@ -44,6 +44,12 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("Start-Transcript", text)
         self.assertIn('$env:LOG_FILE = $LogFile', text)
 
+    def test_root_launcher_uses_separate_transcript_file(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn('$TranscriptFile = Join-Path $LogPath "Sentinel-Pulse-Transcript.log"', text)
+        self.assertIn("Start-Transcript -Path $TranscriptFile -Append", text)
+        self.assertNotIn("Start-Transcript -Path $LogFile", text)
+
     def test_root_launcher_starts_mongodb_from_bin_with_system_data_path(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
         self.assertIn('Join-Path $env:SystemDrive "data\\db"', text)
