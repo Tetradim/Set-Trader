@@ -159,13 +159,29 @@ function Start-BrowserWindow {
     return $null
 }
 
+function Join-ProcessArguments {
+    param([string[]]$Arguments)
+
+    return (($Arguments | ForEach-Object {
+        $arg = $_
+        if ($null -eq $arg) {
+            '""'
+        } elseif ($arg -match '[\s"]') {
+            $escaped = $arg.Replace('"', '\"')
+            '"' + $escaped + '"'
+        } else {
+            $arg
+        }
+    }) -join " ")
+}
+
 function Start-OwnedProcess {
     param(
         [string]$FilePath,
         [string[]]$ArgumentList,
         [string]$WorkingDirectory
     )
-    $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -WorkingDirectory $WorkingDirectory -PassThru -WindowStyle Hidden
+    $process = Start-Process -FilePath $FilePath -ArgumentList (Join-ProcessArguments -Arguments $ArgumentList) -WorkingDirectory $WorkingDirectory -PassThru -WindowStyle Hidden
     $OwnedProcesses.Add($process)
     return $process
 }

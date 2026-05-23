@@ -60,6 +60,12 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("-WorkingDirectory $mongoBin", text)
         self.assertIn('"--dbpath", $DataPath', text)
 
+    def test_root_launcher_quotes_process_arguments_with_spaces(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Join-ProcessArguments", text)
+        self.assertIn("$escaped = $arg.Replace('\"', '\\\"')", text)
+        self.assertIn("-ArgumentList (Join-ProcessArguments -Arguments $ArgumentList)", text)
+
     def test_packaged_windows_launcher_allows_browser_open_suppression(self):
         text = (ROOT / "backend" / "win_launcher.py").read_text(encoding="utf-8")
         self.assertIn('SENTINEL_OPEN_BROWSER', text)
