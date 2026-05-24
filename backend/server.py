@@ -395,6 +395,7 @@ from routes.brokers import router as brokers_router
 from routes.tickers import router as tickers_router
 from routes.trades import router as trades_router
 from routes.bot import router as bot_router
+from routes.settings import router as settings_router
 from routes.ws import router as ws_router
 from routes.system import router as system_router
 from routes.markets import router as markets_router
@@ -419,6 +420,7 @@ api.include_router(brokers_router, dependencies=[Depends(get_current_user)])
 api.include_router(tickers_router, dependencies=[Depends(get_current_user)])
 api.include_router(trades_router, dependencies=[Depends(get_current_user)])
 api.include_router(bot_router, dependencies=[Depends(get_current_user)])
+api.include_router(settings_router, dependencies=[Depends(get_current_user)])
 api.include_router(ws_router)
 api.include_router(system_router, dependencies=[Depends(get_current_user)])
 api.include_router(markets_router, dependencies=[Depends(get_current_user)])

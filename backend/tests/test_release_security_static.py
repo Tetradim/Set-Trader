@@ -26,6 +26,7 @@ class ReleaseSecurityStaticTest(unittest.TestCase):
             "tickers_router",
             "trades_router",
             "bot_router",
+            "settings_router",
             "system_router",
             "markets_router",
             "strategies_router",
@@ -50,7 +51,8 @@ class ReleaseSecurityStaticTest(unittest.TestCase):
         text = self.read("backend/routes/ws.py")
 
         self.assertIn("verify_token", text)
-        self.assertIn("token: Optional[str]", text)
+        self.assertIn("authenticate_websocket", text)
+        self.assertIn("extract_websocket_token", text)
         self.assertIn("WS_1008_POLICY_VIOLATION", text)
 
     def test_edge_and_alert_webhooks_require_shared_secret(self):
@@ -131,6 +133,14 @@ class ReleaseSecurityStaticTest(unittest.TestCase):
         self.assertIn("markets.filter((market) => market.code !== 'US')", foreign_tab)
         self.assertIn("apiFetch('/api/markets')", add_ticker)
         self.assertNotIn("const MARKET_OPTIONS = [", add_ticker)
+
+    def test_broker_credentials_do_not_use_runtime_legacy_fallback(self):
+        broker_manager = self.read("backend/broker_manager.py")
+
+        self.assertNotIn("_LEGACY_KEY", broker_manager)
+        self.assertNotIn("_xor_bytes", broker_manager)
+        self.assertNotIn("base64.b64decode(encrypted)", broker_manager)
+        self.assertNotIn("migrate_credential_format", broker_manager)
 
 
 if __name__ == "__main__":

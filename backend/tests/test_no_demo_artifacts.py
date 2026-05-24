@@ -42,6 +42,7 @@ class NoDemoArtifactsTest(unittest.TestCase):
             "routes/reconciliation.py",
             "routes/risk.py",
             "routes/slo.py",
+            "routes/settings.py",
         ]:
             text = self.read(relative_path)
             self.assertNotRegex(text, r"APIRouter\(prefix=[\"']/api/")

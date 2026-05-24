@@ -224,7 +224,7 @@ class EdgeMongoClient:
         
         try:
             result = await self._db[self.commands_collection].insert_one(command)
-            command_type = str(command.get("command_type", "UNKNOWN"))
+            command_type = self._command_count_key(command.get("command_type", "UNKNOWN"))
             self._command_counts[command_type] = self._command_counts.get(command_type, 0) + 1
             self._last_send_at = time.time()
             self._mark_success()
@@ -293,9 +293,8 @@ class EdgeMongoClient:
             ]
             result = await self._db[self.commands_collection].insert_many(commands)
             inserted_count = len(result.inserted_ids)
-            self._command_counts[CommandType.POSITION_UPDATE] = (
-                self._command_counts.get(CommandType.POSITION_UPDATE, 0) + inserted_count
-            )
+            command_type = self._command_count_key(CommandType.POSITION_UPDATE)
+            self._command_counts[command_type] = self._command_counts.get(command_type, 0) + inserted_count
             self._last_send_at = time.time()
             self._mark_success()
             logger.debug(f"Batch inserted {len(result.inserted_ids)} position updates")
@@ -330,6 +329,10 @@ class EdgeMongoClient:
 
     def _is_backoff_active(self) -> bool:
         return self._next_retry_at is not None and time.monotonic() < self._next_retry_at
+
+    @staticmethod
+    def _command_count_key(command_type: Any) -> str:
+        return getattr(command_type, "value", str(command_type))
 
 
 # --- Singleton instance ---

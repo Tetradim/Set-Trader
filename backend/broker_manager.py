@@ -1,17 +1,14 @@
-"""Broker connection manager — stores credentials, manages live connections, handles failover."""
+"""Broker connection manager: stores credentials, manages live connections, handles failover."""
 import asyncio
 import logging
 import base64
-import os
 import uuid
-import secrets
 from datetime import datetime, timezone
 from typing import Optional, Set
 from brokers import BrokerAdapter, BrokerOrder, get_broker_adapter, get_broker_info, BROKER_REGISTRY
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-import hashlib
 from runtime_secrets import get_or_create_secret
 
 logger = logging.getLogger("SentinelPulse")
@@ -32,19 +29,10 @@ def _get_encryption_key() -> bytes:
 _FERNET_KEY = _get_encryption_key()
 _fernet = Fernet(_FERNET_KEY)
 
-# Legacy XOR key kept for backward compatibility with old credentials
-# TODO: Migrate old credentials to new format
-_LEGACY_KEY = b"sentinel-pulse-default-key-2026"
-
-def _xor_bytes(data: bytes, key: bytes) -> bytes:
-    """Legacy XOR obfuscation - only for migrating old data."""
-    return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-
 def encrypt_credentials(creds: dict) -> str:
     """
     Encrypt credentials using Fernet (AES) symmetric encryption.
     
-    This replaces the old XOR-based encryption which was insecure.
     Uses PBKDF2 key derivation from CREDENTIAL_KEY env var.
     """
     import json
@@ -53,34 +41,14 @@ def encrypt_credentials(creds: dict) -> str:
     return encrypted.decode()
 
 def decrypt_credentials(encrypted: str) -> dict:
-    """
-    Decrypt credentials using Fernet.
-    
-    Falls back to legacy XOR decryption for backward compatibility.
-    """
+    """Decrypt credentials using Fernet only."""
     import json
     try:
-        # Try new Fernet encryption first
         raw = _fernet.decrypt(encrypted.encode())
         return json.loads(raw)
-    except Exception:
-        # Fallback to legacy XOR for old stored credentials
-        try:
-            raw = _xor_bytes(base64.b64decode(encrypted), _LEGACY_KEY)
-            return json.loads(raw)
-        except Exception as e:
-            logger.error(f"Failed to decrypt credentials: {e}")
-            raise ValueError("Invalid encrypted credentials") from e
-
-def migrate_credential_format(encrypted: str) -> str:
-    """
-    Migrate old XOR-encrypted credentials to new Fernet format.
-    Call this once to upgrade old stored credentials.
-    """
-    # Decrypt using legacy method
-    creds = decrypt_credentials(encrypted)
-    # Re-encrypt using new method
-    return encrypt_credentials(creds)
+    except Exception as e:
+        logger.error(f"Failed to decrypt credentials: {e}")
+        raise ValueError("Invalid encrypted credentials") from e
 
 
 class BrokerConnectionManager:

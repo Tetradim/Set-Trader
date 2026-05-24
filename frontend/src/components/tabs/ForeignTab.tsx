@@ -24,6 +24,14 @@ type MarketInfo = {
   ticker_examples: string[];
   trading_notes: string;
   lunch_break: boolean;
+  calendar_source?: string;
+  calendar_reason?: string;
+  is_holiday?: boolean;
+  is_session_day?: boolean;
+  market_open_utc?: string;
+  market_close_utc?: string;
+  break_start_utc?: string;
+  break_end_utc?: string;
 };
 
 export function ForeignTab() {
@@ -245,6 +253,21 @@ function MarketPanel({
             </span>
             <span className="text-muted-foreground/60">{market.hours_display}</span>
           </div>
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            <span className="rounded-full border border-border bg-secondary/40 px-2 py-0.5">
+              {market.calendar_source?.startsWith('pandas_market_calendars') ? 'Exchange calendar' : 'Local hours'}
+            </span>
+            {market.is_holiday && (
+              <span className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-red-300">
+                Holiday / closed
+              </span>
+            )}
+            {market.calendar_reason && !market.is_open && (
+              <span className="rounded-full border border-border bg-secondary/40 px-2 py-0.5">
+                {market.calendar_reason.replace(/_/g, ' ')}
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-right shrink-0">
           <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Currency</div>
@@ -302,6 +325,7 @@ function MarketPanel({
           <ul className="text-[10px] text-muted-foreground/60 space-y-1 list-disc list-inside">
             <li>Opening Bell rules use this market's open time.</li>
             {market.lunch_break && <li>Engine pauses evaluation during the lunch break window.</li>}
+            {market.market_close_utc && <li>Holiday and half-day closures come from the exchange calendar when available.</li>}
             <li>Opening Bell windows are 30 min from each market's open.</li>
           </ul>
         </div>

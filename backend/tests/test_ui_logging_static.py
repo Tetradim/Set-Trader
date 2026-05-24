@@ -12,16 +12,18 @@ class UiLoggingStaticTest(unittest.TestCase):
 
     def test_backend_accepts_batched_client_events_and_sanitizes_payloads(self):
         server = self.read("backend/server.py")
+        logs = self.read("backend/routes/logs.py")
 
-        self.assertIn("def get_runtime_log_path", server)
-        self.assertIn('os.getenv("LOG_FILE"', server)
-        self.assertIn('@app.post("/api/logs/client-events")', server)
-        self.assertIn("async def log_client_events(request: Request, _current_user=Depends(get_current_user))", server)
-        self.assertIn("sanitize_client_log_payload", server)
-        self.assertIn("token", server)
-        self.assertIn("password", server)
-        self.assertIn("logger.info(\"Frontend event", server)
-        self.assertIn("logger.error(\"Frontend event", server)
+        self.assertIn("api.include_router(logs_router", server)
+        self.assertIn("def get_runtime_log_path", logs)
+        self.assertIn('os.getenv("LOG_FILE"', logs)
+        self.assertIn('@router.post("/client-events")', logs)
+        self.assertIn("async def log_client_events(request: Request)", logs)
+        self.assertIn("sanitize_client_log_payload", logs)
+        self.assertIn("token", logs)
+        self.assertIn("password", logs)
+        self.assertIn("logger.info(\"Frontend event", logs)
+        self.assertIn("logger.error(\"Frontend event", logs)
 
     def test_frontend_installs_global_ui_logging(self):
         main = self.read("frontend/src/main.tsx")

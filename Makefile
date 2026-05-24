@@ -49,6 +49,12 @@ test:
 	echo "[PASS] Frontend reachable" && \
 	docker compose down -v
 
+test-backend-static:
+	powershell -ExecutionPolicy Bypass -File backend/run-tests.ps1
+
+test-backend-live:
+	powershell -ExecutionPolicy Bypass -File backend/run-tests.ps1 -Live
+
 clean:
 	docker compose down -v --rmi all
 	docker system prune -f

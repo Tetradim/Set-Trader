@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 import deps
-from auth import verify_token
+from auth import TokenData, verify_token
 from default_tickers import ensure_default_tickers
 from schemas import TickerConfig
 from strategies import PRESET_STRATEGIES
@@ -16,17 +16,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.websocket("/ws")
-async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
-    if not token:
+def extract_websocket_token(websocket: WebSocket, token: Optional[str]) -> str:
+    """Read the WebSocket auth token from query params or a Bearer header."""
+    if token:
+        return token.strip()
+    authorization = websocket.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+async def authenticate_websocket(websocket: WebSocket, token: Optional[str]) -> Optional[TokenData]:
+    """Validate a WebSocket before accepting it."""
+    provided = extract_websocket_token(websocket, token)
+    if not provided:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")
-        return
+        return None
     try:
-        verify_token(token)
+        return verify_token(provided)
     except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        return None
+
+
+@router.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
+    token_data = await authenticate_websocket(websocket, token)
+    if not token_data:
         return
 
+    logger.info("WebSocket authenticated for user=%s roles=%s", token_data.username, token_data.roles)
     await deps.ws_manager.connect(websocket)
     try:
         tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)

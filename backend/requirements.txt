@@ -82,6 +82,7 @@ opentelemetry-semantic-conventions==0.61b0
 opentelemetry-util-http==0.61b0
 packaging==26.0
 pandas==3.0.1
+pandas-market-calendars==5.3.2
 passlib==1.7.4
 pathspec==1.0.4
 peewee==4.0.2

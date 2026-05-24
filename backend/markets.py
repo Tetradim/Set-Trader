@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Dict, List
 from zoneinfo import ZoneInfo
 
+from market_calendar import get_calendar_status
+
 
 @dataclass
 class MarketConfig:
@@ -37,11 +39,18 @@ class MarketConfig:
         """Return current time in this market's local timezone."""
         return datetime.now(ZoneInfo(self.tz_name))
 
-    def is_in_lunch_break(self) -> bool:
+    def _localize(self, now: datetime | None = None) -> datetime:
+        if now is None:
+            return self.local_now()
+        if now.tzinfo is None:
+            return now.replace(tzinfo=ZoneInfo(self.tz_name))
+        return now.astimezone(ZoneInfo(self.tz_name))
+
+    def is_in_lunch_break(self, now: datetime | None = None) -> bool:
         """True if the market is in its mid-session lunch break right now."""
         if not self.lunch_break:
             return False
-        now = self.local_now()
+        now = self._localize(now)
         if now.weekday() >= 5:
             return False
         total = now.hour * 60 + now.minute
@@ -49,9 +58,12 @@ class MarketConfig:
         lunch_open = self.lunch_open_hour * 60 + self.lunch_open_minute
         return lunch_close <= total < lunch_open
 
-    def is_open_now(self) -> bool:
+    def is_open_now(self, now: datetime | None = None) -> bool:
         """True if the market is currently in an active trading session."""
-        now = self.local_now()
+        now = self._localize(now)
+        calendar = get_calendar_status(self.code, now)
+        if calendar:
+            return calendar.is_open
         if now.weekday() >= 5:
             return False
         total = now.hour * 60 + now.minute
@@ -59,20 +71,26 @@ class MarketConfig:
         close_time = self.close_hour * 60 + self.close_minute
         if total < open_time or total >= close_time:
             return False
-        return not self.is_in_lunch_break()
+        return not self.is_in_lunch_break(now)
 
-    def is_opening_window(self, minutes: int = 30) -> bool:
+    def is_opening_window(self, minutes: int = 30, now: datetime | None = None) -> bool:
         """True during the first `minutes` after market open."""
-        now = self.local_now()
+        now = self._localize(now)
+        calendar = get_calendar_status(self.code, now)
+        if calendar and not calendar.is_session_day:
+            return False
         if now.weekday() >= 5:
             return False
         open_time = now.replace(hour=self.open_hour, minute=self.open_minute, second=0, microsecond=0)
         elapsed = (now - open_time).total_seconds()
         return 0 <= elapsed <= minutes * 60
 
-    def is_past_opening_window(self, minutes: int = 30) -> bool:
+    def is_past_opening_window(self, minutes: int = 30, now: datetime | None = None) -> bool:
         """True when past the opening window but still within trading hours."""
-        now = self.local_now()
+        now = self._localize(now)
+        calendar = get_calendar_status(self.code, now)
+        if calendar and not calendar.is_session_day:
+            return False
         if now.weekday() >= 5:
             return False
         open_time = now.replace(hour=self.open_hour, minute=self.open_minute, second=0, microsecond=0)
@@ -80,11 +98,15 @@ class MarketConfig:
         elapsed = (now - open_time).total_seconds()
         return elapsed > minutes * 60 and now < close_time
 
-    def status(self) -> str:
+    def status(self, now: datetime | None = None) -> str:
         """Return 'open', 'lunch', or 'closed'."""
-        if self.is_in_lunch_break():
+        now = self._localize(now)
+        calendar = get_calendar_status(self.code, now)
+        if calendar:
+            return calendar.status
+        if self.is_in_lunch_break(now):
             return "lunch"
-        return "open" if self.is_open_now() else "closed"
+        return "open" if self.is_open_now(now) else "closed"
 
     def hours_display(self) -> str:
         label = f"{self.open_hour:02d}:{self.open_minute:02d} - {self.close_hour:02d}:{self.close_minute:02d} {self.tz_label}"
@@ -94,6 +116,7 @@ class MarketConfig:
 
     def to_dict(self) -> dict:
         now = self.local_now()
+        calendar = get_calendar_status(self.code, now)
         return {
             "code": self.code,
             "name": self.name,
@@ -117,10 +140,18 @@ class MarketConfig:
             "ticker_examples": self.ticker_examples,
             "trading_notes": self.trading_notes,
             "hours_display": self.hours_display(),
-            "status": self.status(),
+            "status": self.status(now),
             "local_time": now.strftime("%H:%M:%S"),
             "utc_offset": now.strftime("%z"),
-            "is_open": self.is_open_now(),
+            "is_open": self.is_open_now(now),
+            "calendar_source": calendar.source if calendar else "weekday_hours_fallback",
+            "calendar_reason": calendar.reason if calendar else "",
+            "is_holiday": calendar.is_holiday if calendar else False,
+            "is_session_day": calendar.is_session_day if calendar else now.weekday() < 5,
+            "market_open_utc": calendar.market_open if calendar else "",
+            "market_close_utc": calendar.market_close if calendar else "",
+            "break_start_utc": calendar.break_start if calendar else "",
+            "break_end_utc": calendar.break_end if calendar else "",
         }
 
 

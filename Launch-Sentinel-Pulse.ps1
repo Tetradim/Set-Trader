@@ -8,7 +8,8 @@ param(
     [string]$SettingsPath = "",
     [int]$MongoPort = 27017,
     [int]$AppPort = 8002,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$SmokeTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -224,6 +225,23 @@ function Stop-BrowserWindow {
         }
     } catch {
     }
+}
+
+if ($SmokeTest) {
+    Write-Status "Running launcher smoke test"
+    $basicArgs = Join-ProcessArguments -Arguments @("--dbpath", "C:\data\db", "--port", "27017")
+    if (-not $basicArgs.Contains("--dbpath") -or -not $basicArgs.Contains("C:\data\db")) {
+        throw "Basic argument smoke test failed."
+    }
+    $spacedArgs = Join-ProcessArguments -Arguments @("--logpath", "C:\Users\Lite OS\Desktop\Sentinel-Pulse.log")
+    if (-not $spacedArgs.Contains('"C:\Users\Lite OS\Desktop\Sentinel-Pulse.log"')) {
+        throw "Spaced argument quoting smoke test failed."
+    }
+    if (-not (Get-Command Start-Process -ErrorAction SilentlyContinue)) {
+        throw "Start-Process is unavailable."
+    }
+    Write-Status "Launcher smoke test passed" "OK"
+    exit 0
 }
 
 try {
