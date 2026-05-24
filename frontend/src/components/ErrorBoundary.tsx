@@ -24,7 +24,6 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('ErrorBoundary caught:', error, info.componentStack);
     uiLog.reactError(error, info.componentStack, this.props.fallbackLabel);
   }
 

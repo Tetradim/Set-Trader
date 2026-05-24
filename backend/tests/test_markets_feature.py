@@ -9,8 +9,12 @@ import os
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
-EXPECTED_MARKET_CODES = ["US", "HK", "AU", "UK", "CA", "CN_SS", "CN_SZ"]
-EXPECTED_CURRENCIES = {"HKD", "AUD", "GBP", "CAD", "CNY"}
+EXPECTED_MARKET_CODES = [
+    "US", "CA", "MX", "BR",
+    "UK", "DE", "FR", "NL", "ES", "IT", "CH", "SE", "ZA",
+    "JP", "HK", "AU", "CN_SS", "CN_SZ", "IN_NSE", "IN_BSE", "SG", "KR", "TW",
+]
+EXPECTED_CURRENCIES = {"CAD", "MXN", "BRL", "GBP", "EUR", "CHF", "SEK", "ZAR", "JPY", "HKD", "AUD", "CNY", "INR", "SGD", "KRW", "TWD"}
 
 
 class TestListMarkets:

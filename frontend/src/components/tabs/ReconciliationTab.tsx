@@ -3,6 +3,7 @@
 // Displays internal ledger vs broker statements, break detection, and EOD sign-off.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Scale, AlertTriangle, CheckCircle, RefreshCw, FileText, Clock, ArrowRightLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,7 +55,7 @@ export function ReconciliationTab() {
       setRecords(recsRes.records || []);
       setSummary(sumRes);
     } catch (err) {
-      console.error('Failed to fetch reconciliation:', err);
+      uiLog.error('reconciliation.fetch_failed', err);
     } finally {
       setLoading(false);
     }
@@ -75,7 +76,7 @@ export function ReconciliationTab() {
       });
       await fetchReconciliation();
     } catch (err) {
-      console.error('Failed to sign off:', err);
+      uiLog.error('reconciliation.signoff_failed', err);
     } finally {
       setSigningOff(false);
     }

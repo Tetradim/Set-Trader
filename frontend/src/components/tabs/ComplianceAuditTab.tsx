@@ -3,6 +3,7 @@
 // Displays immutable event log explorer, operator attestations, and export bundles.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Shield, Search, Download, FileText, User, Clock, Filter, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -64,7 +65,7 @@ export function ComplianceAuditTab() {
       setEvents(eventsRes.events || []);
       setSummary(sumRes);
     } catch (err) {
-      console.error('Failed to fetch audit logs:', err);
+      uiLog.error('audit.fetch_failed', err);
     } finally {
       setLoading(false);
     }
@@ -81,7 +82,7 @@ export function ComplianceAuditTab() {
       });
       window.open(response.download_url, '_blank');
     } catch (err) {
-      console.error('Failed to export:', err);
+      uiLog.error('audit.export_failed', err, { format });
     }
   };
 

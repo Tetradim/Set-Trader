@@ -3,6 +3,7 @@
 // Displays order state machine, fill timeline, reject reasons, slippage analysis.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { List, Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -61,7 +62,7 @@ export function OrdersExecutionTab() {
       setOrders(ordersRes.orders || []);
       setStats(statsRes);
     } catch (err) {
-      console.error('Failed to fetch orders:', err);
+      uiLog.error('orders.fetch_failed', err);
     } finally {
       setLoading(false);
     }

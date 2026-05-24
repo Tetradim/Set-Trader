@@ -3,6 +3,7 @@
 // Displays live exposure ladder, limits panel, kill switches, and risk controls.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Shield, AlertTriangle, Activity, Crosshair, ToggleLeft, ToggleRight, RefreshCw, Users, DollarSign, TrendingDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,7 @@ export function RiskCenterTab() {
       setKillSwitches(switchesRes.kill_switches || []);
     } catch (err) {
       setError('Failed to load risk data');
-      console.error(err);
+      uiLog.error('risk.fetch_failed', err);
     } finally {
       setLoading(false);
     }
@@ -71,7 +72,7 @@ export function RiskCenterTab() {
       });
       fetchRiskData();
     } catch (err) {
-      console.error('Failed to toggle kill switch:', err);
+      uiLog.error('risk.kill_switch_toggle_failed', err, { switch_id: switchId });
     }
   };
 

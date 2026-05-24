@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { uiLog } from '@/lib/clientLogger';
 
 export interface TickerConfig {
   id: string;
@@ -239,7 +240,7 @@ export const useStore = create<BotState>((set) => ({
 
   tickers: {},
   setTickers: (arr) => {
-    console.log('[STORE] setTickers:', arr?.map(t => t.symbol));
+    uiLog.event('store.set_tickers', { ticker_count: arr?.length ?? 0 });
     return set({
       tickers: arr.reduce((acc, t) => {
         if (!t?.symbol) return acc;
@@ -248,14 +249,14 @@ export const useStore = create<BotState>((set) => ({
     });
   },
   addTicker: (t) => {
-    console.log('[STORE] addTicker:', t?.symbol);
+    uiLog.event('store.add_ticker', { symbol: t?.symbol });
     return set((state) => {
       if (!t?.symbol) return state;
       return { tickers: { ...state.tickers, [t.symbol]: t } }
     });
   },
   updateTicker: (symbol, updates) => {
-    console.log('[STORE] updateTicker:', symbol, updates);
+    uiLog.event('store.update_ticker', { symbol, fields: Object.keys(updates || {}) });
     return set((state) => {
       const existing = state.tickers[symbol];
       if (!existing) return state;
@@ -263,7 +264,7 @@ export const useStore = create<BotState>((set) => ({
     });
   },
   removeTicker: (symbol) => {
-    console.log('[STORE] removeTicker:', symbol);
+    uiLog.event('store.remove_ticker', { symbol });
     return set((state) => {
       const copy = { ...state.tickers };
       delete copy[symbol];
@@ -273,13 +274,13 @@ export const useStore = create<BotState>((set) => ({
 
   prices: {},
   setPrices: (prices) => {
-    console.log('[STORE] setPrices:', Object.keys(prices));
+    uiLog.event('store.set_prices', { price_count: Object.keys(prices).length });
     return set({ prices });
   },
 
   priceHistory: {},
   appendPriceHistory: (prices) => {
-    console.log('[STORE] appendPriceHistory:', Object.keys(prices));
+    uiLog.event('store.append_price_history', { price_count: Object.keys(prices).length });
     return set((state) => {
       const now = Date.now();
       const updated = { ...state.priceHistory };

@@ -3,6 +3,7 @@
 // Displays service health topology, alert feed, and runbook links.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { AlertTriangle, Server, Activity, RefreshCw, CheckCircle, XCircle, Clock, FileText, Play } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -70,7 +71,7 @@ export function IncidentsOpsTab() {
       setIncidents(incidentsRes.incidents || []);
       setRunbooks(runbooksRes.runbooks || []);
     } catch (err) {
-      console.error('Failed to fetch ops data:', err);
+      uiLog.error('ops.fetch_failed', err);
     } finally {
       setLoading(false);
     }

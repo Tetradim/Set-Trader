@@ -3,6 +3,7 @@
 // Displays users, roles, API keys, session policy, and IP allowlist management.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Users, Key, Shield, Settings, Plus, Trash2, RefreshCw, Edit } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -44,7 +45,7 @@ export function AdminIAMTab() {
       setUsers(usersRes.users || []);
       setApiKeys(keysRes.api_keys || []);
     } catch (err) {
-      console.error('Failed to fetch admin data:', err);
+      uiLog.error('admin.fetch_failed', err);
     } finally {
       setLoading(false);
     }

@@ -1,32 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useStore } from '@/stores/useStore';
-import { apiFetch } from '@/lib/api';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { Switch } from '@/components/ui/switch';
-import {
-  Save,
-  Plus,
-  X,
-  MessageCircle,
-  Key,
-  Wifi,
-  WifiOff,
-  Send,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  SlidersHorizontal,
-  ArrowUp,
-  ArrowDown,
-  Wallet,
-  Plug,
-  Shield,
-  Zap,
-  CircuitBoard,
-  Percent,
-  DollarSign,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
+import { useStore } from '@/stores/useStore';
+import { AccountBalanceSection } from '@/components/settings/AccountBalanceSection';
+import { BrokerAllocationsSection } from '@/components/settings/BrokerAllocationsSection';
+import { EdgeRetrySection, GlobalDrawdownSection } from '@/components/settings/RiskAndEdgeSections';
+import { StepSizeSection } from '@/components/settings/StepSizeSection';
+import { TelegramSettingsSection } from '@/components/settings/TelegramSettingsSection';
+import { TradingModeSection } from '@/components/settings/TradingModeSection';
 
 export function SettingsTab() {
   const [token, setToken] = useState('');
@@ -42,8 +23,6 @@ export function SettingsTab() {
   const [balanceText, setBalanceText] = useState('0');
   const [balanceValue, setBalanceValue] = useState<number | null>(null);
   const [allocated, setAllocated] = useState(0);
-  
-  // Global daily drawdown limit (portfolio-level circuit breaker)
   const [drawdownEnabled, setDrawdownEnabled] = useState(false);
   const [drawdownLimitText, setDrawdownLimitText] = useState('3');
   const [drawdownLimitValue, setDrawdownLimitValue] = useState(3);
@@ -61,38 +40,75 @@ export function SettingsTab() {
         setDecStep(data.decrement_step ?? 0.5);
         setIncText(String(data.increment_step ?? 0.5));
         setDecText(String(data.decrement_step ?? 0.5));
-        if (data.account_balance !== undefined && data.account_balance !== null) {
-          setBalanceValue(data.account_balance);
-          setBalanceText(String(data.account_balance));
-        }
         setAllocated(data.allocated ?? 0);
         setEdgeRetryAttempts(data.edge_retry_max_attempts ?? 10);
         setEdgeRetryAttemptsText(String(data.edge_retry_max_attempts ?? 10));
+        if (data.account_balance !== undefined && data.account_balance !== null) {
+          setBalanceValue(data.account_balance);
+          setBalanceText(String(data.account_balance));
+          useStore.getState().setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
+        }
         useStore.getState().setSimulate247(data.simulate_24_7 || false);
         useStore.getState().setLiveDuringMarketHours(data.live_during_market_hours || false);
         useStore.getState().setPaperAfterHours(data.paper_after_hours || false);
         useStore.getState().setIncrementStep(data.increment_step ?? 0.5);
         useStore.getState().setDecrementStep(data.decrement_step ?? 0.5);
-        
-        // Load global daily drawdown settings
         if (data.global_daily_drawdown !== undefined) {
-          setDrawdownEnabled(data.global_daily_drawdown.enabled ?? false);
-          setDrawdownLimitValue(data.global_daily_drawdown.limit ?? 3);
-          setDrawdownLimitText(String(data.global_daily_drawdown.limit ?? 3));
-          setDrawdownType(data.global_daily_drawdown.type ?? 'percent');
-          useStore.getState().setGlobalDailyDrawdown(
-            data.global_daily_drawdown.enabled ?? false,
-            data.global_daily_drawdown.limit ?? 3,
-            data.global_daily_drawdown.type ?? 'percent'
-          );
-        }
-        
-        if (data.account_balance !== undefined && data.account_balance !== null) {
-          useStore.getState().setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
+          const settings = data.global_daily_drawdown;
+          setDrawdownEnabled(settings.enabled ?? false);
+          setDrawdownLimitValue(settings.limit ?? 3);
+          setDrawdownLimitText(String(settings.limit ?? 3));
+          setDrawdownType(settings.type ?? 'percent');
+          useStore.getState().setGlobalDailyDrawdown(settings.enabled ?? false, settings.limit ?? 3, settings.type ?? 'percent');
         }
       })
       .catch(() => {});
   }, []);
+
+  const commitBalance = () => {
+    const value = parseFloat(balanceText);
+    if (!Number.isNaN(value) && value >= 0) {
+      setBalanceValue(value);
+    } else {
+      setBalanceText(String(balanceValue ?? 0));
+    }
+  };
+
+  const commitDrawdownLimit = () => {
+    const value = parseFloat(drawdownLimitText);
+    if (!Number.isNaN(value) && value > 0) {
+      setDrawdownLimitValue(value);
+    } else {
+      setDrawdownLimitText(String(drawdownLimitValue));
+    }
+  };
+
+  const commitEdgeRetryAttempts = () => {
+    const value = parseInt(edgeRetryAttemptsText, 10);
+    if (!Number.isNaN(value) && value >= 0 && value <= 100) {
+      setEdgeRetryAttempts(value);
+    } else {
+      setEdgeRetryAttemptsText(String(edgeRetryAttempts));
+    }
+  };
+
+  const commitIncStep = () => {
+    const value = parseFloat(incText);
+    if (!Number.isNaN(value) && value >= 0.01) {
+      setIncStep(value);
+    } else {
+      setIncText(String(incStep));
+    }
+  };
+
+  const commitDecStep = () => {
+    const value = parseFloat(decText);
+    if (!Number.isNaN(value) && value >= 0.01) {
+      setDecStep(value);
+    } else {
+      setDecText(String(decStep));
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -114,7 +130,6 @@ export function SettingsTab() {
           edge_retry_max_attempts: edgeRetryAttempts,
         }),
       });
-      // Update store with new step values
       setBalanceValue(balanceToSave);
       setBalanceText(String(balanceToSave));
       useStore.getState().setIncrementStep(incStep);
@@ -129,8 +144,8 @@ export function SettingsTab() {
       } else {
         toast.success('Settings saved. Telegram disconnected.');
       }
-    } catch (e: any) {
-      toast.error(e.message || 'Save failed');
+    } catch (error: any) {
+      toast.error(error.message || 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -141,8 +156,8 @@ export function SettingsTab() {
     try {
       await apiFetch('/api/settings/telegram/test', { method: 'POST' });
       toast.success('Test alert sent to all chat IDs!');
-    } catch (e: any) {
-      toast.error(e.message || 'Test failed');
+    } catch (error: any) {
+      toast.error(error.message || 'Test failed');
     } finally {
       setTesting(false);
     }
@@ -156,698 +171,56 @@ export function SettingsTab() {
     }
   };
 
-  const removeChatId = (id: string) => {
-    setChatIds(chatIds.filter((c) => c !== id));
-  };
-
   return (
     <div className="max-w-2xl space-y-8" data-testid="settings-tab">
-      {/* Account Balance */}
-      <section className="glass rounded-xl border border-border p-6 space-y-5">
-        <div className="flex items-center gap-2 mb-2">
-          <Wallet size={18} className="text-primary" />
-          <h3 className="text-sm font-bold text-foreground">Account Balance</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Set your total account capital. This is the master balance from which buy power is allocated to individual tickers.
-          Take Profit moves gains into your Cash Reserve.
-        </p>
-        <div>
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-            <Wallet size={10} className="text-primary" /> Total Account Balance ($)
-          </label>
-          <input
-            data-testid="account-balance-input"
-            type="text"
-            inputMode="decimal"
-            value={balanceText}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (/^\d*\.?\d*$/.test(raw)) {
-                setBalanceText(raw);
-              }
-            }}
-            onBlur={() => {
-              const num = parseFloat(balanceText);
-              if (!isNaN(num) && num >= 0) {
-                setBalanceValue(num);
-              } else {
-                setBalanceText(String(balanceValue ?? 0));
-              }
-            }}
-            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-            placeholder="e.g. 100000"
-          />
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            Your total trading capital (e.g. $100,000). Allocate portions to each ticker via Buy Power.
-          </p>
-        </div>
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="rounded-lg bg-secondary/50 border border-border p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Account</p>
-            <p className="font-mono text-lg font-bold text-foreground">${(balanceValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-          </div>
-          <div className="rounded-lg bg-secondary/50 border border-border p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Allocated</p>
-            <p className="font-mono text-lg font-bold text-amber-400">${allocated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-          </div>
-          <div className="rounded-lg bg-secondary/50 border border-border p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Available</p>
-            <p className={`font-mono text-lg font-bold ${((balanceValue ?? 0) - allocated) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              ${((balanceValue ?? 0) - allocated).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* Trading Mode Toggle */}
+      <AccountBalanceSection
+        balanceText={balanceText}
+        balanceValue={balanceValue}
+        allocated={allocated}
+        onBalanceTextChange={(value) => /^\d*\.?\d*$/.test(value) && setBalanceText(value)}
+        onBalanceCommit={commitBalance}
+      />
       <TradingModeSection />
-
-      {/* Global Daily Drawdown Limit (Portfolio-Level Circuit Breaker) */}
-      <section className="glass rounded-xl border border-border p-6 space-y-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CircuitBoard size={18} className="text-red-400" />
-            <h3 className="text-sm font-bold text-foreground">Global Daily Drawdown Limit</h3>
-          </div>
-          <Switch
-            data-testid="drawdown-toggle"
-            checked={drawdownEnabled}
-            onCheckedChange={setDrawdownEnabled}
-            className="data-[state=checked]:bg-red-500"
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Portfolio-level circuit breaker. If total daily losses exceed this limit, all bots pause for the rest of the day.
-          This prevents cascading drawdowns when multiple tickers hit stop-loss simultaneously.
-        </p>
-        {drawdownEnabled && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-                {drawdownType === 'percent' ? (
-                  <Percent size={10} className="text-amber-400" />
-                ) : (
-                  <DollarSign size={10} className="text-emerald-400" />
-                )}
-                {drawdownType === 'percent' ? 'Limit (%)' : 'Limit ($)'}
-              </label>
-              <input
-                data-testid="drawdown-limit-input"
-                type="text"
-                inputMode="decimal"
-                value={drawdownLimitText}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (/^\d*\.?\d*$/.test(raw)) {
-                    setDrawdownLimitText(raw);
-                  }
-                }}
-                onBlur={() => {
-                  const num = parseFloat(drawdownLimitText);
-                  if (!isNaN(num) && num > 0) {
-                    setDrawdownLimitValue(num);
-                  } else {
-                    setDrawdownLimitText(String(drawdownLimitValue));
-                  }
-                }}
-                className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-                placeholder={drawdownType === 'percent' ? 'e.g. 3' : 'e.g. 3000'}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-                <CircuitBoard size={10} className="text-red-400" /> Type
-              </label>
-              <div className="flex rounded-lg overflow-hidden border border-border">
-                <button
-                  type="button"
-                  onClick={() => setDrawdownType('percent')}
-                  className={`flex-1 py-2 text-xs font-medium flex items-center justify-center gap-1 ${
-                    drawdownType === 'percent'
-                      ? 'bg-amber-500/20 text-amber-400'
-                      : 'bg-secondary text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Percent size={12} /> Percent
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDrawdownType('cash')}
-                  className={`flex-1 py-2 text-xs font-medium flex items-center justify-center gap-1 ${
-                    drawdownType === 'cash'
-                      ? 'bg-emerald-500/20 text-emerald-400'
-                      : 'bg-secondary text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <DollarSign size={12} /> Cash
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {drawdownEnabled && (
-          <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3">
-            <p className="text-xs text-red-400 font-medium">
-              When enabled: All bots will pause automatically when daily P&L drops below{' '}
-              {drawdownType === 'percent'
-                ? `${drawdownLimitValue}% of account balance`
-                : `$${drawdownLimitValue.toLocaleString()}`
-              }
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Sentinel Edge Retry Policy */}
-      <section className="glass rounded-xl border border-border p-6 space-y-5">
-        <div className="flex items-center gap-2 mb-2">
-          <Plug size={18} className="text-primary" />
-          <h3 className="text-sm font-bold text-foreground">Sentinel Edge Retry Policy</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Limits how many exponential backoff retries Pulse attempts after Edge has been connected and then stops responding.
-          If Edge is not running when Pulse starts, Pulse still starts normally and this limit is not consumed.
-        </p>
-        <div>
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-            <Plug size={10} className="text-primary" /> Backoff Attempts
-          </label>
-          <input
-            data-testid="edge-retry-attempts-input"
-            type="text"
-            inputMode="numeric"
-            value={edgeRetryAttemptsText}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (/^\d*$/.test(raw)) {
-                setEdgeRetryAttemptsText(raw);
-              }
-            }}
-            onBlur={() => {
-              const num = parseInt(edgeRetryAttemptsText, 10);
-              if (!isNaN(num) && num >= 0 && num <= 100) {
-                setEdgeRetryAttempts(num);
-              } else {
-                setEdgeRetryAttemptsText(String(edgeRetryAttempts));
-              }
-            }}
-            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-            placeholder="10"
-          />
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            Default is 10. Use 0 to stop retrying after the first post-connection Edge failure.
-          </p>
-        </div>
-      </section>
-
-      {/* Broker Allocations per Ticker */}
+      <GlobalDrawdownSection
+        enabled={drawdownEnabled}
+        limitText={drawdownLimitText}
+        limitValue={drawdownLimitValue}
+        type={drawdownType}
+        onEnabledChange={setDrawdownEnabled}
+        onLimitTextChange={(value) => /^\d*\.?\d*$/.test(value) && setDrawdownLimitText(value)}
+        onLimitCommit={commitDrawdownLimit}
+        onTypeChange={setDrawdownType}
+      />
+      <EdgeRetrySection
+        attemptsText={edgeRetryAttemptsText}
+        onAttemptsTextChange={(value) => /^\d*$/.test(value) && setEdgeRetryAttemptsText(value)}
+        onAttemptsCommit={commitEdgeRetryAttempts}
+      />
       <BrokerAllocationsSection />
-
-      {/* Input Increment/Decrement Steps */}
-      <section className="glass rounded-xl border border-border p-6 space-y-5">
-        <div className="flex items-center gap-2 mb-2">
-          <SlidersHorizontal size={18} className="text-accent" />
-          <h3 className="text-sm font-bold text-foreground">Arrow Step Sizes</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Customize how much the up/down arrows on ticker card inputs change values.
-          Set different amounts for increasing vs decreasing.
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-              <ArrowUp size={10} className="text-emerald-400" /> Increase Step
-            </label>
-            <input
-              data-testid="increment-step-input"
-              type="text"
-              inputMode="decimal"
-              value={incText}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (/^\d*\.?\d*$/.test(raw)) {
-                  setIncText(raw);
-                }
-              }}
-              onBlur={() => {
-                const num = parseFloat(incText);
-                if (!isNaN(num) && num >= 0.01) {
-                  setIncStep(num);
-                } else {
-                  setIncText(String(incStep));
-                }
-              }}
-              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-            />
-            <p className="text-[10px] text-muted-foreground/60 mt-1">
-              e.g. 0.05 means each up-arrow click adds 0.05
-            </p>
-          </div>
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-              <ArrowDown size={10} className="text-red-400" /> Decrease Step
-            </label>
-            <input
-              data-testid="decrement-step-input"
-              type="text"
-              inputMode="decimal"
-              value={decText}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (/^\d*\.?\d*$/.test(raw)) {
-                  setDecText(raw);
-                }
-              }}
-              onBlur={() => {
-                const num = parseFloat(decText);
-                if (!isNaN(num) && num >= 0.01) {
-                  setDecStep(num);
-                } else {
-                  setDecText(String(decStep));
-                }
-              }}
-              className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-            />
-            <p className="text-[10px] text-muted-foreground/60 mt-1">
-              e.g. 0.10 means each down-arrow click subtracts 0.10
-            </p>
-          </div>
-        </div>
-        <div className="rounded-lg bg-secondary/50 border border-border p-2 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono text-primary">{incStep}</span>
-          <ArrowUp size={10} className="text-emerald-400" /> /
-          <span className="font-mono text-primary">{decStep}</span>
-          <ArrowDown size={10} className="text-red-400" />
-          <span>applies to all ticker card number inputs</span>
-        </div>
-      </section>
-
-      {/* Telegram Integration */}
-      <section className="glass rounded-xl border border-border p-6 space-y-5">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <MessageCircle size={18} className="text-primary" />
-            <h3 className="text-sm font-bold text-foreground">Telegram Integration</h3>
-          </div>
-          {/* Connection status pill */}
-          <span
-            data-testid="telegram-status"
-            className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${
-              tgConnected
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                : 'bg-secondary text-muted-foreground border-border'
-            }`}
-          >
-            {tgConnected ? (
-              <>
-                <Wifi size={12} />
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                </span>
-                Bot Connected
-              </>
-            ) : (
-              <>
-                <WifiOff size={12} /> Not Connected
-              </>
-            )}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Connect a Telegram bot to receive trade alerts, restart/offline notifications, and execute
-          commands remotely. Multiple chat IDs allow multiple users to control the same bot.
-        </p>
-
-        {/* Bot Token */}
-        <div>
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5 flex items-center gap-1">
-            <Key size={10} /> Bot Token
-          </label>
-          <input
-            data-testid="telegram-token-input"
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Paste your Telegram Bot Token from @BotFather"
-            className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-          />
-          <p className="text-[10px] text-muted-foreground/60 mt-1">
-            Message @BotFather on Telegram, use /newbot, and paste the token here.
-          </p>
-        </div>
-
-        {/* Chat IDs */}
-        <div>
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium block mb-1.5">
-            Authorized Chat IDs
-          </label>
-          <div className="flex gap-2 mb-2">
-            <input
-              data-testid="telegram-chatid-input"
-              value={newChatId}
-              onChange={(e) => setNewChatId(e.target.value)}
-              placeholder="Chat ID (e.g. 123456789)"
-              onKeyDown={(e) => e.key === 'Enter' && addChatId()}
-              className="flex-1 bg-secondary border border-border rounded-lg px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-foreground"
-            />
-            <button
-              data-testid="add-chatid-btn"
-              onClick={addChatId}
-              className="px-3 py-2 rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-all"
-            >
-              <Plus size={14} />
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {chatIds.map((id) => (
-              <span
-                key={id}
-                className="flex items-center gap-1.5 text-xs font-mono bg-secondary px-2.5 py-1 rounded-full border border-border"
-              >
-                {id}
-                <button
-                  onClick={() => removeChatId(id)}
-                  className="text-muted-foreground hover:text-red-400 transition-colors"
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
-            {chatIds.length === 0 && (
-              <span className="text-[10px] text-muted-foreground/50 italic">
-                No chat IDs added yet. Add at least one to receive alerts.
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Alert Behaviour */}
-        <div className="rounded-lg bg-secondary/50 border border-border p-3 space-y-2">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1.5">
-            <AlertCircle size={10} /> Automatic Alerts
-          </p>
-          <ul className="text-xs text-muted-foreground space-y-1 ml-4 list-disc">
-            <li>Trade executions (BUY, SELL, STOP, TRAILING_STOP) with price &amp; P&L</li>
-            <li><strong className="text-foreground">Bot restart</strong> notification when the server comes back online</li>
-            <li><strong className="text-foreground">Bot offline</strong> notification before the server shuts down</li>
-            <li>Pause/resume confirmations from Telegram commands</li>
-          </ul>
-        </div>
-
-        {/* Available Commands */}
-        <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
-            Telegram Commands
-          </p>
-          <div className="grid grid-cols-2 gap-1 text-xs font-mono">
-            {[
-              ['/pause', 'Pause ALL trading'],
-              ['/resume', 'Resume trading'],
-              ['/start', 'Start trading engine'],
-              ['/stop', 'Stop trading engine'],
-              ['/status', 'Bot status overview'],
-              ['/portfolio', 'P&L by symbol'],
-              ['/new SYMBOL [POWER]', 'Add new ticker'],
-              ['/cancel SYMBOL', 'Disable a ticker'],
-              ['/cancelall', 'Disable all tickers'],
-              ['/history', 'Last 10 trades'],
-              ['/reconnect_brokers', 'Reconnect all brokers'],
-              ['/help', 'List all commands'],
-            ].map(([cmd, desc]) => (
-              <div key={cmd} className="flex gap-2 px-2 py-1 rounded bg-secondary/50">
-                <span className="text-primary font-bold shrink-0">{cmd}</span>
-                <span className="text-muted-foreground truncate">{desc}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Action buttons */}
-      <div className="flex items-center gap-3">
-        <button
-          data-testid="save-settings-btn"
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/25 disabled:opacity-50"
-        >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-          {saving ? 'Saving...' : 'Save & Connect'}
-        </button>
-
-        <button
-          data-testid="test-telegram-btn"
-          onClick={handleTestAlert}
-          disabled={testing || !tgConnected}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm bg-secondary text-foreground border border-border hover:bg-secondary/80 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {testing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-          {testing ? 'Sending...' : 'Send Test Alert'}
-        </button>
-
-        {tgConnected && (
-          <span className="flex items-center gap-1 text-xs text-emerald-400" data-testid="telegram-connected-indicator">
-            <CheckCircle2 size={12} /> Bot polling active
-          </span>
-        )}
-      </div>
+      <StepSizeSection
+        incText={incText}
+        decText={decText}
+        incStep={incStep}
+        decStep={decStep}
+        onIncTextChange={(value) => /^\d*\.?\d*$/.test(value) && setIncText(value)}
+        onDecTextChange={(value) => /^\d*\.?\d*$/.test(value) && setDecText(value)}
+        onIncCommit={commitIncStep}
+        onDecCommit={commitDecStep}
+      />
+      <TelegramSettingsSection
+        token={token}
+        chatIds={chatIds}
+        newChatId={newChatId}
+        connected={tgConnected}
+        saving={saving}
+        testing={testing}
+        onTokenChange={setToken}
+        onNewChatIdChange={setNewChatId}
+        onAddChatId={addChatId}
+        onRemoveChatId={(id) => setChatIds(chatIds.filter((chatId) => chatId !== id))}
+        onSave={handleSave}
+        onTestAlert={handleTestAlert}
+      />
     </div>
-  );
-}
-
-
-interface BrokerMeta { id: string; name: string; color: string }
-
-function TradingModeSection() {
-  const simulate247 = useStore((s) => s.simulate247);
-  const { send } = useWebSocket();
-
-  const handleToggle = async (checked: boolean) => {
-    useStore.getState().setSimulate247(checked);
-    try {
-      await apiFetch('/api/settings', {
-        method: 'POST',
-        body: JSON.stringify({ simulate_24_7: checked }),
-      });
-      toast.success(checked
-        ? 'Paper Trading mode enabled. Market always open, no live orders.'
-        : 'Live Trading mode enabled. Real market hours, orders routed to brokers.'
-      );
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to save mode');
-    }
-  };
-
-  return (
-    <section className="glass rounded-xl border border-border p-6 space-y-4" data-testid="trading-mode-section">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {simulate247 ? (
-            <Shield size={18} className="text-amber-400" />
-          ) : (
-            <Zap size={18} className="text-emerald-400" />
-          )}
-          <h3 className="text-sm font-bold text-foreground">Trading Mode</h3>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-            simulate247
-              ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-          }`} data-testid="trading-mode-badge">
-            {simulate247 ? 'PAPER' : 'LIVE'}
-          </span>
-          <Switch
-            data-testid="simulation-toggle"
-            checked={simulate247}
-            onCheckedChange={handleToggle}
-            className="data-[state=checked]:bg-amber-500"
-          />
-        </div>
-      </div>
-      <div className={`rounded-lg p-4 border ${
-        simulate247
-          ? 'bg-amber-500/5 border-amber-500/20'
-          : 'bg-emerald-500/5 border-emerald-500/20'
-      }`}>
-        {simulate247 ? (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-amber-400">Paper Trading (Simulation)</p>
-            <ul className="text-xs text-muted-foreground space-y-1 list-disc ml-4">
-              <li>Market is treated as always open (24/7)</li>
-              <li>Trades are logged locally but <strong className="text-foreground">NOT sent to brokers</strong></li>
-              <li>Perfect for testing strategies risk-free</li>
-              <li>All trade analytics and P&L are tracked normally</li>
-            </ul>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-emerald-400">Live Trading</p>
-            <ul className="text-xs text-muted-foreground space-y-1 list-disc ml-4">
-              <li>Follows real US market hours (9:30 AM - 4:00 PM EST)</li>
-              <li>Orders are <strong className="text-foreground">routed to connected brokers</strong></li>
-              <li>Tickers without assigned brokers still trade in paper mode</li>
-              <li>Broker failures are handled gracefully with alerts</li>
-            </ul>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function BrokerAllocationsSection() {
-  const tickersMap = useStore((s) => s.tickers);
-  const tickers = Object.values(tickersMap);
-  const { send } = useWebSocket();
-  const [brokers, setBrokers] = useState<BrokerMeta[]>([]);
-  const [editValues, setEditValues] = useState<Record<string, Record<string, string>>>({});
-
-  useEffect(() => {
-    async function loadBrokers() {
-      try {
-        const data: any[] = await apiFetch('/api/brokers');
-        setBrokers(data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color })));
-      } catch (err) {
-        console.warn('Failed to load brokers, retrying...');
-        // Retry once after 2s in case backend was starting up
-        setTimeout(async () => {
-          try {
-            const data: any[] = await apiFetch('/api/brokers');
-            setBrokers(data.filter(b => b.supported).map(b => ({ id: b.id, name: b.name, color: b.color })));
-          } catch {
-            console.error('Broker load failed on retry');
-          }
-        }, 2000);
-      }
-    }
-    loadBrokers();
-  }, []);
-
-  // Init edit values from tickers — use memoized key to prevent infinite loop
-  const tickerBrokerKey = tickers.map(t => `${t.symbol}:${(t.broker_ids || []).join(',')}:${JSON.stringify(t.broker_allocations || {})}`).join('|');
-  
-  useEffect(() => {
-    const vals: Record<string, Record<string, string>> = {};
-    tickers.forEach(t => {
-      vals[t.symbol] = {};
-      (t.broker_ids || []).forEach(bid => {
-        vals[t.symbol][bid] = String((t.broker_allocations || {})[bid] ?? 0);
-      });
-    });
-    setEditValues(vals);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tickerBrokerKey]);
-
-  const tickersWithBrokers = tickers.filter(t => (t.broker_ids || []).length > 0);
-
-  const handleChange = (symbol: string, brokerId: string, raw: string) => {
-    if (/^\d*\.?\d*$/.test(raw)) {
-      setEditValues(prev => ({ ...prev, [symbol]: { ...prev[symbol], [brokerId]: raw } }));
-    }
-  };
-
-  const handleBlur = (symbol: string, brokerId: string) => {
-    const raw = editValues[symbol]?.[brokerId] ?? '0';
-    const num = parseFloat(raw);
-    console.log('[Settings] handleBlur:', symbol, brokerId, '->', num, 'raw:', raw);
-    if (isNaN(num) || num < 0) return;
-    const ticker = tickers.find(t => t.symbol === symbol);
-    if (!ticker) return;
-    const newAlloc = { ...(ticker.broker_allocations || {}), [brokerId]: num };
-    const newTotal = Object.values(newAlloc).reduce((s, v) => s + v, 0);
-    console.log('[Settings] UPDATE_TICKER:', { symbol, broker_allocations: newAlloc, base_power: newTotal });
-    send('UPDATE_TICKER', { symbol, broker_allocations: newAlloc, base_power: newTotal });
-    toast.success(`${symbol}: ${brokerId} = $${num.toFixed(2)} (total: $${newTotal.toFixed(2)})`);
-  };
-
-  if (tickersWithBrokers.length === 0) {
-    return (
-      <section className="glass rounded-xl border border-border p-6 space-y-3">
-        <div className="flex items-center gap-2 mb-2">
-          <Plug size={18} className="text-primary" />
-          <h3 className="text-sm font-bold text-foreground">Broker Allocations</h3>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Assign brokers to ticker cards first, then set custom buy power per broker here.
-          Select brokers on each card in the Watchlist tab.
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="glass rounded-xl border border-border p-6 space-y-5" data-testid="broker-allocations-section">
-      <div className="flex items-center gap-2 mb-2">
-        <Plug size={18} className="text-primary" />
-        <h3 className="text-sm font-bold text-foreground">Broker Allocations</h3>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Set custom buy power per broker for each ticker. Total buy power = sum of all broker allocations.
-        On Take Profit, gains return proportionally to each broker's allocation.
-      </p>
-
-      <div className="space-y-4">
-        {tickersWithBrokers.map(ticker => {
-          const alloc = ticker.broker_allocations || {};
-          const total = Object.values(alloc).reduce((s, v) => s + v, 0);
-          const assignedBrokers = (ticker.broker_ids || []).map(bid => brokers.find(b => b.id === bid)).filter(Boolean) as BrokerMeta[];
-
-          return (
-            <div key={ticker.symbol} className="border border-border rounded-lg overflow-hidden" data-testid={`alloc-ticker-${ticker.symbol}`}>
-              <div className="flex items-center justify-between bg-secondary/30 px-4 py-2 border-b border-border">
-                <span className="text-sm font-bold text-foreground font-mono">{ticker.symbol}</span>
-                <span className="text-xs font-mono text-primary font-bold">Total: ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
-              <div className="divide-y divide-border">
-                {assignedBrokers.map(broker => {
-                  const val = editValues[ticker.symbol]?.[broker.id] ?? String(alloc[broker.id] ?? 0);
-                  const numVal = parseFloat(val) || 0;
-                  const pct = total > 0 ? ((numVal / total) * 100).toFixed(0) : '0';
-                  return (
-                    <div key={broker.id} className="flex items-center gap-3 px-4 py-2.5" data-testid={`alloc-row-${ticker.symbol}-${broker.id}`}>
-                      <div className="w-1.5 h-6 rounded-full shrink-0" style={{ backgroundColor: broker.color }} />
-                      <span className="text-xs font-medium text-foreground min-w-[120px]">{broker.name}</span>
-                      <div className="flex items-center gap-1.5 flex-1">
-                        <span className="text-muted-foreground text-xs">$</span>
-                        <input
-                          data-testid={`alloc-input-${ticker.symbol}-${broker.id}`}
-                          type="text"
-                          inputMode="decimal"
-                          value={val}
-                          onChange={(e) => handleChange(ticker.symbol, broker.id, e.target.value)}
-                          onBlur={() => handleBlur(ticker.symbol, broker.id)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleBlur(ticker.symbol, broker.id); }}
-                          className="w-24 bg-secondary border border-border rounded-md px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
-                        />
-                      </div>
-                      {/* Percentage bar */}
-                      <div className="flex items-center gap-2 min-w-[80px]">
-                        <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
-                          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: broker.color }} />
-                        </div>
-                        <span className="text-[10px] font-mono text-muted-foreground w-8 text-right">{pct}%</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="rounded-lg bg-secondary/50 border border-border p-3 text-xs text-muted-foreground space-y-1">
-        <p className="font-medium text-foreground">How Take Profit works with multi-broker:</p>
-        <ul className="list-disc ml-4 space-y-0.5">
-          <li>Each broker's position is sold independently through its own API</li>
-          <li>Realized gains return proportionally to each broker's allocation</li>
-          <li>With compounding ON: each broker's allocation grows by its share of the profit</li>
-          <li>Total buy power on the card = sum of all broker allocations</li>
-        </ul>
-      </div>
-    </section>
   );
 }

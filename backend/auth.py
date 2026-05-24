@@ -4,7 +4,6 @@ Provides OIDC-based authentication, RBAC, and session management for firm-grade 
 """
 import os
 import jwt
-import hashlib
 import secrets
 import logging
 from datetime import datetime, timedelta
@@ -16,6 +15,7 @@ from fastapi import HTTPException, Request, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordBearer
 from pydantic import BaseModel
 from runtime_secrets import get_or_create_secret
+from password_security import hash_password, verify_password
 
 
 logger = logging.getLogger(__name__)
@@ -69,16 +69,6 @@ _api_keys: Dict[str, Dict[str, Any]] = {}
 JWT_SECRET = get_or_create_secret("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-
-
-def hash_password(password: str) -> str:
-    """Hash a password using SHA-256."""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return hash_password(plain_password) == hashed_password
 
 
 def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -> str:

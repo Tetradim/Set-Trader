@@ -56,7 +56,6 @@ export async function apiFetch(path: string, options?: RequestInit & { rawText?:
     clearTimeout(timeout);
     const duration_ms = Math.round(performance.now() - started);
     if (err.name === 'AbortError') {
-      console.warn(`API timeout (no backend?): ${path}`);
       uiLog.api('timeout', { path, method, duration_ms });
       // Return default values for specific endpoints to prevent crashes
       if (path === '/api/fx-rates') return { rates: { USD: 1 } };

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/stores/useStore';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Globe, Clock, TrendingUp, RefreshCw, Info, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,26 +18,17 @@ type MarketInfo = {
   hours_display: string;
   status: MarketStatus;
   local_time: string;
+  utc_offset?: string;
   is_open: boolean;
+  yf_suffix: string;
   ticker_examples: string[];
   trading_notes: string;
   lunch_break: boolean;
 };
 
-const FOREIGN_CODES = ['HK', 'AU', 'UK', 'CA', 'CN_SS', 'CN_SZ'];
-
-const TAB_LABELS: Record<string, string> = {
-  HK: 'Hong Kong',
-  AU: 'Australia',
-  UK: 'UK',
-  CA: 'Canada',
-  CN_SS: 'China SSE',
-  CN_SZ: 'China SZE',
-};
-
 export function ForeignTab() {
-  const [activeMarket, setActiveMarket] = useState('HK');
-  const [markets, setMarkets] = useState<Record<string, MarketInfo>>({});
+  const [activeMarket, setActiveMarket] = useState('');
+  const [markets, setMarkets] = useState<MarketInfo[]>([]);
   const [localFxRates, setLocalFxRates] = useState<Record<string, number>>({ USD: 1.0 });
   const [loading, setLoading] = useState(true);
   const [fxLoading, setFxLoading] = useState(false);
@@ -52,17 +44,17 @@ export function ForeignTab() {
   const fetchMarkets = useCallback(async () => {
     try {
       const data = await apiFetch('/api/markets');
-      console.log('[ForeignTab] markets API response:', data);
-      const map: Record<string, MarketInfo> = {};
-      for (const m of (data?.markets ?? [])) {
-        map[m.code] = m;
-      }
-      console.log('[ForeignTab] loaded markets:', Object.keys(map));
-      console.log('[ForeignTab] FOREIGN_CODES:', FOREIGN_CODES);
-      console.log('[ForeignTab] testing access - HK:', map['HK'], 'AU:', map['AU']);
-      setMarkets(map);
+      const nextMarkets = (data?.markets ?? []) as MarketInfo[];
+      uiLog.event('foreign.markets_loaded', { market_count: nextMarkets.length });
+      setMarkets(nextMarkets);
+      const nextForeignMarkets = nextMarkets.filter((market) => market.code !== 'US');
+      setActiveMarket((current) => {
+        if (current && nextForeignMarkets.some((market) => market.code === current)) return current;
+        const firstOpen = nextForeignMarkets.find((market) => market.is_open);
+        return (firstOpen ?? nextForeignMarkets[0])?.code ?? '';
+      });
     } catch (err) {
-      console.error('[ForeignTab] Failed to fetch markets:', err);
+      uiLog.error('foreign.markets_fetch_failed', err);
     } finally {
       setLoading(false);
     }
@@ -75,7 +67,7 @@ export function ForeignTab() {
       setLocalFxRates(data.rates);
       setStoreFxRates(data.rates);
     } catch (err) {
-      console.error('Failed to fetch FX rates:', err);
+      uiLog.error('foreign.fx_fetch_failed', err);
     } finally {
       setFxLoading(false);
     }
@@ -104,7 +96,9 @@ export function ForeignTab() {
     return () => { clearInterval(marketTimer); clearInterval(fxTimer); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const currentMarket = markets[activeMarket];
+  const foreignMarkets = markets.filter((market) => market.code !== 'US');
+  const openMarketCount = foreignMarkets.filter((market) => market.is_open).length;
+  const currentMarket = foreignMarkets.find((market) => market.code === activeMarket);
 
   return (
     <div className="space-y-6" data-testid="foreign-tab">
@@ -116,10 +110,17 @@ export function ForeignTab() {
             Foreign Markets
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-            Trade international stocks with per-market trading hours, opening bell rules, and live currency display.
-            Add tickers using their exchange suffix (e.g. <span className="font-mono text-foreground/80">BHP.AX</span>,{' '}
-            <span className="font-mono text-foreground/80">BARC.L</span>).
+            Follow global exchanges as sessions hand off across North America, Europe, Asia-Pacific, and Africa.
+            Ticker cards use each market&apos;s exchange suffix, local hours, lunch window, and opening-bell rules.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+            <span className="rounded-full border border-border bg-secondary/40 px-2 py-0.5">
+              {foreignMarkets.length} overseas markets
+            </span>
+            <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+              {openMarketCount} open now
+            </span>
+          </div>
         </div>
 
         {/* Currency toggle + FX refresh */}
@@ -150,27 +151,25 @@ export function ForeignTab() {
 
       {/* Market sub-tabs */}
       <div className="flex items-center gap-0.5 border-b border-border overflow-x-auto pb-0 scrollbar-hide">
-        {FOREIGN_CODES.map((code) => {
-          const m = markets[code];
-          const isActive = activeMarket === code;
-          const statusDot = !m ? 'bg-muted-foreground/20'
-            : m.status === 'open'   ? 'bg-emerald-400 shadow-[0_0_4px_#34d399]'
-            : m.status === 'lunch'  ? 'bg-amber-400'
+        {foreignMarkets.map((market) => {
+          const isActive = activeMarket === market.code;
+          const statusDot = market.status === 'open'   ? 'bg-emerald-400 shadow-[0_0_4px_#34d399]'
+            : market.status === 'lunch'  ? 'bg-amber-400'
             : 'bg-muted-foreground/30';
 
           return (
             <button
-              key={code}
-              data-testid={`market-tab-${code}`}
-              onClick={() => setActiveMarket(code)}
+              key={market.code}
+              data-testid={`market-tab-${market.code}`}
+              onClick={() => setActiveMarket(market.code)}
               className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap shrink-0 ${
                 isActive
                   ? 'text-primary bg-card border border-b-0 border-border -mb-px'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
               }`}
             >
-              {m?.flag ?? ''}{' '}
-              {TAB_LABELS[code] ?? code}
+              {market.flag}{' '}
+              {market.code}
               <span className={`w-1.5 h-1.5 rounded-full transition-colors ${statusDot}`} />
             </button>
           );

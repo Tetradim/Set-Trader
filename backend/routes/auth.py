@@ -1,5 +1,4 @@
 """Authentication API routes."""
-import hashlib
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 import deps
+from password_security import hash_password, needs_password_rehash, verify_password
 from auth import (
     Role,
     TokenData,
@@ -73,18 +73,8 @@ class UserResponse(BaseModel):
     last_login: Optional[str] = None
 
 
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
-
-
 def _verify_password(password: str, user_doc: dict) -> bool:
-    stored_hash = user_doc.get("password_hash", "")
-    salt = user_doc.get("salt", "")
-    if not stored_hash:
-        return False
-    if salt:
-        return secrets.compare_digest(_hash_password(password, salt), stored_hash)
-    return secrets.compare_digest(hashlib.sha256(password.encode("utf-8")).hexdigest(), stored_hash)
+    return verify_password(password, user_doc.get("password_hash", ""), user_doc.get("salt", ""))
 
 
 def _normalize_roles(user_doc: dict) -> list[Role]:
@@ -143,7 +133,6 @@ async def _create_user_doc(
     broker_access: list[str],
 ) -> dict:
     now = datetime.now(timezone.utc)
-    salt = secrets.token_hex(16)
     return {
         "id": secrets.token_urlsafe(16),
         "username": username,
@@ -153,8 +142,8 @@ async def _create_user_doc(
         "is_active": True,
         "created_at": now,
         "last_login": None,
-        "password_hash": _hash_password(password, salt),
-        "salt": salt,
+        "password_hash": hash_password(password),
+        "salt": "",
     }
 
 
@@ -202,7 +191,11 @@ async def login(request: LoginRequest):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled")
 
     now = datetime.now(timezone.utc)
-    await deps.db.users.update_one({"id": user.id}, {"$set": {"last_login": now}})
+    updates = {"last_login": now}
+    if needs_password_rehash(user_doc.get("password_hash", "")):
+        updates["password_hash"] = hash_password(request.password)
+        updates["salt"] = ""
+    await deps.db.users.update_one({"id": user.id}, {"$set": updates})
     access_token = create_access_token(user)
 
     return LoginResponse(

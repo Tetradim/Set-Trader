@@ -11,13 +11,16 @@ class EdgeRouteContractStaticTest(unittest.TestCase):
     def read_edge(self) -> str:
         return (ROOT / "backend" / "routes" / "edge.py").read_text(encoding="utf-8")
 
+    def read_contracts(self) -> str:
+        return (ROOT / "backend" / "routes" / "edge_contracts.py").read_text(encoding="utf-8")
+
     def test_edge_route_has_single_signal_response_model(self):
-        text = self.read_edge()
+        text = self.read_contracts()
 
         self.assertEqual(text.count("class SignalResponse(BaseModel):"), 1)
 
     def test_edge_auth_accepts_api_key_header_and_bearer_token(self):
-        text = self.read_edge()
+        text = self.read_contracts()
 
         self.assertIn("authorization: Optional[str] = Header(None)", text)
         self.assertIn("Authorization", text)
@@ -52,8 +55,9 @@ class EdgeRouteContractStaticTest(unittest.TestCase):
 
     def test_decision_route_refreshes_position_before_edge_update(self):
         text = self.read_edge()
+        contracts = self.read_contracts()
 
-        self.assertIn("def _current_position", text)
+        self.assertIn("def _current_position", contracts)
         decision_update = re.search(
             r"# Send position update to Edge if enabled.*?build_position_update",
             text,
@@ -63,7 +67,7 @@ class EdgeRouteContractStaticTest(unittest.TestCase):
         self.assertIn("position = _current_position(sym)", decision_update.group(0))
 
     def test_signal_request_supports_legacy_decision_fields(self):
-        text = self.read_edge()
+        text = self.read_contracts()
 
         signal_request = re.search(
             r"class SignalRequest\(BaseModel\):(.*?)class SignalResponse",

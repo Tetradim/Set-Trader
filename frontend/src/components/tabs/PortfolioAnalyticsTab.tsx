@@ -3,6 +3,7 @@
 // Displays PnL attribution, drawdown, Sharpe-like metrics, and performance analytics.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, RefreshCw, PieChart } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,7 +53,7 @@ export function PortfolioAnalyticsTab() {
       setAttribution(attrRes.attribution || []);
       setRegimes(regimeRes.regimes || []);
     } catch (err) {
-      console.error('Failed to fetch portfolio data:', err);
+      uiLog.error('analytics.fetch_failed', err, { timeframe });
     } finally {
       setLoading(false);
     }

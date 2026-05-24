@@ -3,6 +3,7 @@ import { useStore, TickerConfig, StrategyInfo } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { Brain, Settings2, RefreshCw, ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 
 /* Re-use config widgets */
 import {
@@ -196,7 +197,7 @@ export const StrategyConfigSection = memo(function StrategyConfigSection({
         const strategyList = Object.values(data.strategies || {}) as StrategyInfo[];
         setStrategies(strategyList);
       } catch (err) {
-        console.error('Failed to load strategies:', err);
+        uiLog.error('strategies.load_failed', err);
       } finally {
         setLoading(false);
       }

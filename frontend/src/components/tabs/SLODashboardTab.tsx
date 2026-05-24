@@ -3,6 +3,7 @@
 // Displays Service Level Objectives, error budgets, and incident management.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 import { Target, AlertTriangle, CheckCircle, RefreshCw, TrendingDown, Activity, Bell } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -57,7 +58,7 @@ export function SLODashboardTab() {
       setIncidents(incidentsRes.incidents || []);
       setSummary(sumRes);
     } catch (err) {
-      console.error('Failed to fetch SLO data:', err);
+      uiLog.error('slo.fetch_failed', err);
     } finally {
       setLoading(false);
     }

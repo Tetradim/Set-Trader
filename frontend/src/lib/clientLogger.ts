@@ -3,9 +3,12 @@ const AUTH_TOKEN_KEY = 'sentinel_auth_token';
 const CLIENT_LOG_ENDPOINT = `${BACKEND_URL}/api/logs/client-events`;
 const MAX_QUEUE = 250;
 const FLUSH_INTERVAL_MS = 2000;
+const hasBrowser = typeof window !== 'undefined' && typeof document !== 'undefined';
+const hasLocalStorage = typeof localStorage !== 'undefined';
+const hasSessionStorage = typeof sessionStorage !== 'undefined';
 const LOG_TYPED_VALUES =
   import.meta.env.VITE_LOG_TYPED_VALUES === 'true' ||
-  localStorage.getItem('sentinel_log_typed_values') === 'true';
+  (hasLocalStorage && localStorage.getItem('sentinel_log_typed_values') === 'true');
 
 type ClientLogLevel = 'info' | 'warn' | 'error';
 
@@ -23,16 +26,18 @@ type ClientLogEvent = {
 
 let installed = false;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
-let sessionId = sessionStorage.getItem('sentinel_ui_session_id') || '';
+let sessionId = hasSessionStorage ? sessionStorage.getItem('sentinel_ui_session_id') || '' : '';
 const queue: ClientLogEvent[] = [];
 
 if (!sessionId) {
-  sessionId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  sessionStorage.setItem('sentinel_ui_session_id', sessionId);
+  sessionId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (hasSessionStorage) {
+    sessionStorage.setItem('sentinel_ui_session_id', sessionId);
+  }
 }
 
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const token = hasLocalStorage ? localStorage.getItem(AUTH_TOKEN_KEY) : '';
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -43,9 +48,9 @@ function currentContext() {
   return {
     ts: new Date().toISOString(),
     session_id: sessionId,
-    url: window.location.href,
-    user_agent: navigator.userAgent,
-    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    url: hasBrowser ? window.location.href : '',
+    user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    viewport: hasBrowser ? `${window.innerWidth}x${window.innerHeight}` : '',
   };
 }
 
@@ -186,7 +191,7 @@ export const uiLog = {
 };
 
 export function installUiLogging() {
-  if (installed) return;
+  if (installed || !hasBrowser) return;
   installed = true;
   enqueue({ type: 'ui.session_start', level: 'info', message: 'Browser UI session started' });
 

@@ -80,6 +80,58 @@ class ReleaseSecurityStaticTest(unittest.TestCase):
         self.assertIn("getAuthToken", ws)
         self.assertIn("searchParams.set('token'", ws)
 
+    def test_log_routes_are_mounted_with_auth_dependency(self):
+        server = self.read("backend/server.py")
+        logs = self.read("backend/routes/logs.py")
+
+        self.assertRegex(
+            server,
+            r"api\.include_router\(logs_router,\s*dependencies=\[Depends\(get_current_user\)\]\)",
+            "logs_router must be mounted with the same auth dependency as other private API routes",
+        )
+        self.assertNotIn('@app.get("/api/logs', server)
+        self.assertNotIn('@app.post("/api/logs', server)
+        self.assertIn('router = APIRouter(prefix="/logs"', logs)
+
+    def test_password_hashing_uses_bcrypt_for_new_passwords(self):
+        auth_routes = self.read("backend/routes/auth.py")
+        password_security = self.read("backend/password_security.py")
+
+        self.assertNotIn("hashlib.sha256((password + salt)", auth_routes)
+        self.assertNotIn("hashlib.sha256(password.encode", auth_routes)
+        self.assertIn("hash_password", auth_routes)
+        self.assertIn("bcrypt.hashpw", password_security)
+        self.assertIn("verify_password", password_security)
+
+    def test_frontend_has_no_unguarded_console_logging(self):
+        frontend_root = ROOT / "frontend" / "src"
+        allowed_files = {
+            "lib/clientLogger.ts",
+        }
+        offenders = []
+        for path in frontend_root.rglob("*"):
+            if path.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+                continue
+            rel = path.relative_to(frontend_root).as_posix()
+            if rel in allowed_files:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "console." in text:
+                offenders.append(rel)
+        self.assertEqual([], offenders, f"Route frontend logs through clientLogger instead of console: {offenders}")
+
+    def test_foreign_markets_are_backend_driven_and_global(self):
+        markets = self.read("backend/markets.py")
+        foreign_tab = self.read("frontend/src/components/tabs/ForeignTab.tsx")
+        add_ticker = self.read("frontend/src/components/AddTickerDialog.tsx")
+
+        for code in ["JP", "DE", "FR", "IN_NSE", "SG", "KR", "TW", "BR", "ZA"]:
+            self.assertIn(f'code="{code}"', markets)
+        self.assertNotIn("FOREIGN_CODES", foreign_tab)
+        self.assertIn("markets.filter((market) => market.code !== 'US')", foreign_tab)
+        self.assertIn("apiFetch('/api/markets')", add_ticker)
+        self.assertNotIn("const MARKET_OPTIONS = [", add_ticker)
+
 
 if __name__ == "__main__":
     unittest.main()
