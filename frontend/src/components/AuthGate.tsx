@@ -1,5 +1,10 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearAuthToken, getAuthToken, setAuthToken } from '@/lib/api';
+import {
+  clearRememberedCredentials,
+  loadRememberedCredentials,
+  saveRememberedCredentials,
+} from '@/lib/rememberCredentials';
 
 type AuthMode = 'loading' | 'setup' | 'login' | 'ready';
 
@@ -9,10 +14,12 @@ type AuthResponse = {
 };
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  const [initialCredentials] = useState(() => loadRememberedCredentials());
   const [mode, setMode] = useState<AuthMode>('loading');
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState(initialCredentials.username || 'admin');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState(initialCredentials.password);
+  const [rememberPassword, setRememberPassword] = useState(initialCredentials.remember);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -71,8 +78,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      if (rememberPassword) {
+        saveRememberedCredentials({ username, password });
+      } else {
+        clearRememberedCredentials();
+      }
       setAuthToken(response.access_token);
-      setPassword('');
+      setPassword(rememberPassword ? password : '');
       setMode('ready');
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
@@ -132,6 +144,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
             autoComplete={mode === 'setup' ? 'new-password' : 'current-password'}
             required
           />
+        </label>
+
+        <label className="mb-4 flex items-center gap-2 text-sm text-[#bdb4a0]">
+          <input
+            type="checkbox"
+            checked={rememberPassword}
+            onChange={(event) => setRememberPassword(event.target.checked)}
+            className="h-4 w-4 accent-[#c99a2e]"
+          />
+          <span>Remember username and password</span>
         </label>
 
         {error && (

@@ -1,10 +1,11 @@
 """Resilience primitive types used by BrokerResilience."""
 import asyncio
 import time as sync_time
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Deque, Optional
 
 
 class CircuitState(str, Enum):
@@ -12,6 +13,8 @@ class CircuitState(str, Enum):
     OPEN = "open"           # Blocking all calls
     HALF_OPEN = "half_open" # Testing with one call
 
+
+@dataclass
 class BrokerResilienceConfig:
     """Per-broker resilience configuration."""
     # Rate limiting (token bucket)
@@ -67,10 +70,12 @@ class BrokerResilienceConfig:
         broker_key = broker_type.lower().split("_")[0]
         return DEFAULTS.get(broker_key, cls())
 
+
+@dataclass
 class CircuitBreakerState:
     """Runtime state for a circuit breaker."""
     state: CircuitState = CircuitState.CLOSED
-    failure_timestamps: deque = field(default_factory=lambda: deque(maxlen=100))
+    failure_timestamps: Deque[datetime] = field(default_factory=lambda: deque(maxlen=100))
     last_failure_time: Optional[datetime] = None
     opened_at: Optional[datetime] = None
     half_open_successes: int = 0

@@ -1,34 +1,28 @@
-# Sentinel Pulse Launcher
-# Starts MongoDB and Sentinel Pulse from an installed package or source checkout.
+# Sentinel Pulse Local Source Launcher
+# Runs the edited local source tree without building or downloading an installer.
 
 param(
-    [string]$MongoPath = "",
-    [string]$DataPath = "",
-    [string]$LogPath = "",
-    [string]$SettingsPath = "",
     [int]$MongoPort = 27017,
-    [int]$AppPort = 8002,
+    [int]$BackendPort = 8002,
     [int]$FrontendPort = 3000,
+    [string]$DataPath = "",
     [switch]$NoBrowser,
-    [switch]$SmokeTest
+    [switch]$SkipMongo,
+    [switch]$InstallDeps
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
 
+$Backend = Join-Path $ProjectRoot "backend"
+$Frontend = Join-Path $ProjectRoot "frontend"
 $DesktopPath = [Environment]::GetFolderPath("Desktop")
 if (-not $DesktopPath) { $DesktopPath = Join-Path $HOME "Desktop" }
-
 if (-not $DataPath) { $DataPath = Join-Path $env:SystemDrive "data\db" }
-if (-not $LogPath) { $LogPath = $DesktopPath }
-if (-not $SettingsPath) { $SettingsPath = Join-Path $ProjectRoot "launcher-settings.ini" }
 
+$LogFile = Join-Path $DesktopPath "Sentinel-Pulse-Local.log"
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
-$LogFile = Join-Path $LogPath "Sentinel-Pulse.log"
-$TranscriptFile = Join-Path $LogPath "Sentinel-Pulse-Transcript.log"
-$TranscriptStarted = $false
-$serverWillOpenBrowser = $false
 $BrowserProcess = $null
 $BrowserProfileDir = $null
 $BrowserProcessIds = @()
@@ -43,10 +37,8 @@ function Write-Status {
         default { "Cyan" }
     }
     Write-Host "[$Level] $Message" -ForegroundColor $color
-    if (Test-Path $LogPath) {
-        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
-        Add-Content -Path $LogFile -Value "$timestamp [$Level] $Message" -Encoding UTF8
-    }
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+    Add-Content -Path $LogFile -Value "$timestamp [$Level] $Message" -Encoding UTF8
 }
 
 function Test-PortOpen {
@@ -64,7 +56,7 @@ function Test-PortOpen {
 }
 
 function Wait-Port {
-    param([int]$Port, [int]$Seconds = 15)
+    param([int]$Port, [int]$Seconds = 30)
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
         if (Test-PortOpen -Port $Port) { return $true }
@@ -73,58 +65,18 @@ function Wait-Port {
     return $false
 }
 
-function Wait-PortAttempts {
-    param([int]$Port, [int]$Attempts = 3, [int]$IntervalSeconds = 3)
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        Start-Sleep -Seconds $IntervalSeconds
-        if (Test-PortOpen -Port $Port) {
-            Write-Status "Port $Port opened on check $attempt of $Attempts" "OK"
-            return $true
-        }
-        Write-Status "Port $Port not open yet; check $attempt of $Attempts" "WARN"
-    }
-    return $false
-}
-
 function Find-Mongo {
-    if ($MongoPath) {
-        $candidate = Join-Path $MongoPath "mongod.exe"
-        if (Test-Path $candidate) { return $candidate }
-        if (Test-Path $MongoPath) { return $MongoPath }
-    }
-
     $candidates = @(
         "C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe",
         "C:\Program Files\MongoDB\Server\8.0\bin\mongod.exe",
         "C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe",
         "C:\Program Files\MongoDB\Server\6.0\bin\mongod.exe"
     )
-
     foreach ($candidate in $candidates) {
         if (Test-Path $candidate) { return $candidate }
     }
-
     $cmd = Get-Command mongod.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
-    return $null
-}
-
-function Find-Python {
-    $candidates = @(
-        (Join-Path $ProjectRoot "backend\.venv\Scripts\python.exe"),
-        (Join-Path $ProjectRoot "backend\venv\Scripts\python.exe"),
-        (Join-Path $ProjectRoot ".venv\Scripts\python.exe")
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
-    }
-
-    foreach ($name in @("python.exe", "py.exe")) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-    }
-
     return $null
 }
 
@@ -136,6 +88,75 @@ function Find-Npm {
     return $null
 }
 
+function Get-PythonVersion {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentPrefix = @()
+    )
+    try {
+        $args = @($ArgumentPrefix + @("-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"))
+        $version = (& $FilePath @args 2>$null | Select-Object -First 1)
+        if (-not $version) { return $null }
+        return [version]$version
+    } catch {
+        return $null
+    }
+}
+
+function Test-CompatiblePythonVersion {
+    param([version]$Version)
+    return $Version -and $Version.Major -eq 3 -and $Version.Minor -ge 11 -and $Version.Minor -le 13
+}
+
+function Find-CompatiblePython {
+    $candidates = New-Object System.Collections.Generic.List[object]
+
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) {
+        foreach ($selector in @("-3.11", "-3.12", "-3.13")) {
+            $candidates.Add([pscustomobject]@{
+                FilePath = $py.Source
+                ArgumentPrefix = @($selector)
+                Label = "py $selector"
+            })
+        }
+    }
+
+    foreach ($name in @("python3.11.exe", "python3.12.exe", "python3.13.exe", "python.exe")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $candidates.Add([pscustomobject]@{
+                FilePath = $cmd.Source
+                ArgumentPrefix = @()
+                Label = $cmd.Source
+            })
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        $version = Get-PythonVersion -FilePath $candidate.FilePath -ArgumentPrefix $candidate.ArgumentPrefix
+        if (Test-CompatiblePythonVersion -Version $version) {
+            return [pscustomobject]@{
+                FilePath = $candidate.FilePath
+                ArgumentPrefix = $candidate.ArgumentPrefix
+                Version = $version
+                Label = $candidate.Label
+            }
+        }
+    }
+
+    return $null
+}
+
+function Invoke-CompatiblePython {
+    param(
+        [object]$PythonInfo,
+        [string[]]$Arguments
+    )
+    $fullArgs = @($PythonInfo.ArgumentPrefix + $Arguments)
+    & $PythonInfo.FilePath @fullArgs
+}
+
 function Find-BrowserExecutable {
     $candidates = @(
         "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
@@ -145,16 +166,9 @@ function Find-BrowserExecutable {
         "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
         "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
     )
-
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path $candidate)) { return $candidate }
     }
-
-    foreach ($name in @("msedge.exe", "chrome.exe")) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-    }
-
     return $null
 }
 
@@ -201,7 +215,7 @@ function Start-BrowserWindow {
     $browserExe = Find-BrowserExecutable
     if ($browserExe) {
         Write-Status "Opening dedicated browser window"
-        $script:BrowserProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) "SentinelPulse-Browser-$PID"
+        $script:BrowserProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) "SentinelPulse-Local-Browser-$PID"
         New-Item -ItemType Directory -Path $script:BrowserProfileDir -Force | Out-Null
         $browserArgs = Join-ProcessArguments -Arguments @("--new-window", "--app=$Url", "--user-data-dir=$script:BrowserProfileDir", "--no-first-run", "--disable-background-mode")
         $process = Start-Process -FilePath $browserExe -ArgumentList $browserArgs -PassThru
@@ -235,16 +249,19 @@ function Start-OwnedProcess {
     param(
         [string]$FilePath,
         [string[]]$ArgumentList,
-        [string]$WorkingDirectory
+        [string]$WorkingDirectory,
+        [switch]$Visible
     )
     $startParams = @{
         FilePath = $FilePath
         WorkingDirectory = $WorkingDirectory
         PassThru = $true
-        WindowStyle = "Hidden"
     }
     if ($ArgumentList -and $ArgumentList.Count -gt 0) {
         $startParams.ArgumentList = Join-ProcessArguments -Arguments $ArgumentList
+    }
+    if (-not $Visible) {
+        $startParams.WindowStyle = "Hidden"
     }
     $process = Start-Process @startParams
     $OwnedProcesses.Add($process)
@@ -261,7 +278,7 @@ function Stop-ProcessTree {
 
         $current = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
         if ($current) {
-            Write-Status "Stopping process $($current.ProcessName) ($($current.Id))" "INFO"
+            Write-Status "Stopping process $($current.ProcessName) ($($current.Id))"
             Stop-Process -Id $current.Id -Force -ErrorAction SilentlyContinue
         }
     } catch {
@@ -279,7 +296,6 @@ function Stop-BrowserWindow {
     $profileProcesses = @(Get-BrowserProfileProcesses)
     try {
         foreach ($current in $profileProcesses) {
-            Write-Status "Closing browser window ($($current.Id))" "INFO"
             $current.CloseMainWindow() | Out-Null
         }
         Start-Sleep -Milliseconds 500
@@ -295,7 +311,6 @@ function Stop-BrowserWindow {
         try {
             $current = Get-Process -Id $BrowserProcess.Id -ErrorAction SilentlyContinue
             if ($current) {
-                Write-Status "Closing browser window ($($current.Id))" "INFO"
                 $current.CloseMainWindow() | Out-Null
                 Start-Sleep -Milliseconds 500
                 $current = Get-Process -Id $BrowserProcess.Id -ErrorAction SilentlyContinue
@@ -311,130 +326,110 @@ function Stop-BrowserWindow {
     }
 }
 
-if ($SmokeTest) {
-    Write-Status "Running launcher smoke test"
-    $basicArgs = Join-ProcessArguments -Arguments @("--dbpath", "C:\data\db", "--port", "27017")
-    if (-not $basicArgs.Contains("--dbpath") -or -not $basicArgs.Contains("C:\data\db")) {
-        throw "Basic argument smoke test failed."
-    }
-    $spacedArgs = Join-ProcessArguments -Arguments @("--logpath", "C:\Users\Lite OS\Desktop\Sentinel-Pulse.log")
-    if (-not $spacedArgs.Contains('"C:\Users\Lite OS\Desktop\Sentinel-Pulse.log"')) {
-        throw "Spaced argument quoting smoke test failed."
-    }
-    if (-not (Get-Command Start-Process -ErrorAction SilentlyContinue)) {
-        throw "Start-Process is unavailable."
-    }
-    $browserArgs = Join-ProcessArguments -Arguments @("--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelPulse-Browser-1234")
-    if (-not $browserArgs.Contains('"--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelPulse-Browser-1234"')) {
-        throw "Browser argument quoting smoke test failed."
-    }
-    Write-Status "Launcher smoke test passed" "OK"
-    exit 0
-}
-
 try {
-    New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
-    New-Item -ItemType Directory -Path $LogPath -Force | Out-Null
-    try {
-        Start-Transcript -Path $TranscriptFile -Append | Out-Null
-        $TranscriptStarted = $true
-    } catch {
-        $TranscriptStarted = $false
-    }
-
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Sentinel Pulse Launcher" -ForegroundColor Cyan
+    Write-Host "  Sentinel Pulse - Local Source" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Status "Project root: $ProjectRoot"
-    Write-Status "App log: $LogFile"
-    Write-Status "Launcher transcript: $TranscriptFile"
-    Write-Status "MongoDB data path: $DataPath"
+    Write-Status "Local log: $LogFile"
+
+    if (-not (Test-Path $Backend)) { throw "Backend folder not found: $Backend" }
+    if (-not (Test-Path $Frontend)) { throw "Frontend folder not found: $Frontend" }
+
+    if (-not $SkipMongo) {
+        if (-not (Test-PortOpen -Port $MongoPort)) {
+            New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
+            $mongoExe = Find-Mongo
+            if (-not $mongoExe) {
+                throw "MongoDB was not found. Install MongoDB Community Server or start MongoDB manually with -SkipMongo."
+            }
+            $mongoBin = Split-Path -Parent $mongoExe
+            $mongoLog = Join-Path $DesktopPath "Sentinel-Pulse-MongoDB.log"
+            Write-Status "Starting MongoDB from $mongoBin"
+            $mongoProcess = Start-OwnedProcess -FilePath $mongoExe -ArgumentList @("--dbpath", $DataPath, "--port", "$MongoPort", "--logpath", $mongoLog, "--quiet") -WorkingDirectory $mongoBin
+            if (-not (Wait-Port -Port $MongoPort -Seconds 15)) {
+                if ($mongoProcess.HasExited) {
+                    throw "MongoDB exited with code $($mongoProcess.ExitCode) before opening port $MongoPort. Check $mongoLog."
+                }
+                throw "MongoDB did not open port $MongoPort. Check $mongoLog."
+            }
+            Write-Status "MongoDB is ready" "OK"
+        } else {
+            Write-Status "MongoDB already running on port $MongoPort" "WARN"
+        }
+    }
+
+    $venvPath = Join-Path $Backend ".venv"
+    $venvPython = Join-Path $venvPath "Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        $venvVersion = Get-PythonVersion -FilePath $venvPython
+        if (-not (Test-CompatiblePythonVersion -Version $venvVersion)) {
+            Write-Status "Backend virtual environment uses Python $venvVersion; recreating with Python 3.11-3.13" "WARN"
+            Remove-Item -LiteralPath $venvPath -Recurse -Force
+        }
+    }
+
+    if (-not (Test-Path $venvPython)) {
+        $pythonInfo = Find-CompatiblePython
+        if (-not $pythonInfo) {
+            throw "A compatible Python was not found. Sentinel Pulse local source requires Python 3.11-3.13 because current pinned wheels do not support Python 3.14. Install Python 3.11 and rerun."
+        }
+        Write-Status "Creating backend virtual environment with $($pythonInfo.Label) ($($pythonInfo.Version))"
+        Invoke-CompatiblePython -PythonInfo $pythonInfo -Arguments @("-m", "venv", $venvPath)
+        $InstallDeps = $true
+    }
+
+    if ($InstallDeps) {
+        Write-Status "Installing backend dependencies"
+        & $venvPython -m pip install --retries 10 --timeout 180 --prefer-binary -r (Join-Path $Backend "requirements.txt")
+    }
+
+    $npm = Find-Npm
+    if (-not $npm) { throw "npm was not found. Install Node.js." }
+    if ($InstallDeps -or -not (Test-Path (Join-Path $Frontend "node_modules"))) {
+        Write-Status "Installing frontend dependencies"
+        Start-OwnedProcess -FilePath $npm -ArgumentList @("install") -WorkingDirectory $Frontend -Visible | Wait-Process
+    }
+
+    $backendUrl = "http://127.0.0.1:$BackendPort"
+    $frontendUrl = "http://127.0.0.1:$FrontendPort"
+    $env:PORT = "$BackendPort"
+    $env:SENTINEL_OPEN_BROWSER = "0"
+    $env:VITE_BACKEND_URL = $backendUrl
+    $env:REACT_APP_BACKEND_URL = $backendUrl
     $env:LOG_FILE = $LogFile
 
-    if (-not (Test-PortOpen -Port $MongoPort)) {
-        $mongoExe = Find-Mongo
-        if (-not $mongoExe) {
-            throw "MongoDB was not found. Install MongoDB Community Server or pass -MongoPath."
+    if (-not (Test-PortOpen -Port $BackendPort)) {
+        Write-Status "Starting backend from source on port $BackendPort"
+        Start-OwnedProcess -FilePath $venvPython -ArgumentList @("-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "$BackendPort", "--reload") -WorkingDirectory $Backend | Out-Null
+        if (-not (Wait-Port -Port $BackendPort -Seconds 45)) {
+            throw "Backend did not open port $BackendPort. Check $LogFile."
         }
-        $mongoBin = Split-Path -Parent $mongoExe
-        Write-Status "Preparing MongoDB working directory: $mongoBin"
-        Start-Sleep -Seconds 3
-        Write-Status "Starting MongoDB on port $MongoPort"
-        $mongoLog = Join-Path $LogPath "Sentinel-Pulse-MongoDB.log"
-        Start-OwnedProcess -FilePath $mongoExe -ArgumentList @("--dbpath", $DataPath, "--port", "$MongoPort", "--logpath", $mongoLog, "--quiet") -WorkingDirectory $mongoBin | Out-Null
-        if (-not (Wait-PortAttempts -Port $MongoPort -Attempts 3 -IntervalSeconds 3)) {
-            throw "MongoDB did not open port $MongoPort. Check $mongoLog."
-        }
-        Write-Status "MongoDB is ready" "OK"
+        Write-Status "Backend is ready" "OK"
     } else {
-        Write-Status "MongoDB already running on port $MongoPort" "WARN"
+        Write-Status "Backend already running on port $BackendPort" "WARN"
     }
 
-    if (-not (Test-PortOpen -Port $AppPort)) {
-        $rootExe = Join-Path $ProjectRoot "SentinelPulse.exe"
-        $backendExe = Join-Path $ProjectRoot "backend\SentinelPulse.exe"
-        $serverPy = Join-Path $ProjectRoot "backend\server.py"
-
-        if (Test-Path $rootExe) {
-            Write-Status "Starting packaged SentinelPulse.exe"
-            $env:SENTINEL_OPEN_BROWSER = "0"
-            Start-OwnedProcess -FilePath $rootExe -ArgumentList @() -WorkingDirectory $ProjectRoot | Out-Null
-        } elseif (Test-Path $backendExe) {
-            Write-Status "Starting backend packaged SentinelPulse.exe"
-            $env:SENTINEL_OPEN_BROWSER = "0"
-            Start-OwnedProcess -FilePath $backendExe -ArgumentList @() -WorkingDirectory (Split-Path -Parent $backendExe) | Out-Null
-        } elseif (Test-Path $serverPy) {
-            $python = Find-Python
-            if (-not $python) {
-                throw "Python was not found. Install Python 3.11+ or create backend\.venv."
-            }
-            Write-Status "Starting backend server on port $AppPort"
-            $env:PORT = "$AppPort"
-            $env:SENTINEL_OPEN_BROWSER = "0"
-            Start-OwnedProcess -FilePath $python -ArgumentList @("server.py") -WorkingDirectory (Join-Path $ProjectRoot "backend") | Out-Null
-        } else {
-            throw "No Sentinel Pulse server was found. Expected SentinelPulse.exe or backend\server.py."
+    if (-not (Test-PortOpen -Port $FrontendPort)) {
+        Write-Status "Starting Vite frontend from source on port $FrontendPort"
+        Start-OwnedProcess -FilePath $npm -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "$FrontendPort") -WorkingDirectory $Frontend | Out-Null
+        if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
+            throw "Frontend did not open port $FrontendPort. Check $LogFile."
         }
-
-        if (-not (Wait-Port -Port $AppPort -Seconds 30)) {
-            throw "Sentinel Pulse did not open port $AppPort. Check $LogFile and backend logs."
-        }
-        Write-Status "Sentinel Pulse is ready on port $AppPort" "OK"
+        Write-Status "Frontend is ready" "OK"
     } else {
-        Write-Status "Sentinel Pulse already running on port $AppPort" "WARN"
-    }
-
-    $url = ("http://localhost:{0}" -f $AppPort)
-    $frontendPackage = Join-Path $ProjectRoot "frontend\package.json"
-    if (Test-Path $frontendPackage) {
-        $frontendRoot = Split-Path -Parent $frontendPackage
-        $url = "http://localhost:$FrontendPort"
-        $env:VITE_BACKEND_URL = "http://127.0.0.1:$AppPort"
-        $env:REACT_APP_BACKEND_URL = $env:VITE_BACKEND_URL
-        if (-not (Test-PortOpen -Port $FrontendPort)) {
-            $npm = Find-Npm
-            if (-not $npm) {
-                throw "Frontend source was found, but npm was not found. Install Node.js/npm or use the packaged installer."
-            }
-            Write-Status "Starting frontend UI on port $FrontendPort"
-            Start-OwnedProcess -FilePath $npm -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "$FrontendPort") -WorkingDirectory $frontendRoot | Out-Null
-            if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
-                throw "Frontend UI did not open port $FrontendPort. Check $LogFile."
-            }
-            Write-Status "Frontend UI is ready on port $FrontendPort" "OK"
-        } else {
-            Write-Status "Frontend UI already running on port $FrontendPort" "WARN"
-        }
+        Write-Status "Frontend already running on port $FrontendPort" "WARN"
     }
 
     if (-not $NoBrowser) {
-        $BrowserProcess = Start-BrowserWindow -Url $url
+        $BrowserProcess = Start-BrowserWindow -Url $frontendUrl
     }
 
     Write-Host ""
-    Write-Host "Ready: $url" -ForegroundColor Green
+    Write-Host "Ready: $frontendUrl" -ForegroundColor Green
+    Write-Host "Backend: $backendUrl" -ForegroundColor Gray
     Write-Host "Close this window or press Ctrl+C to stop processes started by this launcher." -ForegroundColor Gray
     Write-Host ""
 
@@ -456,7 +451,4 @@ try {
 } finally {
     Stop-BrowserWindow
     Stop-OwnedProcesses
-    if ($TranscriptStarted) {
-        try { Stop-Transcript | Out-Null } catch {}
-    }
 }

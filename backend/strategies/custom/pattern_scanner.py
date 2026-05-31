@@ -49,7 +49,7 @@ class PatternScannerStrategy(BaseStrategy):
         super().__init__()
         self._scan_counter = 0
         self._last_patterns: Dict[str, Dict] = {}
-        self._detector = ChartPatternDetector(lookback=self.params["lookback_bars"])
+        self._detector = ChartPatternDetector(lookback=self.default_params["lookback_bars"])
 
     async def generate_signals(
         self,
@@ -64,6 +64,10 @@ class PatternScannerStrategy(BaseStrategy):
         df = market_data.get("history")
         if df is None or len(df) < params["lookback_bars"]:
             return None
+
+        lookback_bars = int(params["lookback_bars"])
+        if self._detector.lookback != lookback_bars:
+            self._detector = ChartPatternDetector(lookback=lookback_bars)
 
         # Check if pattern detection is enabled in settings
         from deps import db

@@ -7,6 +7,9 @@ from schemas import TradeRecord
 from resilience import CircuitOpenError
 
 
+_ET = ZoneInfo("America/New_York")
+
+
 class EngineStateMixin:
     def record_ticker_error(self, symbol: str, error: Exception):
         """Record an error for a ticker for backpressure."""

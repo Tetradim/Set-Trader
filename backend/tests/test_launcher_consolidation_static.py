@@ -6,12 +6,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class LauncherConsolidationStaticTests(unittest.TestCase):
-    def test_only_unversioned_windows_launchers_are_shipped(self):
+    def test_only_current_windows_launchers_are_shipped(self):
         launchers = sorted(path.name for path in ROOT.glob("Launch-Sentinel-Pulse*"))
         self.assertEqual(
             launchers,
-            ["Launch-Sentinel-Pulse.bat", "Launch-Sentinel-Pulse.ps1"],
+            [
+                "Launch-Sentinel-Pulse-Local.bat",
+                "Launch-Sentinel-Pulse-Local.ps1",
+                "Launch-Sentinel-Pulse.bat",
+                "Launch-Sentinel-Pulse.ps1",
+            ],
         )
+        self.assertFalse(any("-v2" in launcher or "-v3" in launcher for launcher in launchers))
 
     def test_batch_wrapper_invokes_unversioned_powershell_launcher(self):
         text = (ROOT / "Launch-Sentinel-Pulse.bat").read_text(encoding="utf-8")
@@ -29,13 +35,53 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn('$env:SENTINEL_OPEN_BROWSER = "0"', text)
         self.assertIn("$BrowserProcess = Start-BrowserWindow -Url $url", text)
 
+    def test_root_launcher_opens_source_frontend_instead_of_backend_root(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("[int]$FrontendPort = 3000", text)
+        self.assertIn("function Find-Npm", text)
+        self.assertIn('Join-Path $ProjectRoot "frontend\\package.json"', text)
+        self.assertIn('$env:VITE_BACKEND_URL = "http://127.0.0.1:$AppPort"', text)
+        self.assertIn('$env:REACT_APP_BACKEND_URL = $env:VITE_BACKEND_URL', text)
+        self.assertIn('Write-Status "Starting frontend UI on port $FrontendPort"', text)
+        self.assertIn('"run", "dev", "--", "--host", "127.0.0.1", "--port", "$FrontendPort"', text)
+        self.assertIn('$url = "http://localhost:$FrontendPort"', text)
+        self.assertNotIn('$url = "http://localhost:$AppPort"', text)
+
+    def test_vite_dev_server_proxies_api_to_backend(self):
+        text = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+        self.assertIn("VITE_BACKEND_URL", text)
+        self.assertIn("'http://127.0.0.1:8002'", text)
+        self.assertIn("proxy:", text)
+        self.assertIn("'/api':", text)
+        self.assertIn("target: backendUrl", text)
+        self.assertIn("ws: true", text)
+
+    def test_root_launcher_stops_started_child_process_trees(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("function Stop-ProcessTree", text)
+        self.assertIn("ParentProcessId = $ProcessId", text)
+        self.assertIn("Stop-ProcessTree -ProcessId $process.Id", text)
+
     def test_root_launcher_tracks_browser_window(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
         self.assertIn("$BrowserProcess = $null", text)
+        self.assertIn("$BrowserProfileDir = $null", text)
+        self.assertIn("$BrowserProcessIds = @()", text)
         self.assertIn("function Start-BrowserWindow", text)
+        self.assertIn("function Get-BrowserProfileProcesses", text)
+        self.assertIn("function Test-BrowserWindowClosed", text)
         self.assertIn("function Stop-BrowserWindow", text)
-        self.assertIn("Browser window closed.", text)
+        self.assertIn("--user-data-dir=$script:BrowserProfileDir", text)
+        self.assertIn("--disable-background-mode", text)
+        self.assertIn("Browser process handed off; close monitoring disabled", text)
+        self.assertIn("Browser window closed; shutting down Sentinel Pulse", text)
+        self.assertNotIn('throw "Browser window closed."', text)
         self.assertIn("SENTINEL_OPEN_BROWSER", text)
+
+    def test_root_launcher_quotes_browser_arguments_with_user_profile_spaces(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+        self.assertIn("$browserArgs = Join-ProcessArguments -Arguments @(", text)
+        self.assertIn('Start-Process -FilePath $browserExe -ArgumentList $browserArgs -PassThru', text)
 
     def test_root_launcher_writes_desktop_log_and_backend_uses_same_file(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
