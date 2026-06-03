@@ -10,6 +10,7 @@ const frontendPort = 3001;
 const backendPort = 8765;
 const artifactDir = path.join(root, 'test-artifacts');
 const screenshotPath = path.join(artifactDir, 'sentinel-ui.png');
+const failureScreenshotPath = path.join(artifactDir, 'sentinel-ui-failure.png');
 
 function ticker(symbol, sortOrder, price) {
   return {
@@ -75,7 +76,7 @@ const profits = { AAPL: 42.2, MSFT: 18.4, TSLA: -9.8 };
 const server = http.createServer((request, response) => {
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  response.setHeader('Access-Control-Allow-Headers', 'content-type');
+  response.setHeader('Access-Control-Allow-Headers', 'authorization,content-type');
 
   if (request.method === 'OPTIONS') {
     response.writeHead(204);
@@ -93,6 +94,29 @@ const server = http.createServer((request, response) => {
 
   if (url.startsWith('/api/settings/currency-display')) {
     response.end(JSON.stringify({ mode: 'usd' }));
+    return;
+  }
+
+  if (url.startsWith('/api/preflight')) {
+    response.end(JSON.stringify({
+      ready_to_trade: true,
+      summary: { pass: 3, warn: 0, fail: 0 },
+      checks: [
+        { id: 'account', label: 'Account', status: 'pass', detail: 'Mock account is funded.', action: 'No action required.' },
+        { id: 'brokers', label: 'Brokers', status: 'pass', detail: 'Mock broker is connected.', action: 'No action required.' },
+        { id: 'tickers', label: 'Tickers', status: 'pass', detail: 'Watchlist contains enabled tickers.', action: 'No action required.' },
+      ],
+      context: {
+        trading_mode: 'paper',
+        account_balance: 25000,
+        allocated: 3000,
+        available: 22000,
+        enabled_tickers: 3,
+        connected_brokers: 1,
+        running: true,
+        paused: false,
+      },
+    }));
     return;
   }
 
@@ -117,7 +141,7 @@ const server = http.createServer((request, response) => {
 const wss = new WebSocketServer({ noServer: true });
 const wsClients = new Set();
 server.on('upgrade', (request, socket, head) => {
-  if (request.url === '/api/ws') {
+  if ((request.url ?? '').startsWith('/api/ws')) {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
@@ -213,21 +237,55 @@ async function run() {
       : undefined,
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 920 } });
+  await page.addInitScript(() => {
+    localStorage.setItem('sentinel_auth_token', 'verify-ui-token');
+  });
   const consoleErrors = [];
+  const pageErrors = [];
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => {
+    pageErrors.push(error.message);
   });
 
   console.log('verify-ui: loading app');
   await page.goto(`http://127.0.0.1:${frontendPort}`, { waitUntil: 'domcontentloaded' });
   console.log('verify-ui: waiting for dashboard');
-  await page.getByTestId('tab-bar').waitFor({ state: 'visible', timeout: 10_000 });
+  try {
+    await page.getByTestId('tab-bar').waitFor({ state: 'visible', timeout: 10_000 });
+  } catch (error) {
+    await page.screenshot({ path: failureScreenshotPath, fullPage: true });
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    console.error(`verify-ui: dashboard wait failed at ${page.url()}`);
+    console.error(`verify-ui: body text:\n${bodyText}`);
+    if (consoleErrors.length > 0) console.error(`verify-ui: console errors:\n${consoleErrors.join('\n')}`);
+    if (pageErrors.length > 0) console.error(`verify-ui: page errors:\n${pageErrors.join('\n')}`);
+    console.error(`verify-ui: failure screenshot: ${failureScreenshotPath}`);
+    throw error;
+  }
   await page.getByTestId('ticker-card-AAPL').waitFor({ state: 'visible', timeout: 10_000 });
   await page.waitForTimeout(1000);
   console.log('verify-ui: checking tabs and charts');
 
-  const tabCount = await page.locator('[data-testid^="tab-"]').count();
-  if (tabCount < 17) throw new Error(`Expected at least 17 dashboard tabs, found ${tabCount}`);
+  const dashboardGroups = [
+    ['trading', 'watchlist'],
+    ['risk', 'preflight'],
+    ['monitoring', 'logs'],
+    ['integrations', 'brokers'],
+    ['settings', 'settings'],
+  ];
+  const groupCount = await page.locator('[data-testid^="tab-group-"]').count();
+  if (groupCount !== dashboardGroups.length) {
+    throw new Error(`Expected ${dashboardGroups.length} dashboard tab groups, found ${groupCount}`);
+  }
+  for (const [groupId, defaultTabId] of dashboardGroups) {
+    await page.getByTestId(`tab-group-${groupId}`).click();
+    await page.getByTestId(`tab-${defaultTabId}`).waitFor({ state: 'visible', timeout: 10_000 });
+  }
+  await page.getByTestId('tab-group-trading').click();
+  await page.getByTestId('tab-watchlist').click();
+  await page.getByTestId('ticker-card-AAPL').waitFor({ state: 'visible', timeout: 10_000 });
 
   const chartCount = await page.locator('.sp-chart-container').count();
   if (chartCount < 3) throw new Error(`Expected chart containers for ticker cards, found ${chartCount}`);
@@ -236,6 +294,15 @@ async function run() {
   await page.getByTestId('tab-orders').click();
   await page.getByTestId('tab-watchlist').click();
   await page.getByTestId('ticker-card-AAPL').waitFor({ state: 'visible', timeout: 10_000 });
+
+  console.log('verify-ui: opening config modal');
+  await page.getByLabel('Configure AAPL').click();
+  await page.getByTestId('config-modal-AAPL').waitFor({ state: 'visible', timeout: 10_000 });
+  if (await page.getByText('Config modal failed').isVisible()) {
+    throw new Error('Config modal error boundary was shown after opening AAPL settings');
+  }
+  await page.getByTestId('close-config-modal-AAPL').click();
+  await page.getByTestId('config-modal-AAPL').waitFor({ state: 'hidden', timeout: 10_000 });
 
   console.log('verify-ui: resizing card');
   const card = page.getByTestId('ticker-card-AAPL');

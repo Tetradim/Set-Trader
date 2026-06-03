@@ -41,6 +41,8 @@ interface Props {
 export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props) {
   const { send } = useWebSocket();
   const ticker = useStore((s) => s.tickers[symbol]);
+  const incrementStep = useStore((s) => s.incrementStep);
+  const decrementStep = useStore((s) => s.decrementStep);
   const [activeTab, setActiveTab] = useState<ConfigTabId>('rules');
 
   if (!ticker) return null;
