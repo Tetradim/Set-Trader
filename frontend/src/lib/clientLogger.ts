@@ -1,4 +1,5 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.REACT_APP_BACKEND_URL || '';
+const ENV = import.meta.env || {};
+const BACKEND_URL = ENV.VITE_BACKEND_URL || ENV.REACT_APP_BACKEND_URL || '';
 const AUTH_TOKEN_KEY = 'sentinel_auth_token';
 const CLIENT_LOG_ENDPOINT = `${BACKEND_URL}/api/logs/client-events`;
 const MAX_QUEUE = 250;
@@ -7,7 +8,7 @@ const hasBrowser = typeof window !== 'undefined' && typeof document !== 'undefin
 const hasLocalStorage = typeof localStorage !== 'undefined';
 const hasSessionStorage = typeof sessionStorage !== 'undefined';
 const LOG_TYPED_VALUES =
-  import.meta.env.VITE_LOG_TYPED_VALUES === 'true' ||
+  ENV.VITE_LOG_TYPED_VALUES === 'true' ||
   (hasLocalStorage && localStorage.getItem('sentinel_log_typed_values') === 'true');
 
 type ClientLogLevel = 'info' | 'warn' | 'error';

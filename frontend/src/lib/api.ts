@@ -1,8 +1,42 @@
 // Support both VITE_ (Vite) and REACT_APP_ (Create React App) prefixes
 import { uiLog } from './clientLogger';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || import.meta.env.REACT_APP_BACKEND_URL || '';
+const BACKEND_URL = import.meta.env?.VITE_BACKEND_URL || import.meta.env?.REACT_APP_BACKEND_URL || '';
 const AUTH_TOKEN_KEY = 'sentinel_auth_token';
+
+export function formatApiErrorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return '';
+
+        const record = item as { loc?: unknown; msg?: unknown; message?: unknown };
+        const message = typeof record.msg === 'string'
+          ? record.msg
+          : typeof record.message === 'string'
+            ? record.message
+            : '';
+        if (!message) return '';
+
+        const loc = Array.isArray(record.loc)
+          ? record.loc.filter((part) => part !== 'body').join('.')
+          : '';
+        return loc ? `${loc}: ${message}` : message;
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+
+  if (detail && typeof detail === 'object') {
+    const record = detail as { detail?: unknown; msg?: unknown; message?: unknown };
+    return formatApiErrorDetail(record.detail ?? record.msg ?? record.message, fallback);
+  }
+
+  return fallback;
+}
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY);
@@ -43,12 +77,13 @@ export async function apiFetch(path: string, options?: RequestInit & { rawText?:
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      uiLog.api('error', { path, method, status: res.status, duration_ms, message: err.detail || res.statusText });
+      const message = formatApiErrorDetail(err.detail, res.statusText);
+      uiLog.api('error', { path, method, status: res.status, duration_ms, message });
       if (res.status === 401 || res.status === 403) {
         clearAuthToken();
         window.dispatchEvent(new Event('sentinel-auth-required'));
       }
-      throw new Error(err.detail || res.statusText);
+      throw new Error(message);
     }
     uiLog.api('success', { path, method, status: res.status, duration_ms });
     return rawText ? res.text() : res.json();
