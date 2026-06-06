@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { TickerCard } from '@/components/TickerCard';
@@ -77,7 +77,7 @@ const DEFAULT_MKT_COLORS: Record<string, string> = {
 
 // ── WatchlistTab ─────────────────────────────────────────────────────────────
 export function WatchlistTab() {
-  const { send }       = useWebSocket();
+  useWebSocket();
   const tickers        = useStore((s) => s.tickers);
   const profits        = useStore((s) => s.profits);
   const prices         = useStore((s) => s.prices);
@@ -124,6 +124,60 @@ export function WatchlistTab() {
       await apiFetch('/api/tickers/reorder', { method: 'POST', body: JSON.stringify({ symbols: reordered }) });
     } catch { toast.error('Failed to reorder tickers'); }
   }, []); // Empty deps - gets fresh state internally
+
+  const runBotAction = useCallback(async (action: 'start' | 'pause' | 'stop') => {
+    try {
+      const result = await apiFetch(`/api/bot/${action}`, { method: 'POST' });
+      if (typeof result.running === 'boolean') useStore.getState().setRunning(result.running);
+      if (typeof result.paused === 'boolean') useStore.getState().setPaused(result.paused);
+    } catch (error: any) {
+      toast.error(error.message || `Failed to ${action} bot`);
+    }
+  }, []);
+
+  const setPaperMode = useCallback(async (checked: boolean) => {
+    const previous = useStore.getState().simulate247;
+    useStore.getState().setSimulate247(checked);
+    useStore.getState().setTradingMode(checked ? 'paper' : 'live');
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ simulate_24_7: checked }),
+      });
+    } catch (error: any) {
+      useStore.getState().setSimulate247(previous);
+      useStore.getState().setTradingMode(previous ? 'paper' : 'live');
+      toast.error(error.message || 'Failed to update trading mode');
+    }
+  }, []);
+
+  const setLiveMarketHours = useCallback(async (checked: boolean) => {
+    const previous = useStore.getState().liveDuringMarketHours;
+    useStore.getState().setLiveDuringMarketHours(checked);
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ live_during_market_hours: checked }),
+      });
+    } catch (error: any) {
+      useStore.getState().setLiveDuringMarketHours(previous);
+      toast.error(error.message || 'Failed to update live market-hours mode');
+    }
+  }, []);
+
+  const setPaperAfterHours = useCallback(async (checked: boolean) => {
+    const previous = useStore.getState().paperAfterHours;
+    useStore.getState().setPaperAfterHours(checked);
+    try {
+      await apiFetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({ paper_after_hours: checked }),
+      });
+    } catch (error: any) {
+      useStore.getState().setPaperAfterHours(previous);
+      toast.error(error.message || 'Failed to update paper after-hours mode');
+    }
+  }, []);
 
   const sortedSymbols = Object.values(tickers)
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -311,33 +365,33 @@ export function WatchlistTab() {
             <div>
               <div className="sp-ctrl-lbl">Bot State</div>
               <div className="sp-ctrl-btns">
-                <button className="sp-ctrl-btn sp-btn-start" onClick={() => send('START_BOT')}>▶ Start All</button>
-                <button className="sp-ctrl-btn sp-btn-pause" onClick={() => send('PAUSE_BOT')}>⏸ Pause</button>
-                <button className="sp-ctrl-btn sp-btn-stop"  onClick={() => send('STOP_BOT')}>⏹ Stop</button>
+                <button className="sp-ctrl-btn sp-btn-start" onClick={() => runBotAction('start')}>▶ Start All</button>
+                <button className="sp-ctrl-btn sp-btn-pause" onClick={() => runBotAction('pause')}>⏸ Pause</button>
+                <button className="sp-ctrl-btn sp-btn-stop"  onClick={() => runBotAction('stop')}>⏹ Stop</button>
               </div>
             </div>
             <div>
               <div className="sp-ctrl-lbl">Trading Mode</div>
               <div className="sp-ctrl-btns">
-                <button className="sp-ctrl-btn sp-btn-pause" onClick={() => send('SET_MODE', { mode: 'paper' })}>Paper</button>
-                <button className="sp-ctrl-btn sp-btn-stop"  onClick={() => send('SET_MODE', { mode: 'live'  })}>Live</button>
+                <button className="sp-ctrl-btn sp-btn-pause" onClick={() => setPaperMode(true)}>Paper</button>
+                <button className="sp-ctrl-btn sp-btn-stop"  onClick={() => setPaperMode(false)}>Live</button>
               </div>
             </div>
           </div>
           <div className="sp-toggle-list">
             {[
-              { key: 'sim247',     label: 'Simulate 24/7',           action: 'SET_SIMULATE_247',            val: simulate247            },
-              { key: 'liveMarket', label: 'Live During Market Hours', action: 'SET_LIVE_DURING_MARKET_HOURS', val: liveDuringMarketHours  },
-              { key: 'paperAfter', label: 'Paper After Hours',        action: 'SET_PAPER_AFTER_HOURS',        val: paperAfterHours        },
-              { key: 'stopLoss',   label: 'Stop Loss Enabled',        action: null,                           val: toggles.stopLoss       },
-              { key: 'trailing',   label: 'Trailing Stop',            action: null,                           val: toggles.trailing       },
-            ].map(({ key, label, action, val }) => (
+              { key: 'sim247',     label: 'Simulate 24/7',           onToggle: setPaperMode,          val: simulate247            },
+              { key: 'liveMarket', label: 'Live During Market Hours', onToggle: setLiveMarketHours,    val: liveDuringMarketHours  },
+              { key: 'paperAfter', label: 'Paper After Hours',        onToggle: setPaperAfterHours,    val: paperAfterHours        },
+              { key: 'stopLoss',   label: 'Stop Loss Enabled',        onToggle: null,                  val: toggles.stopLoss       },
+              { key: 'trailing',   label: 'Trailing Stop',            onToggle: null,                  val: toggles.trailing       },
+            ].map(({ key, label, onToggle, val }) => (
               <div className="sp-toggle-row" key={key}>
                 <div className="sp-toggle-name">{label}</div>
                 <div
                   className={`sp-toggle ${val ? 'on' : ''}`}
                   onClick={() => {
-                    if (action) send(action, { value: !val });
+                    if (onToggle) onToggle(!val);
                     else setToggles(prev => ({ ...prev, [key]: !prev[key as keyof typeof prev] }));
                   }}
                 />
