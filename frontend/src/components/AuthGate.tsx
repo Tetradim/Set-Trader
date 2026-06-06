@@ -17,7 +17,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [initialCredentials] = useState(() => loadRememberedCredentials());
   const [mode, setMode] = useState<AuthMode>('loading');
   const [username, setUsername] = useState(initialCredentials.username || 'admin');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState(initialCredentials.password);
   const [rememberPassword, setRememberPassword] = useState(initialCredentials.remember);
   const [error, setError] = useState('');
@@ -72,7 +71,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     try {
       const path = mode === 'setup' ? '/api/auth/bootstrap' : '/api/auth/login';
       const payload = mode === 'setup'
-        ? { username, email, password }
+        ? { username, password }
         : { username, password };
       const response: AuthResponse = await apiFetch(path, {
         method: 'POST',
@@ -119,27 +118,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
           />
         </label>
 
-        {mode === 'setup' && (
-          <label className="mb-4 block text-sm">
-            <span className="mb-1 block text-[#bdb4a0]">Email</span>
-            <input
-              className="w-full border border-[rgba(255,255,255,0.16)] bg-[#07080b] px-3 py-2 text-[#f0e8d0] outline-none focus:border-[#c99a2e]"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              required
-            />
-          </label>
-        )}
-
         <label className="mb-4 block text-sm">
           <span className="mb-1 block text-[#bdb4a0]">Password</span>
           <input
             className="w-full border border-[rgba(255,255,255,0.16)] bg-[#07080b] px-3 py-2 text-[#f0e8d0] outline-none focus:border-[#c99a2e]"
             type="password"
             value={password}
-            minLength={mode === 'setup' ? 12 : undefined}
             onChange={(event) => setPassword(event.target.value)}
             autoComplete={mode === 'setup' ? 'new-password' : 'current-password'}
             required

@@ -58,8 +58,8 @@ class UserCreateRequest(BaseModel):
 
 class BootstrapRequest(BaseModel):
     username: str
-    email: str
-    password: str = Field(min_length=12)
+    email: str = ""
+    password: str
 
 
 class UserResponse(BaseModel):
@@ -163,7 +163,7 @@ async def bootstrap_admin(request: BootstrapRequest):
 
     user_doc = await _create_user_doc(
         username=request.username,
-        email=request.email,
+        email=request.email.strip() or f"{request.username}@sentinel.local",
         password=request.password,
         roles=[Role.ADMIN, Role.RISK_OFFICER, Role.TRADER],
         broker_access=["*"],
