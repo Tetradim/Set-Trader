@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { useStore } from '@/stores/useStore';
 import { apiFetch } from '@/lib/api';
 import { detectMarketCode } from '@/lib/market-utils';
@@ -30,16 +29,22 @@ const FALLBACK_MARKET: MarketOption = {
   ticker_examples: ['AAPL', 'TSLA', 'NVDA'],
 };
 
-export function AddTickerDialog() {
-  const { send } = useWebSocket();
+type AddTickerDialogProps = {
+  trigger?: React.ReactNode;
+}
+
+export function AddTickerDialog({ trigger }: AddTickerDialogProps = {}) {
   const accountBalance = useStore((s) => s.accountBalance);
   const tickers = useStore((s) => s.tickers);
+  const addTicker = useStore((s) => s.addTicker);
+  const setAccountBalance = useStore((s) => s.setAccountBalance);
   const [open, setOpen] = useState(false);
   const [symbol, setSymbol] = useState('');
   const [basePower, setBasePower] = useState(100);
   const [market, setMarket] = useState('US');
   const [marketOptions, setMarketOptions] = useState<MarketOption[]>([FALLBACK_MARKET]);
   const [marketsLoaded, setMarketsLoaded] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const currentAllocated = Object.values(tickers).reduce((sum, ticker) => sum + (ticker.base_power ?? 0), 0);
@@ -84,7 +89,7 @@ export function AddTickerDialog() {
     if (marketOptions.some((option) => option.code === detected)) setMarket(detected);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const sym = symbol.toUpperCase().trim();
     if (sym.length < 1 || sym.length > 20) {
@@ -99,24 +104,39 @@ export function AddTickerDialog() {
       setError('Base power must be $1 - $1,000,000');
       return;
     }
-    send('ADD_TICKER', { symbol: sym, base_power: basePower, market });
-    setSymbol('');
-    setBasePower(100);
-    setMarket('US');
+    setSubmitting(true);
     setError('');
-    setOpen(false);
+    try {
+      const saved = await apiFetch('/api/tickers', {
+        method: 'POST',
+        body: JSON.stringify({ symbol: sym, base_power: basePower, market }),
+      });
+      addTicker(saved);
+      const allocatedAfterAdd = currentAllocated + (saved.base_power ?? basePower);
+      setAccountBalance(accountBalance, allocatedAfterAdd, accountBalance - allocatedAfterAdd);
+      setSymbol('');
+      setBasePower(100);
+      setMarket('US');
+      setOpen(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to add ticker');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <button
-          type="button"
-          data-testid="add-ticker-btn"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-all"
-        >
-          <PlusCircle size={13} /> Add Stock
-        </button>
+        {trigger ?? (
+          <button
+            type="button"
+            data-testid="add-ticker-btn"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 transition-all"
+          >
+            <PlusCircle size={13} /> Add Stock
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md glass border-border" data-testid="add-ticker-dialog">
         <DialogHeader>
@@ -214,13 +234,14 @@ export function AddTickerDialog() {
           <button
             type="submit"
             data-testid="add-ticker-submit"
+            disabled={submitting}
             className={`w-full py-2.5 rounded-lg font-semibold text-sm transition-all shadow-lg ${
               wouldExceed
                 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 shadow-amber-500/10'
                 : 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary/25'
             }`}
           >
-            {wouldExceed ? 'Add Anyway (Over-Allocated)' : 'Add to Watchlist'}
+            {submitting ? 'Adding...' : wouldExceed ? 'Add Anyway (Over-Allocated)' : 'Add to Watchlist'}
           </button>
         </form>
       </DialogContent>

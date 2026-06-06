@@ -11,10 +11,11 @@ def validate_symbol(symbol: str) -> str:
     """Validate ticker symbol format."""
     if not symbol:
         raise ValueError("Symbol cannot be empty")
-    # Allow alphanumeric + common exchange suffixes
-    if not re.match(r"^[A-Z]{1,5}(:[A-Z]{1,5})?$", symbol.upper()):
+    normalized = symbol.upper()
+    # Allow common US and foreign ticker formats such as AAPL, BRK-B, BHP.AX, and 7203.T.
+    if not re.match(r"^(?=.{1,20}$)[A-Z0-9]+(?:[.-][A-Z0-9]+)*$", normalized):
         raise ValueError(f"Invalid symbol format: {symbol}")
-    return symbol.upper()
+    return normalized
 
 
 class TickerConfig(BaseModel):

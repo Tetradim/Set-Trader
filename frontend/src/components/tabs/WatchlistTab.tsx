@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { AddTickerDialog } from '@/components/AddTickerDialog';
 import { TickerCard } from '@/components/TickerCard';
 import { ConfigModal } from '@/components/ConfigModal';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -300,13 +301,16 @@ export function WatchlistTab() {
                 );
               })}
 
-              {/* Add ticker placeholder */}
-              <div className="sp-add-ticker">
-                <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
-                <span style={{ fontSize: 8, letterSpacing: '.2em', textTransform: 'uppercase', fontFamily: "'JetBrains Mono',monospace" }}>
-                  Add Ticker
-                </span>
-              </div>
+              <AddTickerDialog
+                trigger={
+                  <button type="button" data-testid="watchlist-add-ticker-card" className="sp-add-ticker">
+                    <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
+                    <span style={{ fontSize: 8, letterSpacing: '.2em', textTransform: 'uppercase', fontFamily: "'JetBrains Mono',monospace" }}>
+                      Add Ticker
+                    </span>
+                  </button>
+                }
+              />
             </div>
           </SortableContext>
         </DndContext>
