@@ -8,6 +8,7 @@ import { Scale, AlertTriangle, CheckCircle, RefreshCw, FileText, Clock, ArrowRig
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TabLoadingState } from './TabStates';
 
 interface ReconciliationRecord {
   record_id: string;
@@ -111,9 +112,10 @@ export function ReconciliationTab() {
 
   if (loading && records.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading reconciliation"
+        detail="Fetching broker records, ledger status, and end-of-day summary."
+      />
     );
   }
 

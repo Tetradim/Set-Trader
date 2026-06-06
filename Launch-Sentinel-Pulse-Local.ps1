@@ -397,9 +397,18 @@ try {
     $frontendUrl = "http://127.0.0.1:$FrontendPort"
     $env:PORT = "$BackendPort"
     $env:SENTINEL_OPEN_BROWSER = "0"
-    $env:VITE_BACKEND_URL = $backendUrl
-    $env:REACT_APP_BACKEND_URL = $backendUrl
+    $env:VITE_BACKEND_URL = ""
+    $env:REACT_APP_BACKEND_URL = ""
     $env:LOG_FILE = $LogFile
+    $localCorsOrigins = @(
+        "http://localhost:$FrontendPort",
+        "http://127.0.0.1:$FrontendPort",
+        "http://localhost:$BackendPort",
+        "http://127.0.0.1:$BackendPort"
+    ) -join ","
+    if (-not $env:CORS_ORIGINS) {
+        $env:CORS_ORIGINS = $localCorsOrigins
+    }
 
     if (-not (Test-PortOpen -Port $BackendPort)) {
         Write-Status "Starting backend from source on port $BackendPort"

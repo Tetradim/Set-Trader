@@ -75,7 +75,7 @@
 .sp-gleam-bar { height:2px; position:relative; z-index:9; flex-shrink:0; background:linear-gradient(90deg,rgba(192,40,46,0.35) 0%,rgba(180,130,10,0.7) 18%,rgba(220,165,30,0.9) 32%,rgba(253,220,80,1) 46%,rgba(255,240,140,1) 50%,rgba(253,220,80,1) 54%,rgba(220,165,30,0.9) 68%,rgba(180,130,10,0.7) 82%,rgba(192,40,46,0.3) 100%); }
 
 /* ── LAYOUT ── */
-.sp-layout { display:flex; flex:1; overflow:hidden; }
+.sp-layout { display:flex; flex:1; overflow:hidden; position:relative; z-index:1; }
 
 /* ── LEFT SIDEBAR ── */
 .sp-sidebar { width:52px; flex-shrink:0; background:rgba(6,4,10,0.92); backdrop-filter:blur(12px); border-right:1px solid rgba(180,130,10,0.12); display:flex; flex-direction:column; align-items:center; padding:10px 0; gap:4px; position:relative; z-index:8; }
@@ -86,7 +86,8 @@
 .sp-sb-spacer { flex:1; }
 .sp-sb-divider { width:28px; height:1px; background:rgba(180,130,10,0.12); margin:4px 0; }
 
-.sp-main { display:flex; flex-direction:column; flex:1; min-width:0; overflow:auto; }
+.sp-main { display:flex; flex-direction:column; flex:1; min-width:0; overflow:auto; position:relative; z-index:1; }
+.sp-tab-content { position:relative; z-index:1; }
 
 /* ── TAB BAR ── */
 .sp-tabbar { height:40px; display:flex; align-items:stretch; background:rgba(6,4,10,0.82); backdrop-filter:blur(8px); border-bottom:1px solid rgba(180,130,10,0.12); padding:0 6px; position:relative; z-index:9; flex-shrink:0; }

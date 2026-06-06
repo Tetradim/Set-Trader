@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { TabLoadingState } from './TabStates';
 
 interface AuditEvent {
   event_id: string;
@@ -108,9 +109,10 @@ export function ComplianceAuditTab() {
 
   if (loading && events.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading compliance audit"
+        detail="Fetching audit events, summary counts, and export status."
+      />
     );
   }
 

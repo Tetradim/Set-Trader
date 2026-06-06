@@ -8,6 +8,7 @@ import { Shield, AlertTriangle, Activity, Crosshair, ToggleLeft, ToggleRight, Re
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TabLoadingState } from './TabStates';
 
 interface ExposureLimit {
   limit_id: string;
@@ -98,9 +99,10 @@ export function RiskCenterTab() {
 
   if (loading && limits.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading risk center"
+        detail="Fetching exposure limits and kill-switch status."
+      />
     );
   }
 

@@ -54,7 +54,7 @@ export function Dashboard() {
           <DashboardTabBars activeGroup={activeGroup} activeTab={activeTab} onTabChange={setActiveTab} />
 
           <div
-            className="flex-1 overflow-auto"
+            className="sp-tab-content flex-1 overflow-auto"
             style={{ padding: '14px 16px' }}
             data-testid="tab-content"
           >

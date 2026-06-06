@@ -54,6 +54,20 @@ class AuditEventType(str, Enum):
     PRICE_FEED_SWITCHED = "PRICE_FEED_SWITCHED"
 
 
+def _normalize_event_type_filters(event_types: Any = None, event_type: Any = None) -> list[str] | None:
+    """Return a clean list of event types from route or legacy filter inputs."""
+    raw = event_types if event_types is not None else ([event_type] if event_type else None)
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return [raw] if raw else None
+    try:
+        values = [str(value) for value in raw if value]
+    except TypeError:
+        return None
+    return values or None
+
+
 class AuditService:
     """Service for structured audit logging."""
     
@@ -257,7 +271,7 @@ class AuditService:
         """Query audit logs with filters."""
         query = {}
         # event_types (list) takes precedence over legacy single event_type
-        effective_types = event_types or ([event_type] if event_type else None)
+        effective_types = _normalize_event_type_filters(event_types, event_type)
         if effective_types:
             if len(effective_types) == 1:
                 query["event_type"] = effective_types[0]

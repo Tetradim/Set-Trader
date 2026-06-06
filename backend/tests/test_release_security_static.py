@@ -79,8 +79,22 @@ class ReleaseSecurityStaticTest(unittest.TestCase):
 
         self.assertIn("getAuthToken", api)
         self.assertIn("Authorization", api)
+        self.assertIn("Backend is not reachable. Start Sentinel Pulse and try again.", api)
         self.assertIn("getAuthToken", ws)
         self.assertIn("searchParams.set('token'", ws)
+
+    def test_server_allows_local_frontend_origins_by_default(self):
+        server = self.read("backend/server.py")
+
+        self.assertIn("DEFAULT_CORS_ORIGINS", server)
+        for origin in [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8002",
+            "http://127.0.0.1:8002",
+        ]:
+            self.assertIn(origin, server)
+        self.assertIn("allow_origins=_cors_origins.split(\",\") if _cors_origins else DEFAULT_CORS_ORIGINS", server)
 
     def test_log_routes_are_mounted_with_auth_dependency(self):
         server = self.read("backend/server.py")

@@ -44,10 +44,13 @@ export function loadRememberedCredentials(storage: StorageLike | null = getStora
 }
 
 export function saveRememberedCredentials(
-  storage: StorageLike | null = getStorage(),
-  credentials: Pick<RememberedCredentials, 'username' | 'password'>,
+  storageOrCredentials: StorageLike | Pick<RememberedCredentials, 'username' | 'password'> | null,
+  maybeCredentials?: Pick<RememberedCredentials, 'username' | 'password'>,
 ): void {
+  const storage = maybeCredentials ? storageOrCredentials as StorageLike | null : getStorage();
+  const credentials = maybeCredentials ?? storageOrCredentials as Pick<RememberedCredentials, 'username' | 'password'> | null;
   if (!storage) return;
+  if (!credentials) return;
 
   storage.setItem(
     REMEMBER_CREDENTIALS_KEY,

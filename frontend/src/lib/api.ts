@@ -62,7 +62,13 @@ export async function apiFetch(path: string, options?: RequestInit & { rawText?:
       if (path === '/api/settings/currency-display') return { mode: 'usd' };
       throw new Error(`Request timeout after 10s: ${path}`);
     }
-    uiLog.api('error', { path, method, duration_ms, message: err?.message || String(err) });
+    const errorMessage = err?.message || String(err);
+    if (err instanceof TypeError && errorMessage.toLowerCase().includes('fetch')) {
+      const message = 'Backend is not reachable. Start Sentinel Pulse and try again.';
+      uiLog.api('error', { path, method, duration_ms, message });
+      throw new Error(message);
+    }
+    uiLog.api('error', { path, method, duration_ms, message: errorMessage });
     throw err;
   }
 }

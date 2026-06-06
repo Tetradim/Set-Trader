@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useStore } from '@/stores/useStore';
+import { TabLoadingState } from './TabStates';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -107,6 +108,13 @@ export function PreflightTab() {
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
         </div>
+      )}
+
+      {loading && !data && (
+        <TabLoadingState
+          title="Loading preflight checks"
+          detail="Checking account setup, allocations, brokers, data feeds, and release readiness."
+        />
       )}
 
       {data && (

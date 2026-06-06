@@ -7,6 +7,7 @@ import { uiLog } from '@/lib/clientLogger';
 import { TrendingUp, TrendingDown, DollarSign, BarChart3, Activity, RefreshCw, PieChart } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { TabLoadingState } from './TabStates';
 
 interface PortfolioMetrics {
   total_value: number;
@@ -78,9 +79,10 @@ export function PortfolioAnalyticsTab() {
 
   if (loading && !metrics) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading portfolio analytics"
+        detail="Calculating P&L, attribution, drawdown, and trading metrics."
+      />
     );
   }
 

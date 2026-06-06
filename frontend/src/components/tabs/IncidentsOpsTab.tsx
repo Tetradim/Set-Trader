@@ -8,6 +8,7 @@ import { AlertTriangle, Server, Activity, RefreshCw, CheckCircle, XCircle, Clock
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TabLoadingState } from './TabStates';
 
 interface Service {
   service_id: string;
@@ -101,9 +102,10 @@ export function IncidentsOpsTab() {
 
   if (loading && services.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading operations console"
+        detail="Fetching service health, active incidents, and runbooks."
+      />
     );
   }
 

@@ -70,6 +70,12 @@ class LazyDB:
         if db is None:
             raise AttributeError("MongoDB not available")
         return getattr(db, name)
+
+    def __getitem__(self, name):
+        db = _ensure_db()
+        if db is None:
+            raise KeyError("MongoDB not available")
+        return db[name]
     
     def __call__(self, *args, **kwargs):
         db = _ensure_db()

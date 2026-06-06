@@ -40,12 +40,24 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("[int]$FrontendPort = 3000", text)
         self.assertIn("function Find-Npm", text)
         self.assertIn('Join-Path $ProjectRoot "frontend\\package.json"', text)
-        self.assertIn('$env:VITE_BACKEND_URL = "http://127.0.0.1:$AppPort"', text)
-        self.assertIn('$env:REACT_APP_BACKEND_URL = $env:VITE_BACKEND_URL', text)
+        self.assertIn('$env:VITE_BACKEND_URL = ""', text)
+        self.assertIn('$env:REACT_APP_BACKEND_URL = ""', text)
         self.assertIn('Write-Status "Starting frontend UI on port $FrontendPort"', text)
         self.assertIn('"run", "dev", "--", "--host", "127.0.0.1", "--port", "$FrontendPort"', text)
-        self.assertIn('$url = "http://localhost:$FrontendPort"', text)
+        self.assertIn('$url = "http://127.0.0.1:$FrontendPort"', text)
         self.assertNotIn('$url = "http://localhost:$AppPort"', text)
+        self.assertNotIn('$url = "http://localhost:$FrontendPort"', text)
+
+    def test_windows_launchers_use_relative_dev_api_and_set_local_cors(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn('$env:CORS_ORIGINS =', text)
+                self.assertIn('"http://localhost:$FrontendPort"', text)
+                self.assertIn('"http://127.0.0.1:$FrontendPort"', text)
+                self.assertIn('$env:VITE_BACKEND_URL = ""', text)
+                self.assertIn('$env:REACT_APP_BACKEND_URL = ""', text)
+                self.assertNotIn('$env:VITE_BACKEND_URL = $backendUrl', text)
 
     def test_vite_dev_server_proxies_api_to_backend(self):
         text = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
@@ -121,6 +133,9 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         text = (ROOT / "backend" / "win_launcher.py").read_text(encoding="utf-8")
         self.assertIn('SENTINEL_OPEN_BROWSER', text)
         self.assertIn('webbrowser.open', text)
+        self.assertIn('webbrowser.open(f"http://127.0.0.1:{port}")', text)
+        self.assertIn("s.connect(('127.0.0.1', port))", text)
+        self.assertNotIn('webbrowser.open(f"http://localhost:{port}")', text)
 
     def test_packaged_windows_launcher_uses_desktop_log_and_system_mongo_data_path(self):
         text = (ROOT / "backend" / "win_launcher.py").read_text(encoding="utf-8")

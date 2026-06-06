@@ -8,6 +8,7 @@ import { Target, AlertTriangle, CheckCircle, RefreshCw, TrendingDown, Activity, 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TabLoadingState } from './TabStates';
 
 interface SLOData {
   name: string;
@@ -72,9 +73,10 @@ export function SLODashboardTab() {
 
   if (loading && slos.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading SLO dashboard"
+        detail="Fetching objectives, alert rules, incidents, and error budget summary."
+      />
     );
   }
 

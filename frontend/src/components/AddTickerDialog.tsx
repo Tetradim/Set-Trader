@@ -39,6 +39,7 @@ export function AddTickerDialog() {
   const [basePower, setBasePower] = useState(100);
   const [market, setMarket] = useState('US');
   const [marketOptions, setMarketOptions] = useState<MarketOption[]>([FALLBACK_MARKET]);
+  const [marketsLoaded, setMarketsLoaded] = useState(false);
   const [error, setError] = useState('');
 
   const currentAllocated = Object.values(tickers).reduce((sum, ticker) => sum + (ticker.base_power ?? 0), 0);
@@ -48,13 +49,21 @@ export function AddTickerDialog() {
   const selectedHint = selectedMarket.ticker_examples?.slice(0, 3).join(', ') || 'AAPL, TSLA, NVDA';
 
   useEffect(() => {
+    if (!open || marketsLoaded) return;
+    let cancelled = false;
     apiFetch('/api/markets')
       .then((data) => {
         const options = ((data?.markets ?? []) as MarketOption[]).filter((option) => option.code && option.name);
-        if (options.length) setMarketOptions(options);
+        if (!cancelled && options.length) setMarketOptions(options);
       })
-      .catch((err) => uiLog.error('add_ticker.markets_load_failed', err));
-  }, []);
+      .catch((err) => uiLog.error('add_ticker.markets_load_failed', err))
+      .finally(() => {
+        if (!cancelled) setMarketsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, marketsLoaded]);
 
   useEffect(() => {
     function handleTickerError(event: Event) {

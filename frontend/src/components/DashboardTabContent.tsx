@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { WatchlistTab } from './tabs/WatchlistTab';
+import { TabLoadingState } from './tabs/TabStates';
 import type { DashboardTabId } from '@/lib/dashboard-tabs';
 
 const PortfolioTab = lazy(() => import('./tabs/PortfolioTab').then((module) => ({ default: module.PortfolioTab })));
@@ -22,9 +23,10 @@ const SLODashboardTab = lazy(() => import('./tabs/SLODashboardTab').then((module
 
 function TabFallback() {
   return (
-    <div className="sp-panel" style={{ padding: 16 }}>
-      Loading tab...
-    </div>
+    <TabLoadingState
+      title="Loading workspace"
+      detail="Preparing this dashboard panel."
+    />
   );
 }
 

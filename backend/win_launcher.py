@@ -117,7 +117,7 @@ def is_port_in_use(port: int) -> bool:
     """Check if a port is already in use."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
-            s.connect(('localhost', port))
+            s.connect(('127.0.0.1', port))
             return True
         except OSError:
             return False
@@ -336,7 +336,7 @@ def open_browser():
         logger.info("Browser auto-open suppressed by SENTINEL_OPEN_BROWSER")
         return
     port = int(os.environ.get("PORT", "8002"))
-    webbrowser.open(f"http://localhost:{port}")
+    webbrowser.open(f"http://127.0.0.1:{port}")
 
 
 def graceful_shutdown(signum, frame):

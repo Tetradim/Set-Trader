@@ -352,6 +352,15 @@ try {
     Write-Status "Launcher transcript: $TranscriptFile"
     Write-Status "MongoDB data path: $DataPath"
     $env:LOG_FILE = $LogFile
+    $localCorsOrigins = @(
+        "http://localhost:$FrontendPort",
+        "http://127.0.0.1:$FrontendPort",
+        "http://localhost:$AppPort",
+        "http://127.0.0.1:$AppPort"
+    ) -join ","
+    if (-not $env:CORS_ORIGINS) {
+        $env:CORS_ORIGINS = $localCorsOrigins
+    }
 
     if (-not (Test-PortOpen -Port $MongoPort)) {
         $mongoExe = Find-Mongo
@@ -406,13 +415,13 @@ try {
         Write-Status "Sentinel Pulse already running on port $AppPort" "WARN"
     }
 
-    $url = ("http://localhost:{0}" -f $AppPort)
+    $url = ("http://127.0.0.1:{0}" -f $AppPort)
     $frontendPackage = Join-Path $ProjectRoot "frontend\package.json"
     if (Test-Path $frontendPackage) {
         $frontendRoot = Split-Path -Parent $frontendPackage
-        $url = "http://localhost:$FrontendPort"
-        $env:VITE_BACKEND_URL = "http://127.0.0.1:$AppPort"
-        $env:REACT_APP_BACKEND_URL = $env:VITE_BACKEND_URL
+        $url = "http://127.0.0.1:$FrontendPort"
+        $env:VITE_BACKEND_URL = ""
+        $env:REACT_APP_BACKEND_URL = ""
         if (-not (Test-PortOpen -Port $FrontendPort)) {
             $npm = Find-Npm
             if (-not $npm) {

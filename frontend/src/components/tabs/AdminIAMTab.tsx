@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { TabLoadingState } from './TabStates';
 
 interface User {
   id: string;
@@ -67,9 +68,10 @@ export function AdminIAMTab() {
 
   if (loading && users.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <TabLoadingState
+        title="Loading admin controls"
+        detail="Fetching users, roles, and API key status."
+      />
     );
   }
 

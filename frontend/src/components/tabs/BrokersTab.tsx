@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
 import { TestConnectionModal } from './BrokersTestConnectionModal';
-import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, DollarSign, Settings2, Gauge, Activity, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, DollarSign, Settings2, Gauge, Activity, ChevronDown, ChevronUp, FlaskConical } from 'lucide-react';
 
 interface BrokerRiskWarning {
   level: 'low' | 'medium' | 'high';
