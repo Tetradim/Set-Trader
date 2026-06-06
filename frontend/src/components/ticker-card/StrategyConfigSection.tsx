@@ -1,7 +1,6 @@
 import React, { memo, useState, useEffect, useCallback } from 'react';
-import { useStore, TickerConfig, StrategyInfo } from '@/stores/useStore';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { Brain, Settings2, RefreshCw, ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { TickerConfig, StrategyInfo } from '@/stores/useStore';
+import { Brain, RefreshCw, ChevronDown, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
 
@@ -184,10 +183,10 @@ export const StrategyConfigSection = memo(function StrategyConfigSection({
   ticker,
   onFieldChange,
 }: Props) {
-  const { send } = useWebSocket();
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   /* Fetch strategy registry */
   useEffect(() => {
@@ -222,6 +221,7 @@ export const StrategyConfigSection = memo(function StrategyConfigSection({
     onFieldChange('strategy', strategyName);
     /* Reset strategy_config when strategy changes */
     onFieldChange('strategy_config', {});
+    setHelpOpen(false);
   }, [onFieldChange]);
 
   return (
@@ -235,9 +235,24 @@ export const StrategyConfigSection = memo(function StrategyConfigSection({
         <>
           {/* Strategy Picker */}
           <div className="py-2">
-            <label className="block">
-              <span className="text-sm text-slate-200">Active Strategy</span>
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="block">
+                <span className="text-sm text-slate-200">Active Strategy</span>
+              </label>
+              {strategyInfo && (
+                <button
+                  type="button"
+                  data-testid="strategy-help-toggle"
+                  onClick={() => setHelpOpen((open) => !open)}
+                  className="inline-flex items-center gap-1 rounded-full border border-purple-400/30 bg-purple-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-purple-200 hover:border-purple-300 hover:bg-purple-500/20"
+                  aria-expanded={helpOpen}
+                  aria-controls="strategy-help-panel"
+                >
+                  <Info className="h-3 w-3" />
+                  Info
+                </button>
+              )}
+            </div>
             <div className="relative mt-1">
               <select
                 value={currentStrategy}
@@ -247,26 +262,45 @@ export const StrategyConfigSection = memo(function StrategyConfigSection({
                 <option value="">None (manual)</option>
                 {strategies.map((s) => (
                   <option key={s.name} value={s.name}>
-                    {s.name} - {s.description?.slice(0, 40)}...
+                    {s.name}
                   </option>
                 ))}
               </select>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             </div>
+            {strategyInfo && helpOpen && (
+              <div
+                id="strategy-help-panel"
+                data-testid="strategy-help-panel"
+                className="mt-2 rounded-lg border border-purple-400/20 bg-purple-500/10 p-3 text-xs text-slate-200"
+              >
+                <div className="font-semibold text-purple-200">{strategyInfo.name}</div>
+                <p className="mt-1 leading-relaxed text-slate-300">{strategyInfo.description}</p>
+                {strategyInfo.tags?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {strategyInfo.tags.map((tag) => (
+                      <span key={tag} className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Strategy metadata */}
           {strategyInfo && (
-            <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-2 py-2 text-xs text-slate-400">
               <span className="px-2 py-0.5 bg-slate-700 rounded">
                 v{strategyInfo.version}
               </span>
               <span className="px-2 py-0.5 bg-slate-700 rounded">
                 {strategyInfo.risk_level}
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex min-w-0 items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                {strategyInfo.tags?.join(', ')}
+                <span className="truncate">{strategyInfo.tags?.join(', ')}</span>
               </span>
             </div>
           )}
