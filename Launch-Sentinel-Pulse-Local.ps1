@@ -31,6 +31,9 @@ $BrowserMonitorDisabled = $false
 $ShutdownStarted = $false
 $CleanupEventSubscription = $null
 $CancelKeyPressHandler = $null
+$LauncherWatchdogProcess = $null
+$LauncherWatchdogStopFile = $null
+$LauncherWatchdogScriptFile = $null
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -254,7 +257,7 @@ function Join-ProcessArguments {
 
     return (($Arguments | ForEach-Object {
         $arg = $_
-        if ($null -eq $arg) {
+        if ([string]::IsNullOrEmpty($arg)) {
             '""'
         } elseif ($arg -match '[\s"]') {
             $escaped = $arg.Replace('"', '\"')
@@ -312,6 +315,128 @@ function Stop-OwnedProcesses {
     }
 }
 
+function Start-LauncherShutdownWatchdog {
+    if ($script:LauncherWatchdogProcess -and -not $script:LauncherWatchdogProcess.HasExited) { return }
+
+    $watchdogName = "SentinelPulse-Local-Watchdog-$PID"
+    $script:LauncherWatchdogStopFile = Join-Path ([System.IO.Path]::GetTempPath()) "$watchdogName.stop"
+    $script:LauncherWatchdogScriptFile = Join-Path ([System.IO.Path]::GetTempPath()) "$watchdogName.ps1"
+    if (Test-Path $script:LauncherWatchdogStopFile) {
+        Remove-Item -LiteralPath $script:LauncherWatchdogStopFile -Force -ErrorAction SilentlyContinue
+    }
+
+    $watchdogScript = @'
+param(
+    [int]$ParentProcessId,
+    [string]$BrowserProfileDir,
+    [string]$OwnedProcessIds,
+    [string]$StopFile,
+    [string]$LogFile
+)
+
+function Write-WatchdogLog {
+    param([string]$Message)
+    if (-not $LogFile) { return }
+    try {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff"
+        Add-Content -Path $LogFile -Value "$timestamp [WATCHDOG] $Message" -Encoding UTF8
+    } catch {
+    }
+}
+
+function Get-ProfileProcesses {
+    if (-not $BrowserProfileDir) { return @() }
+    try {
+        return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($BrowserProfileDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+            ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+    } catch {
+        return @()
+    }
+}
+
+function Stop-ProcessTreeById {
+    param([int]$ProcessId)
+    try {
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue)
+        foreach ($child in $children) {
+            Stop-ProcessTreeById -ProcessId $child.ProcessId
+        }
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    } catch {
+    }
+}
+
+try {
+    while ($true) {
+        if ($StopFile -and (Test-Path -LiteralPath $StopFile)) { exit 0 }
+        $parent = Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue
+        if (-not $parent) { break }
+        Start-Sleep -Seconds 1
+    }
+
+    Write-WatchdogLog "Launcher process $ParentProcessId ended; closing browser and owned processes"
+    $profileProcesses = @(Get-ProfileProcesses)
+    foreach ($process in $profileProcesses) {
+        try { $process.CloseMainWindow() | Out-Null } catch {}
+    }
+    Start-Sleep -Milliseconds 750
+    foreach ($process in $profileProcesses) {
+        Stop-ProcessTreeById -ProcessId $process.Id
+    }
+
+    foreach ($idText in @($OwnedProcessIds -split ",")) {
+        if (-not $idText) { continue }
+        $id = 0
+        if ([int]::TryParse($idText, [ref]$id)) {
+            Stop-ProcessTreeById -ProcessId $id
+        }
+    }
+
+    if ($BrowserProfileDir -and (Test-Path -LiteralPath $BrowserProfileDir)) {
+        Remove-Item -LiteralPath $BrowserProfileDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    Write-WatchdogLog $_.Exception.Message
+}
+'@
+
+    Set-Content -Path $script:LauncherWatchdogScriptFile -Value $watchdogScript -Encoding UTF8
+    $ownedIds = @($OwnedProcesses | ForEach-Object { $_.Id }) -join ","
+    $watchdogArgs = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $script:LauncherWatchdogScriptFile,
+        "-ParentProcessId", "$PID",
+        "-BrowserProfileDir", "$BrowserProfileDir",
+        "-OwnedProcessIds", $ownedIds,
+        "-StopFile", $script:LauncherWatchdogStopFile,
+        "-LogFile", $LogFile
+    )
+    $script:LauncherWatchdogProcess = Start-Process -FilePath "powershell.exe" -ArgumentList (Join-ProcessArguments -Arguments $watchdogArgs) -WindowStyle Hidden -PassThru
+}
+
+function Stop-LauncherShutdownWatchdog {
+    if ($script:LauncherWatchdogStopFile) {
+        New-Item -ItemType File -Path $script:LauncherWatchdogStopFile -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+    if ($script:LauncherWatchdogProcess -and -not $script:LauncherWatchdogProcess.HasExited) {
+        try {
+            $script:LauncherWatchdogProcess.WaitForExit(2000) | Out-Null
+            if (-not $script:LauncherWatchdogProcess.HasExited) {
+                Stop-Process -Id $script:LauncherWatchdogProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+    }
+    if ($script:LauncherWatchdogScriptFile -and (Test-Path $script:LauncherWatchdogScriptFile)) {
+        Remove-Item -LiteralPath $script:LauncherWatchdogScriptFile -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:LauncherWatchdogStopFile -and (Test-Path $script:LauncherWatchdogStopFile)) {
+        Remove-Item -LiteralPath $script:LauncherWatchdogStopFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Stop-BrowserWindow {
     $profileProcesses = @(Get-BrowserProfileProcesses)
     try {
@@ -349,6 +474,7 @@ function Stop-BrowserWindow {
 function Invoke-LauncherCleanup {
     if ($script:ShutdownStarted) { return }
     $script:ShutdownStarted = $true
+    Stop-LauncherShutdownWatchdog
     Stop-BrowserWindow
     Stop-OwnedProcesses
 }
@@ -485,6 +611,7 @@ try {
     if (-not $NoBrowser) {
         $BrowserProcess = Start-BrowserWindow -Url $frontendUrl
     }
+    Start-LauncherShutdownWatchdog
 
     Write-Host ""
     Write-Host "Ready: $frontendUrl" -ForegroundColor Green

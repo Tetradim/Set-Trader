@@ -104,6 +104,27 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
                 self.assertIn("[Console]::CancelKeyPress", text)
                 self.assertIn("Invoke-LauncherCleanup", text)
 
+    def test_windows_launchers_start_external_shutdown_watchdog(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("function Start-LauncherShutdownWatchdog", text)
+                self.assertIn("function Stop-LauncherShutdownWatchdog", text)
+                self.assertIn("$LauncherWatchdogStopFile", text)
+                self.assertIn("$ParentProcessId", text)
+                self.assertIn("Start-Process -FilePath \"powershell.exe\"", text)
+                self.assertIn("-WindowStyle Hidden", text)
+                self.assertIn("Get-ProfileProcesses", text)
+                self.assertIn("Stop-ProcessTreeById", text)
+                self.assertIn("Start-LauncherShutdownWatchdog", text)
+                self.assertIn("Stop-LauncherShutdownWatchdog", text)
+
+    def test_windows_launchers_quote_empty_process_arguments(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("[string]::IsNullOrEmpty($arg)", text)
+
     def test_local_batch_wrapper_only_pauses_on_error(self):
         text = (ROOT / "Launch-Sentinel-Pulse-Local.bat").read_text(encoding="utf-8")
         self.assertIn('if not "%EXITCODE%"=="0" (', text)
