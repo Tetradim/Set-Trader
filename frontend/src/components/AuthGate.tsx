@@ -109,7 +109,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         </div>
 
         <label className="mb-4 block text-sm">
-          <span className="mb-1 block text-[#bdb4a0]">Username or email</span>
+          <span className="mb-1 block text-[#bdb4a0]">Username</span>
           <input
             className="w-full border border-[rgba(255,255,255,0.16)] bg-[#07080b] px-3 py-2 text-[#f0e8d0] outline-none focus:border-[#c99a2e]"
             value={username}
