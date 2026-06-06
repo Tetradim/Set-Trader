@@ -7,7 +7,9 @@ echo ========================================
 echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Launch-Sentinel-Pulse-Local.ps1"
 set EXITCODE=%ERRORLEVEL%
-echo.
-echo Sentinel Pulse local launcher exited with code %EXITCODE%.
-pause
+if not "%EXITCODE%"=="0" (
+  echo.
+  echo Sentinel Pulse local launcher exited with code %EXITCODE%.
+  pause
+)
 exit /b %EXITCODE%

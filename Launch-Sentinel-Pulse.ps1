@@ -32,7 +32,11 @@ $serverWillOpenBrowser = $false
 $BrowserProcess = $null
 $BrowserProfileDir = $null
 $BrowserProcessIds = @()
+$BrowserStartedAt = $null
 $BrowserMonitorDisabled = $false
+$ShutdownStarted = $false
+$CleanupEventSubscription = $null
+$CancelKeyPressHandler = $null
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -177,6 +181,18 @@ function Update-BrowserProcessIds {
     return $profileProcesses
 }
 
+function Wait-BrowserProfileProcesses {
+    param([int]$Seconds = 10)
+
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        $profileProcesses = @(Update-BrowserProcessIds)
+        if ($profileProcesses.Count -gt 0) { return $profileProcesses }
+        Start-Sleep -Milliseconds 250
+    }
+    return @(Update-BrowserProcessIds)
+}
+
 function Test-BrowserWindowClosed {
     if ($BrowserMonitorDisabled) { return $false }
     if (-not $BrowserProcess -and -not $BrowserProfileDir -and $BrowserProcessIds.Count -eq 0) { return $false }
@@ -188,9 +204,13 @@ function Test-BrowserWindowClosed {
     if ($knownProcesses.Count -gt 0) { return $false }
     if ($BrowserProcessIds.Count -gt 0) { return $true }
 
+    if ($BrowserProfileDir -and $BrowserStartedAt) {
+        $elapsed = ((Get-Date) - $BrowserStartedAt).TotalSeconds
+        if ($elapsed -lt 15) { return $false }
+    }
+
     if ($BrowserProcess -and $BrowserProcess.HasExited) {
-        Write-Status "Browser process handed off; close monitoring disabled" "WARN"
-        $script:BrowserMonitorDisabled = $true
+        return $true
     }
     return $false
 }
@@ -202,11 +222,11 @@ function Start-BrowserWindow {
     if ($browserExe) {
         Write-Status "Opening dedicated browser window"
         $script:BrowserProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) "SentinelPulse-Browser-$PID"
+        $script:BrowserStartedAt = Get-Date
         New-Item -ItemType Directory -Path $script:BrowserProfileDir -Force | Out-Null
         $browserArgs = Join-ProcessArguments -Arguments @("--new-window", "--app=$Url", "--user-data-dir=$script:BrowserProfileDir", "--no-first-run", "--disable-background-mode")
         $process = Start-Process -FilePath $browserExe -ArgumentList $browserArgs -PassThru
-        Start-Sleep -Milliseconds 500
-        Update-BrowserProcessIds | Out-Null
+        Wait-BrowserProfileProcesses -Seconds 10 | Out-Null
         return $process
     }
 
@@ -311,6 +331,37 @@ function Stop-BrowserWindow {
     }
 }
 
+function Invoke-LauncherCleanup {
+    if ($script:ShutdownStarted) { return }
+    $script:ShutdownStarted = $true
+    Stop-BrowserWindow
+    Stop-OwnedProcesses
+    if ($TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+    }
+}
+
+function Register-LauncherShutdownHandlers {
+    try {
+        $script:CleanupEventSubscription = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+            Invoke-LauncherCleanup
+        }
+    } catch {
+    }
+
+    try {
+        $script:CancelKeyPressHandler = [ConsoleCancelEventHandler]{
+            param($sender, $eventArgs)
+            $eventArgs.Cancel = $true
+            Write-Status "Shutdown requested; closing browser and processes" "WARN"
+            Invoke-LauncherCleanup
+            exit 0
+        }
+        [Console]::CancelKeyPress += $script:CancelKeyPressHandler
+    } catch {
+    }
+}
+
 if ($SmokeTest) {
     Write-Status "Running launcher smoke test"
     $basicArgs = Join-ProcessArguments -Arguments @("--dbpath", "C:\data\db", "--port", "27017")
@@ -331,6 +382,8 @@ if ($SmokeTest) {
     Write-Status "Launcher smoke test passed" "OK"
     exit 0
 }
+
+Register-LauncherShutdownHandlers
 
 try {
     New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
@@ -463,9 +516,5 @@ try {
     Write-Status $_.Exception.Message "ERROR"
     exit 1
 } finally {
-    Stop-BrowserWindow
-    Stop-OwnedProcesses
-    if ($TranscriptStarted) {
-        try { Stop-Transcript | Out-Null } catch {}
-    }
+    Invoke-LauncherCleanup
 }
