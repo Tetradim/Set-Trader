@@ -5,6 +5,8 @@ import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Set
 import { motion, AnimatePresence } from 'framer-motion';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getMarketMeta } from '@/lib/market-utils';
+import { apiFetch } from '@/lib/api';
+import { uiLog } from '@/lib/clientLogger';
 
 /* Re-use the sub-components from TickerCard */
 import {
@@ -43,27 +45,44 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
   const ticker = useStore((s) => s.tickers[symbol]);
   const incrementStep = useStore((s) => s.incrementStep);
   const decrementStep = useStore((s) => s.decrementStep);
+  const updateTicker = useStore((s) => s.updateTicker);
   const [activeTab, setActiveTab] = useState<ConfigTabId>('rules');
 
   if (!ticker) return null;
 
+  const persistTickerUpdate = useCallback(
+    async (updates: Partial<TickerConfig>) => {
+      updateTicker(ticker.symbol, updates);
+      try {
+        const saved = await apiFetch(`/api/tickers/${ticker.symbol}`, {
+          method: 'PUT',
+          body: JSON.stringify(updates),
+        });
+        updateTicker(ticker.symbol, saved);
+      } catch (err) {
+        uiLog.error('config_modal.ticker_update_failed', err, { symbol: ticker.symbol, fields: Object.keys(updates) });
+      }
+    },
+    [ticker.symbol, updateTicker],
+  );
+
   const handleFieldChange = useCallback(
     (field: string, value: any) => {
       if (field === 'buy_percent' && value === false && ticker.buy_offset < 0) {
-        send('UPDATE_TICKER', { symbol: ticker.symbol, buy_percent: false, buy_offset: Math.abs(ticker.buy_offset) });
+        persistTickerUpdate({ buy_percent: false, buy_offset: Math.abs(ticker.buy_offset) });
         return;
       }
       if (field === 'sell_percent' && value === false && ticker.sell_offset < 0) {
-        send('UPDATE_TICKER', { symbol: ticker.symbol, sell_percent: false, sell_offset: Math.abs(ticker.sell_offset) });
+        persistTickerUpdate({ sell_percent: false, sell_offset: Math.abs(ticker.sell_offset) });
         return;
       }
       if (field === 'stop_percent' && value === false && ticker.stop_offset < 0) {
-        send('UPDATE_TICKER', { symbol: ticker.symbol, stop_percent: false, stop_offset: Math.abs(ticker.stop_offset) });
+        persistTickerUpdate({ stop_percent: false, stop_offset: Math.abs(ticker.stop_offset) });
         return;
       }
-      send('UPDATE_TICKER', { symbol: ticker.symbol, [field]: value });
+      persistTickerUpdate({ [field]: value } as Partial<TickerConfig>);
     },
-    [send, ticker.symbol, ticker.buy_offset, ticker.sell_offset, ticker.stop_offset]
+    [persistTickerUpdate, ticker.buy_offset, ticker.sell_offset, ticker.stop_offset]
   );
 
   return (
@@ -169,7 +188,7 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
                 </p>
                 <BrokerSelector
                   selectedBrokerIds={ticker.broker_ids || []}
-                  onChange={(broker_ids) => send('UPDATE_TICKER', { symbol: ticker.symbol, broker_ids })}
+                  onChange={(broker_ids) => persistTickerUpdate({ broker_ids })}
                 />
               </div>
             )}
@@ -183,7 +202,7 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
               <RebracketTab ticker={ticker} onChange={handleFieldChange} incStep={incrementStep} decStep={decrementStep} />
             )}
             {activeTab === 'advanced' && (
-              <AdvancedTab ticker={ticker} send={send} />
+              <AdvancedTab ticker={ticker} send={send} onPersist={persistTickerUpdate} />
             )}
           </div>
         </motion.div>

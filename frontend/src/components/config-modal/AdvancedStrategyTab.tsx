@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 interface AdvancedTabProps {
   ticker: TickerConfig;
   send: (action: string, payload: Record<string, any>) => void;
+  onPersist: (updates: Partial<TickerConfig>) => void;
 }
 
 // ---- signal strategy registry types ------------------------------------
@@ -43,7 +44,7 @@ const RISK_COLORS: Record<string, string> = {
   HIGH:   'text-red-400 bg-red-500/10 border-red-500/30',
 };
 
-export function AdvancedTab({ ticker, send }: AdvancedTabProps) {
+export function AdvancedTab({ ticker, send, onPersist }: AdvancedTabProps) {
   const [registry, setRegistry] = useState<Record<string, StrategyEntry>>({});
   const [loadingRegistry, setLoadingRegistry] = useState(false);
   const [reloading, setReloading] = useState(false);
@@ -72,8 +73,7 @@ export function AdvancedTab({ ticker, send }: AdvancedTabProps) {
   };
 
   const applySignalStrategy = (name: string, entry: StrategyEntry) => {
-    send('UPDATE_TICKER', {
-      symbol: ticker.symbol,
+    onPersist({
       strategy: name,
       strategy_config: entry.default_params,
     });
@@ -81,8 +81,7 @@ export function AdvancedTab({ ticker, send }: AdvancedTabProps) {
 
   const updateStrategyParam = (key: string, value: number | boolean | string) => {
     const current = (ticker as any).strategy_config ?? {};
-    send('UPDATE_TICKER', {
-      symbol: ticker.symbol,
+    onPersist({
       strategy_config: { ...current, [key]: value },
     });
   };
@@ -177,7 +176,7 @@ export function AdvancedTab({ ticker, send }: AdvancedTabProps) {
                     onCheckedChange={(checked) =>
                       checked
                         ? applySignalStrategy(name, entry)
-                        : send('UPDATE_TICKER', { symbol: ticker.symbol, strategy: 'custom', strategy_config: {} })
+                        : onPersist({ strategy: 'custom', strategy_config: {} })
                     }
                     data-testid={`strategy-toggle-${name.replace(/\s+/g, '-')}`}
                     className="shrink-0"

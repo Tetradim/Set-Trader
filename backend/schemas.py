@@ -115,6 +115,9 @@ class TickerUpdate(BaseModel):
     rebracket_min_drift: Optional[float] = None
     enabled: Optional[bool] = None
     strategy: Optional[str] = None
+    broker_id: Optional[str] = None
+    broker_ids: Optional[List[str]] = None
+    broker_allocations: Optional[Dict[str, float]] = None
     partial_fills_enabled: Optional[bool] = None
     buy_legs: Optional[list] = None
     sell_legs: Optional[list] = None
