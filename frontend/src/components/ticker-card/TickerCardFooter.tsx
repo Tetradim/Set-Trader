@@ -1,4 +1,4 @@
-import { Banknote, Pause, Play, Settings2, Trash2 } from 'lucide-react';
+import { Banknote, Pause, Play, RotateCcw, Settings2, Trash2 } from 'lucide-react';
 
 interface TickerCardFooterProps {
   symbol: string;
@@ -6,10 +6,12 @@ interface TickerCardFooterProps {
   isActive: boolean;
   confirmTakeProfit: boolean;
   confirmDelete: boolean;
+  hasCustomSize: boolean;
   onConfigOpen: (symbol: string) => void;
   onToggleEnabled: () => void;
   onTakeProfit: () => void;
   onDelete: () => void;
+  onResetSize: () => void;
 }
 
 export function TickerCardFooter({
@@ -18,10 +20,12 @@ export function TickerCardFooter({
   isActive,
   confirmTakeProfit,
   confirmDelete,
+  hasCustomSize,
   onConfigOpen,
   onToggleEnabled,
   onTakeProfit,
   onDelete,
+  onResetSize,
 }: TickerCardFooterProps) {
   return (
     <div className="sp-ticker-footer">
@@ -32,6 +36,17 @@ export function TickerCardFooter({
         <button type="button" className="sp-card-btn" title="Configure" aria-label={`Configure ${symbol}`} onClick={() => onConfigOpen(symbol)}>
           <Settings2 size={11} />
         </button>
+        {hasCustomSize && (
+          <button
+            type="button"
+            className="sp-card-btn"
+            aria-label={`Reset ${symbol} card size`}
+            title="Reset size"
+            onClick={onResetSize}
+          >
+            <RotateCcw size={11} />
+          </button>
+        )}
         <button
           type="button"
           className="sp-card-btn"

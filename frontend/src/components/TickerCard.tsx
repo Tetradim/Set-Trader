@@ -104,6 +104,10 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
     });
   }, []);
 
+  const handleResetSize = useCallback(() => {
+    setCardSize({ width: 0, height: 0 });
+  }, []);
+
   const isActive   = ticker.enabled;
   const isPositive = pnl >= 0;
   const marketMeta = getMarketMeta(ticker);
@@ -221,10 +225,12 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
         isActive={isActive}
         confirmTakeProfit={confirmTP}
         confirmDelete={confirmDelete}
+        hasCustomSize={cardSize.width > 0 || cardSize.height > 0}
         onConfigOpen={onConfigOpen}
         onToggleEnabled={handleToggleEnabled}
         onTakeProfit={handleTakeProfit}
         onDelete={handleDelete}
+        onResetSize={handleResetSize}
       />
 
       <TickerResizeHandles

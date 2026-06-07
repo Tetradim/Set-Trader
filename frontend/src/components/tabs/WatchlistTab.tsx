@@ -113,7 +113,8 @@ export function WatchlistTab() {
     
     // Get fresh tickers from store instead of closure
     const currentTickers = useStore.getState().tickers;
-    const symbols = Object.values(currentTickers)
+    const previousTickers = Object.values(currentTickers);
+    const symbols = previousTickers
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((t) => t.symbol);
     const from = symbols.indexOf(active.id as string);
@@ -121,9 +122,16 @@ export function WatchlistTab() {
     if (from === -1 || to === -1) return;
     const reordered = [...symbols];
     reordered.splice(to, 0, reordered.splice(from, 1)[0]);
+    const reorderedTickers = reordered
+      .map((symbol, index) => ({ ...currentTickers[symbol], sort_order: index }))
+      .filter((ticker) => ticker.symbol);
+    useStore.getState().setTickers(reorderedTickers);
     try {
-      await apiFetch('/api/tickers/reorder', { method: 'POST', body: JSON.stringify({ symbols: reordered }) });
-    } catch { toast.error('Failed to reorder tickers'); }
+      await apiFetch('/api/tickers/reorder', { method: 'POST', body: JSON.stringify({ order: reordered }) });
+    } catch {
+      useStore.getState().setTickers(previousTickers);
+      toast.error('Failed to reorder tickers');
+    }
   }, []); // Empty deps - gets fresh state internally
 
   const runBotAction = useCallback(async (action: 'start' | 'pause' | 'stop') => {
