@@ -79,10 +79,13 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("$BrowserProcess = $null", text)
         self.assertIn("$BrowserProfileDir = $null", text)
         self.assertIn("$BrowserProcessIds = @()", text)
+        self.assertIn("$BrowserWindowProcessIds = @()", text)
         self.assertIn("$BrowserStartedAt = $null", text)
         self.assertIn("function Start-BrowserWindow", text)
         self.assertIn("function Get-BrowserProfileProcesses", text)
+        self.assertIn("function Get-BrowserWindowProcesses", text)
         self.assertIn("function Wait-BrowserProfileProcesses", text)
+        self.assertIn("function Wait-BrowserWindowProcesses", text)
         self.assertIn("function Test-BrowserWindowClosed", text)
         self.assertIn("function Stop-BrowserWindow", text)
         self.assertIn("--user-data-dir=$script:BrowserProfileDir", text)
@@ -92,6 +95,19 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("Browser window closed; shutting down Sentinel Pulse", text)
         self.assertNotIn('throw "Browser window closed."', text)
         self.assertIn("SENTINEL_OPEN_BROWSER", text)
+
+    def test_windows_launchers_detect_visible_browser_window_close(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("$BrowserWindowProcessIds = @()", text)
+                self.assertIn("function Get-BrowserWindowProcesses", text)
+                self.assertIn("MainWindowHandle", text)
+                self.assertIn("function Wait-BrowserWindowProcesses", text)
+                self.assertIn("$script:BrowserWindowProcessIds", text)
+                self.assertIn("if ($BrowserWindowProcessIds.Count -gt 0) { return $true }", text)
+                self.assertIn("Wait-BrowserWindowProcesses -Seconds 10", text)
+                self.assertNotIn("if ($profileProcesses.Count -gt 0) { return $false }\n\n    $knownProcesses", text)
 
     def test_windows_launchers_register_console_shutdown_cleanup(self):
         for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:

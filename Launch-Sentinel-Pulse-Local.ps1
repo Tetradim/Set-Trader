@@ -26,6 +26,7 @@ $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.
 $BrowserProcess = $null
 $BrowserProfileDir = $null
 $BrowserProcessIds = @()
+$BrowserWindowProcessIds = @()
 $BrowserStartedAt = $null
 $BrowserMonitorDisabled = $false
 $ShutdownStarted = $false
@@ -190,10 +191,18 @@ function Get-BrowserProfileProcesses {
     }
 }
 
+function Get-BrowserWindowProcesses {
+    return @(Get-BrowserProfileProcesses | Where-Object { $_.MainWindowHandle -and $_.MainWindowHandle -ne 0 })
+}
+
 function Update-BrowserProcessIds {
     $profileProcesses = @(Get-BrowserProfileProcesses)
     if ($profileProcesses.Count -gt 0) {
         $script:BrowserProcessIds = @($profileProcesses | Select-Object -ExpandProperty Id)
+    }
+    $windowProcesses = @($profileProcesses | Where-Object { $_.MainWindowHandle -and $_.MainWindowHandle -ne 0 })
+    if ($windowProcesses.Count -gt 0) {
+        $script:BrowserWindowProcessIds = @($windowProcesses | Select-Object -ExpandProperty Id)
     }
     return $profileProcesses
 }
@@ -210,12 +219,40 @@ function Wait-BrowserProfileProcesses {
     return @(Update-BrowserProcessIds)
 }
 
+function Wait-BrowserWindowProcesses {
+    param([int]$Seconds = 10)
+
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        Update-BrowserProcessIds | Out-Null
+        $windowProcesses = @(Get-BrowserWindowProcesses)
+        if ($windowProcesses.Count -gt 0) {
+            $script:BrowserWindowProcessIds = @($windowProcesses | Select-Object -ExpandProperty Id)
+            return $windowProcesses
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    Update-BrowserProcessIds | Out-Null
+    return @(Get-BrowserWindowProcesses)
+}
+
 function Test-BrowserWindowClosed {
     if ($BrowserMonitorDisabled) { return $false }
-    if (-not $BrowserProcess -and -not $BrowserProfileDir -and $BrowserProcessIds.Count -eq 0) { return $false }
+    if (-not $BrowserProcess -and -not $BrowserProfileDir -and $BrowserProcessIds.Count -eq 0 -and $BrowserWindowProcessIds.Count -eq 0) { return $false }
 
     $profileProcesses = @(Update-BrowserProcessIds)
-    if ($profileProcesses.Count -gt 0) { return $false }
+    $windowProcesses = @(Get-BrowserWindowProcesses)
+    if ($windowProcesses.Count -gt 0) {
+        $script:BrowserWindowProcessIds = @($windowProcesses | Select-Object -ExpandProperty Id)
+        return $false
+    }
+
+    $knownWindowProcesses = @($BrowserWindowProcessIds | ForEach-Object {
+        $process = Get-Process -Id $_ -ErrorAction SilentlyContinue
+        if ($process -and $process.MainWindowHandle -and $process.MainWindowHandle -ne 0) { $process }
+    })
+    if ($knownWindowProcesses.Count -gt 0) { return $false }
+    if ($BrowserWindowProcessIds.Count -gt 0) { return $true }
 
     $knownProcesses = @($BrowserProcessIds | ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
     if ($knownProcesses.Count -gt 0) { return $false }
@@ -223,7 +260,8 @@ function Test-BrowserWindowClosed {
 
     if ($BrowserProfileDir -and $BrowserStartedAt) {
         $elapsed = ((Get-Date) - $BrowserStartedAt).TotalSeconds
-        if ($elapsed -lt 15) { return $false }
+        if ($elapsed -lt 15 -and $profileProcesses.Count -gt 0) { return $false }
+        if ($profileProcesses.Count -gt 0) { return $true }
     }
 
     if ($BrowserProcess -and $BrowserProcess.HasExited) {
@@ -244,6 +282,7 @@ function Start-BrowserWindow {
         $browserArgs = Join-ProcessArguments -Arguments @("--new-window", "--app=$Url", "--user-data-dir=$script:BrowserProfileDir", "--no-first-run", "--disable-background-mode")
         $process = Start-Process -FilePath $browserExe -ArgumentList $browserArgs -PassThru
         Wait-BrowserProfileProcesses -Seconds 10 | Out-Null
+        Wait-BrowserWindowProcesses -Seconds 10 | Out-Null
         return $process
     }
 
