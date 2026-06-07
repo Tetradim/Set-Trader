@@ -1,8 +1,6 @@
 import React, { memo, useState, useCallback, useEffect, useRef } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
+import { useTickerCardActions } from '@/hooks/useTickerCardActions';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getMarketMeta, formatPrice } from '@/lib/market-utils';
@@ -32,7 +30,6 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
   if (!ticker || !ticker.symbol) {
     return null;
   }
-  const { send }           = useWebSocket();
   const price              = useStore((s) => s.prices[ticker.symbol] ?? 0);
   const pnl                = useStore((s) => s.profits[ticker.symbol] ?? 0);
   const priceHistory       = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
@@ -120,34 +117,16 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
     !isActive ? 'paused' : '',
   ].filter(Boolean).join(' ');
 
-  const handleDelete = () => {
-    if (!confirmDelete) { setConfirmDelete(true); setTimeout(() => setConfirmDelete(false), 4000); return; }
-    send('DELETE_TICKER', { symbol: ticker.symbol });
-  };
-
-  const handleTakeProfit = () => {
-    if (!confirmTP) { setConfirmTP(true); setTimeout(() => setConfirmTP(false), 4000); return; }
-    send('TAKE_PROFIT', { symbol: ticker.symbol });
-    setConfirmTP(false);
-    toast.success(`Took profit for ${ticker.symbol}: $${pnl.toFixed(2)}`);
-  };
-
-  const handleDuplicate = async () => {
-    try {
-      const allTickers = useStore.getState().tickers;
-      const newSymbol  = `${ticker.symbol}_COPY`;
-      const newTicker  = { ...ticker, symbol: newSymbol, sort_order: Object.keys(allTickers).length };
-      delete (newTicker as any)._id;
-      await apiFetch('/api/tickers', { method: 'POST', body: JSON.stringify(newTicker) });
-      toast.success(`Duplicated as ${newSymbol}`);
-    } catch { toast.error('Failed to duplicate'); }
-  };
-
-  const saveQuickEdit = (field: string, value: number) => {
-    send('UPDATE_TICKER', { symbol: ticker.symbol, [field]: value });
-    setQuickEdit({ buy: false, sell: false, stop: false });
-    toast.success(`${field} → ${value}`);
-  };
+  const { handleToggleEnabled, handleDelete, handleTakeProfit, saveQuickEdit } = useTickerCardActions({
+    ticker,
+    isActive,
+    pnl,
+    confirmDelete,
+    confirmTakeProfit: confirmTP,
+    setConfirmDelete,
+    setConfirmTakeProfit: setConfirmTP,
+    setQuickEdit,
+  });
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: ticker.symbol });
@@ -243,7 +222,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
         confirmTakeProfit={confirmTP}
         confirmDelete={confirmDelete}
         onConfigOpen={onConfigOpen}
-        onToggleEnabled={() => send('UPDATE_TICKER', { symbol: ticker.symbol, enabled: !isActive })}
+        onToggleEnabled={handleToggleEnabled}
         onTakeProfit={handleTakeProfit}
         onDelete={handleDelete}
       />
