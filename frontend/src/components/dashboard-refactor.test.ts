@@ -20,9 +20,12 @@ assert.ok(
 assert.ok(fs.existsSync(tabContentPath), 'Dashboard tab content should live in DashboardTabContent.tsx');
 assert.ok(fs.existsSync(configPath), 'Dashboard navigation metadata should live in dashboardConfig.tsx');
 assert.match(dashboardSource, /className="sp-tab-content flex-1 overflow-auto"/);
+assert.doesNotMatch(dashboardSource, /DashboardSidebar/);
+assert.doesNotMatch(dashboardSource, /sidebar-group-/);
 assert.match(indexCssSource, /\.sp-layout \{[^}]*position:relative;[^}]*z-index:1;/);
 assert.match(indexCssSource, /\.sp-main \{[^}]*position:relative;[^}]*z-index:1;/);
 assert.match(indexCssSource, /\.sp-tab-content \{[^}]*position:relative;[^}]*z-index:1;/);
+assert.doesNotMatch(indexCssSource, /\.sp-sidebar/);
 
 const tabContentSource = fs.readFileSync(tabContentPath, 'utf8');
 

@@ -77,15 +77,6 @@
 /* ── LAYOUT ── */
 .sp-layout { display:flex; flex:1; overflow:hidden; position:relative; z-index:1; }
 
-/* ── LEFT SIDEBAR ── */
-.sp-sidebar { width:52px; flex-shrink:0; background:rgba(6,4,10,0.92); backdrop-filter:blur(12px); border-right:1px solid rgba(180,130,10,0.12); display:flex; flex-direction:column; align-items:center; padding:10px 0; gap:4px; position:relative; z-index:8; }
-.sp-sidebar::after { content:''; position:absolute; top:0; right:0; bottom:0; width:1px; background:linear-gradient(180deg,transparent,rgba(180,130,10,0.2) 30%,rgba(180,130,10,0.2) 70%,transparent); }
-.sp-sb-btn { width:44px; height:44px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:rgba(200,145,10,0.28); border:1px solid transparent; background:transparent; font-size:17px; transition:all .15s; }
-.sp-sb-btn:hover { color:rgba(200,145,10,0.7); background:rgba(200,145,10,0.07); border-color:rgba(200,145,10,0.15); }
-.sp-sb-btn.active { color:#dca828; background:rgba(200,145,10,0.1); border-color:rgba(200,145,10,0.3); }
-.sp-sb-spacer { flex:1; }
-.sp-sb-divider { width:28px; height:1px; background:rgba(180,130,10,0.12); margin:4px 0; }
-
 .sp-main { display:flex; flex-direction:column; flex:1; min-width:0; overflow:auto; position:relative; z-index:1; }
 .sp-tab-content { position:relative; z-index:1; }
 

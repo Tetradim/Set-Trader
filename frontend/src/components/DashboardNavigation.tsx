@@ -13,31 +13,6 @@ interface DashboardNavigationProps {
   onTabChange: (tabId: DashboardTabId) => void;
 }
 
-export function DashboardSidebar({ activeGroup, onTabChange }: Omit<DashboardNavigationProps, 'activeTab'>) {
-  return (
-    <nav className="sp-sidebar" aria-label="Main navigation groups">
-      {GROUP_NAV.map((item) => {
-        const Icon = item.icon;
-        const isActive = activeGroup === item.id;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            className={`sp-sb-btn ${isActive ? 'active' : ''}`}
-            title={item.title}
-            aria-label={`Open ${item.title} group`}
-            aria-current={isActive ? 'page' : undefined}
-            onClick={() => onTabChange(getDefaultTabForDashboardGroup(item.id))}
-            data-testid={`sidebar-group-${item.id}`}
-          >
-            <Icon size={17} />
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
 export function DashboardTabBars({ activeGroup, activeTab, onTabChange }: DashboardNavigationProps) {
   return (
     <>

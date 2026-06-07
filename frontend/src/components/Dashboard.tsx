@@ -3,7 +3,7 @@ import { useStore } from '@/stores/useStore';
 import { Header } from './Header';
 import { ErrorBoundary } from './ErrorBoundary';
 import { DashboardTabContent } from './DashboardTabContent';
-import { DashboardSidebar, DashboardTabBars } from './DashboardNavigation';
+import { DashboardTabBars } from './DashboardNavigation';
 import { apiFetch } from '@/lib/api';
 import {
   getDashboardGroupForTab,
@@ -48,8 +48,6 @@ export function Dashboard() {
       <div className="sp-gleam-bar" />
 
       <div className="sp-layout" style={{ flex: 1, overflow: 'hidden' }}>
-        <DashboardSidebar activeGroup={activeGroup} onTabChange={setActiveTab} />
-
         <div className="sp-main">
           <DashboardTabBars activeGroup={activeGroup} activeTab={activeTab} onTabChange={setActiveTab} />
 
