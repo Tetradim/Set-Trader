@@ -91,7 +91,7 @@ export function WatchlistTab() {
   const [activePanel, setActivePanel]   = useState<'trades'|'positions'|'controls'|'broker'>('trades');
   const [pickerOpen, setPickerOpen]     = useState(false);
   const [mktColors, setMktColors]       = useState(DEFAULT_MKT_COLORS);
-  const [toggles, setToggles]           = useState({ sim247: false, liveMarket: true, paperAfter: true, stopLoss: true, trailing: false });
+  const [toggles, setToggles]           = useState({ stopLoss: true });
 
   const simulate247           = useStore((s) => s.simulate247);
   const liveDuringMarketHours = useStore((s) => s.liveDuringMarketHours);
@@ -396,7 +396,6 @@ export function WatchlistTab() {
               { key: 'liveMarket', label: 'Live During Market Hours', onToggle: setLiveMarketHours,    val: liveDuringMarketHours  },
               { key: 'paperAfter', label: 'Paper After Hours',        onToggle: setPaperAfterHours,    val: paperAfterHours        },
               { key: 'stopLoss',   label: 'Stop Loss Enabled',        onToggle: null,                  val: toggles.stopLoss       },
-              { key: 'trailing',   label: 'Trailing Stop',            onToggle: null,                  val: toggles.trailing       },
             ].map(({ key, label, onToggle, val }) => (
               <div className="sp-toggle-row" key={key}>
                 <div className="sp-toggle-name">{label}</div>

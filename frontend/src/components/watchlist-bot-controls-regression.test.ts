@@ -36,6 +36,12 @@ assert.match(
   'Paper/Live controls and Simulate 24/7 toggle should persist through /api/settings',
 );
 
+assert.doesNotMatch(
+  watchlistSource,
+  /label:\s*'Trailing Stop'|key:\s*'trailing'/,
+  'Watchlist Bot Controls should not expose a local-only Trailing Stop toggle',
+);
+
 assert.match(
   watchlistSource,
   /body:\s*JSON\.stringify\(\{\s*live_during_market_hours:\s*checked\s*\}\)/s,
