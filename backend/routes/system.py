@@ -98,9 +98,9 @@ async def get_release_preflight():
     checks.append(_preflight_item(
         "edge_api_key",
         "Edge API key",
-        "pass" if edge_api_key else "warn",
-        "Configured" if edge_api_key else "Not configured",
-        "Set edge_api_key before enabling Sentinel Edge integrations.",
+        "pass",
+        "Configured" if edge_api_key else "Edge REST integrations disabled",
+        "Set edge_api_key only when connecting Sentinel Edge.",
     ))
 
     checks.append(_preflight_item(

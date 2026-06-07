@@ -20,6 +20,13 @@ class PreflightStaticTest(unittest.TestCase):
         self.assertIn("global_daily_drawdown", text)
         self.assertIn("ready_to_trade", text)
 
+    def test_edge_api_key_is_optional_until_edge_is_configured(self):
+        text = self.read("backend/routes/system.py")
+
+        self.assertIn("Edge REST integrations disabled", text)
+        self.assertIn("Set edge_api_key only when connecting Sentinel Edge.", text)
+        self.assertNotIn('"pass" if edge_api_key else "warn"', text)
+
     def test_global_daily_drawdown_is_persisted(self):
         schemas = self.read("backend/schemas.py")
         settings = self.read("backend/routes/settings.py")
