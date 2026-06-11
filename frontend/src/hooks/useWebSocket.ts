@@ -70,8 +70,14 @@ function handleMessage(event: MessageEvent) {
       }
       if (data.positions) store.setPositions(data.positions);
       if (data.profits) store.setProfits(data.profits);
+      if (data.trades) store.setTrades(data.trades);
       if (data.cash_reserve !== undefined) store.setCashReserve(data.cash_reserve);
+      if (data.account_balance !== undefined) {
+        store.setAccountBalance(data.account_balance, data.allocated ?? 0, data.available ?? 0);
+      }
       if (data.simulate_24_7 !== undefined) store.setSimulate247(data.simulate_24_7);
+      if (data.live_during_market_hours !== undefined) store.setLiveDuringMarketHours(data.live_during_market_hours);
+      if (data.paper_after_hours !== undefined) store.setPaperAfterHours(data.paper_after_hours);
       store.setPaused(data.paused ?? store.paused);
       store.setRunning(data.running ?? store.running);
       store.setMarketOpen(data.market_open ?? store.marketOpen);

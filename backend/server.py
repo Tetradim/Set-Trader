@@ -64,6 +64,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 # Shared state (must be imported first — populates db, logger, etc.)
 import deps
+from bot_snapshot import build_bot_snapshot
 from default_tickers import ensure_default_tickers
 from ws_manager import ConnectionManager
 from price_service import PriceService
@@ -94,43 +95,30 @@ async def price_broadcast_loop():
     
     while True:
         try:
-            tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
-            if tickers:
-                prices = {}
-                for t in tickers:
-                    sym = t["symbol"]
-                    prices[sym] = await deps.price_service.get_price(sym)
-
-                positions = {}
-                for sym, pos in deps.engine._positions.items():
-                    if pos["qty"] > 0:
-                        cp = prices.get(sym, 0)
-                        mv = round(cp * pos["qty"], 2)
-                        positions[sym] = {
-                            "symbol": sym, "quantity": pos["qty"],
-                            "avg_entry": pos["avg_entry"], "current_price": cp,
-                            "market_value": mv,
-                            "unrealized_pnl": round((cp - pos["avg_entry"]) * pos["qty"], 2),
-                        }
-
-                profits_list = await deps.db.profits.find({}, {"_id": 0}).to_list(100)
-                profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
-
-                cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
-                cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
-
-                await deps.ws_manager.broadcast({
-                    "type": "PRICE_UPDATE",
-                    "prices": prices,
-                    "positions": positions,
-                    "profits": profits,
-                    "cash_reserve": cash_reserve,
-                    "paused": deps.engine.paused,
-                    "running": deps.engine.running,
-                    "market_open": deps.engine.is_market_open(),
-                    "simulate_24_7": deps.engine.simulate_24_7,
-                    "market_hours_only": deps.engine.market_hours_only,
-                })
+            snapshot = await build_bot_snapshot()
+            if snapshot["tickers"]:
+                update = {
+                    "prices": snapshot["prices"],
+                    "price_sources": snapshot["price_sources"],
+                    "price_errors": snapshot["price_errors"],
+                    "positions": snapshot["positions"],
+                    "profits": snapshot["profits"],
+                    "cash_reserve": snapshot["cash_reserve"],
+                    "account_balance": snapshot["account_balance"],
+                    "allocated": snapshot["allocated"],
+                    "available": snapshot["available"],
+                    "trades": snapshot["trades"],
+                    "paused": snapshot["paused"],
+                    "running": snapshot["running"],
+                    "market_open": snapshot["market_open"],
+                    "simulate_24_7": snapshot["simulate_24_7"],
+                    "market_hours_only": snapshot["market_hours_only"],
+                    "live_during_market_hours": snapshot["live_during_market_hours"],
+                    "paper_after_hours": snapshot["paper_after_hours"],
+                    "replay": snapshot["replay"],
+                }
+                update["type"] = "PRICE_UPDATE"
+                await deps.ws_manager.broadcast(update)
         except ServerSelectionTimeoutError as e:
             # MongoDB dropped - log but don't crash the loop
             deps.logger.warning(f"MongoDB temporarily unavailable: {e}")

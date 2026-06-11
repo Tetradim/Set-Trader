@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, CheckCircle2, FlaskConical, Pause, Play, RefreshCw, Square, UploadCloud } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
+import { applyBotSnapshot } from '@/lib/botSnapshot';
 import { useStore } from '@/stores/useStore';
 
 type ReplaySession = {
@@ -72,6 +73,11 @@ export function TestLabTab() {
     }
   }, [selectedSessionId]);
 
+  const refreshBotSnapshot = useCallback(async () => {
+    const snapshot = await apiFetch('/api/bot/snapshot');
+    applyBotSnapshot(snapshot);
+  }, []);
+
   useEffect(() => {
     loadReplayState().catch((error) => toast.error(error.message || 'Failed to load replay sessions'));
   }, [loadReplayState]);
@@ -138,6 +144,7 @@ export function TestLabTab() {
         useStore.getState().setRunning(Boolean(bot.running));
         useStore.getState().setPaused(Boolean(bot.paused));
       }
+      await refreshBotSnapshot();
       toast.success('Replay test started.');
     } catch (error: any) {
       toast.error(error.message || 'Failed to start replay test');
@@ -152,6 +159,7 @@ export function TestLabTab() {
       const bot = await apiFetch('/api/bot/pause', { method: 'POST' });
       useStore.getState().setRunning(Boolean(bot.running));
       useStore.getState().setPaused(Boolean(bot.paused));
+      await refreshBotSnapshot();
     } catch (error: any) {
       toast.error(error.message || 'Failed to pause bots');
     } finally {
@@ -171,6 +179,7 @@ export function TestLabTab() {
       useStore.getState().setPaused(Boolean(bot.paused));
       if (Array.isArray(bot.tickers)) useStore.getState().setTickers(bot.tickers);
       await loadReplayState();
+      await refreshBotSnapshot();
       toast.success('Replay test stopped.');
     } catch (error: any) {
       toast.error(error.message || 'Failed to stop replay test');

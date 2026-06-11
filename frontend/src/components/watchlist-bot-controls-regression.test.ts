@@ -5,6 +5,8 @@ import path from 'node:path';
 const root = process.cwd();
 const watchlistPath = path.join(root, 'src', 'components', 'tabs', 'WatchlistTab.tsx');
 const watchlistSource = fs.readFileSync(watchlistPath, 'utf8');
+const botSnapshotPath = path.join(root, 'src', 'lib', 'botSnapshot.ts');
+const botSnapshotSource = fs.existsSync(botSnapshotPath) ? fs.readFileSync(botSnapshotPath, 'utf8') : '';
 
 assert.match(
   watchlistSource,
@@ -70,4 +72,40 @@ assert.doesNotMatch(
   watchlistSource,
   /SET_SIMULATE_247|SET_LIVE_DURING_MARKET_HOURS|SET_PAPER_AFTER_HOURS|SET_MODE/,
   'Watchlist bot controls should not send unsupported WebSocket settings commands',
+);
+
+assert.match(
+  watchlistSource,
+  /refreshBotSnapshot/,
+  'Watchlist should poll the bot snapshot endpoint so replay prices keep moving when WebSocket state is stale',
+);
+
+assert.match(
+  watchlistSource,
+  /apiFetch\('\/api\/bot\/snapshot'\)/,
+  'Watchlist snapshot polling should use the authenticated bot snapshot endpoint',
+);
+
+assert.match(
+  watchlistSource,
+  /setInterval\(refreshBotSnapshot,\s*3000\)/,
+  'Watchlist should refresh bot snapshots every 3 seconds while visible',
+);
+
+assert.match(
+  botSnapshotSource,
+  /export function applyBotSnapshot/,
+  'Bot snapshot application should live in a reusable helper',
+);
+
+assert.match(
+  botSnapshotSource,
+  /store\.setPrices\(snapshot\.prices\)/,
+  'Bot snapshot helper should apply fresh prices to ticker cards',
+);
+
+assert.match(
+  botSnapshotSource,
+  /store\.appendPriceHistory\(snapshot\.prices\)/,
+  'Bot snapshot helper should update sparkline history from snapshots',
 );

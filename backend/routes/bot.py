@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 import deps
+from bot_snapshot import build_bot_snapshot
 
 router = APIRouter()
 
@@ -16,6 +17,34 @@ async def _broadcast_tickers():
     docs = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
     await deps.ws_manager.broadcast({"type": "TICKERS_REORDERED", "tickers": docs})
     return docs
+
+
+@router.get("/bot/snapshot")
+async def get_bot_snapshot():
+    snapshot = await build_bot_snapshot()
+    return {
+        "tickers": snapshot["tickers"],
+        "prices": snapshot["prices"],
+        "price_sources": snapshot["price_sources"],
+        "price_errors": snapshot["price_errors"],
+        "positions": snapshot["positions"],
+        "profits": snapshot["profits"],
+        "trades": snapshot["trades"],
+        "cash_reserve": snapshot["cash_reserve"],
+        "account_balance": snapshot["account_balance"],
+        "allocated": snapshot["allocated"],
+        "available": snapshot["available"],
+        "increment_step": snapshot["increment_step"],
+        "decrement_step": snapshot["decrement_step"],
+        "paused": deps.engine.paused,
+        "running": deps.engine.running,
+        "market_open": deps.engine.is_market_open(),
+        "simulate_24_7": deps.engine.simulate_24_7,
+        "market_hours_only": deps.engine.market_hours_only,
+        "live_during_market_hours": deps.engine.live_during_market_hours,
+        "paper_after_hours": deps.engine.paper_after_hours,
+        "replay": snapshot["replay"],
+    }
 
 
 @router.post("/bot/start")

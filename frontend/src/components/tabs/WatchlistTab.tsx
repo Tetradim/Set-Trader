@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useStore } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { AddTickerDialog } from '@/components/AddTickerDialog';
@@ -18,6 +18,7 @@ import {
   rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { apiFetch } from '@/lib/api';
+import { applyBotSnapshot } from '@/lib/botSnapshot';
 import { toast } from 'sonner';
 
 // ── Tunnel SVG backgrounds per card state ────────────────────────────────────
@@ -107,6 +108,21 @@ export function WatchlistTab() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  const refreshBotSnapshot = useCallback(async () => {
+    try {
+      const snapshot = await apiFetch('/api/bot/snapshot');
+      applyBotSnapshot(snapshot);
+    } catch (error) {
+      console.warn('Bot snapshot refresh failed', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshBotSnapshot();
+    const interval = setInterval(refreshBotSnapshot, 3000);
+    return () => clearInterval(interval);
+  }, [refreshBotSnapshot]);
+
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -145,10 +161,11 @@ export function WatchlistTab() {
       if (typeof result.running === 'boolean') useStore.getState().setRunning(result.running);
       if (typeof result.paused === 'boolean') useStore.getState().setPaused(result.paused);
       if (Array.isArray(result.tickers)) useStore.getState().setTickers(result.tickers);
+      await refreshBotSnapshot();
     } catch (error: any) {
       toast.error(error.message || `Failed to ${action} bot`);
     }
-  }, []);
+  }, [refreshBotSnapshot]);
 
   const setPaperMode = useCallback(async (checked: boolean) => {
     const previous = useStore.getState().simulate247;

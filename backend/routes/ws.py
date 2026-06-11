@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 import deps
 from auth import TokenData, verify_token
+from bot_snapshot import build_bot_snapshot
 from default_tickers import ensure_default_tickers
 from schemas import TickerConfig
 from strategies import PRESET_STRATEGIES
@@ -53,40 +54,31 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
         # Startup owns the normal seed path; this is a safety net for direct WS use.
         if await ensure_default_tickers(deps.db, logger):
             tickers = await deps.db.tickers.find({}, {"_id": 0}).to_list(100)
-        prices = {}
-        for t in tickers:
-            prices[t["symbol"]] = await deps.price_service.get_price(t["symbol"])
-
-        profits_list = await deps.db.profits.find({}, {"_id": 0}).to_list(100)
-        profits = {p["symbol"]: p.get("total_pnl", 0) for p in profits_list}
-
-        cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
-        cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
-
-        inc_doc = await deps.db.settings.find_one({"key": "increment_step"}, {"_id": 0})
-        dec_doc = await deps.db.settings.find_one({"key": "decrement_step"}, {"_id": 0})
-        balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
-        account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
-        allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
+        snapshot = await build_bot_snapshot()
 
         await websocket.send_json({
             "type": "INITIAL_STATE",
-            "tickers": tickers,
-            "prices": prices,
-            "profits": profits,
-            "cash_reserve": cash_reserve,
-            "account_balance": account_balance,
-            "allocated": allocated,
-            "available": round(account_balance - allocated, 2),
-            "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,
-            "decrement_step": dec_doc.get("value", 0.5) if dec_doc else 0.5,
-            "paused": deps.engine.paused,
-            "running": deps.engine.running,
-            "market_open": deps.engine.is_market_open(),
-            "simulate_24_7": deps.engine.simulate_24_7,
-            "market_hours_only": deps.engine.market_hours_only,
-            "live_during_market_hours": deps.engine.live_during_market_hours,
-            "paper_after_hours": deps.engine.paper_after_hours,
+            "tickers": snapshot["tickers"],
+            "prices": snapshot["prices"],
+            "price_sources": snapshot["price_sources"],
+            "price_errors": snapshot["price_errors"],
+            "profits": snapshot["profits"],
+            "positions": snapshot["positions"],
+            "trades": snapshot["trades"],
+            "cash_reserve": snapshot["cash_reserve"],
+            "account_balance": snapshot["account_balance"],
+            "allocated": snapshot["allocated"],
+            "available": snapshot["available"],
+            "increment_step": snapshot["increment_step"],
+            "decrement_step": snapshot["decrement_step"],
+            "paused": snapshot["paused"],
+            "running": snapshot["running"],
+            "market_open": snapshot["market_open"],
+            "simulate_24_7": snapshot["simulate_24_7"],
+            "market_hours_only": snapshot["market_hours_only"],
+            "live_during_market_hours": snapshot["live_during_market_hours"],
+            "paper_after_hours": snapshot["paper_after_hours"],
+            "replay": snapshot["replay"],
         })
 
         while True:
@@ -158,15 +150,22 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                         await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
 
             elif action == "START_BOT":
+                await deps.db.tickers.update_many({}, {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": ""}})
+                tickers = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
                 deps.engine.running = True
                 deps.engine.paused = False
                 await deps.engine.save_state()
+                await deps.ws_manager.broadcast({"type": "TICKERS_REORDERED", "tickers": tickers})
                 await deps.ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": False})
 
             elif action == "STOP_BOT":
                 deps.engine.running = False
                 deps.engine.paused = False
+                deps.engine._pending_sells.clear()
+                await deps.db.tickers.update_many({}, {"$set": {"enabled": False}})
+                tickers = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
                 await deps.engine.save_state()
+                await deps.ws_manager.broadcast({"type": "TICKERS_REORDERED", "tickers": tickers})
                 await deps.ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": False})
 
             elif action == "APPLY_STRATEGY":
