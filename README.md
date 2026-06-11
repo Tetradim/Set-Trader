@@ -8,6 +8,14 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 
 ## Recent Updates
 
+### v1.0.4 - Market Replay Foundation
+
+- **Pulse-owned replay logs**: Imported historical intraday bars are stored in MongoDB as Sentinel Pulse replay sessions, so bot testing uses local replay data after import.
+- **yfinance importer**: `POST /api/replay/import/yfinance` imports 1m/2m/5m/15m/30m/60m bars for selected tickers and dates. yfinance intraday depth is provider-limited, so use recent sessions for 1-minute tests.
+- **Alpaca importer**: `POST /api/replay/import/alpaca` imports historical stock bars from Alpaca's market-data API using `iex`, `sip`, or `otc` feeds. API credentials can be supplied in the request or via environment variables.
+- **Paper-mode playback**: `POST /api/replay/sessions/{session_id}/start` activates a stored session only when `Simulate 24/7` is enabled. While active, `PriceService.get_price()` reads replay bars before broker feeds, yfinance, or cache.
+- **Safety guard**: Replay prices are paper/simulation input only. Replay cannot be started while live mode is active.
+
 ### v1.0.3 - Strategy Configuration UI
 
 - **Strategy Tab in ConfigModal**: New "Strategy" tab (first tab) in the ticker configuration modal. Click any ticker → Config → Strategy.
@@ -41,19 +49,20 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 1. [Architecture](#architecture)
 2. [Quick Start](#quick-start)
 3. [Feature Overview](#feature-overview)
-4. [Pluggable Strategy System](#pluggable-strategy-system)
-5. [Strategy Configuration UI](#strategy-configuration-ui)
-6. [Edge Integration](#edge-integration)
-7. [MACD-V Strategy](#macd-v-strategy)
-8. [File Map — Backend](#file-map--backend)
-9. [File Map — Frontend](#file-map--frontend)
-10. [API Reference](#api-reference)
-11. [Database Schema](#database-schema)
-12. [Environment Variables](#environment-variables)
-13. [Broker Catalogue](#broker-catalogue)
-14. [International Markets](#international-markets)
-15. [Resilience Architecture](#resilience-architecture)
-16. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
+4. [Market Replay Testing](#market-replay-testing)
+5. [Pluggable Strategy System](#pluggable-strategy-system)
+6. [Strategy Configuration UI](#strategy-configuration-ui)
+7. [Edge Integration](#edge-integration)
+8. [MACD-V Strategy](#macd-v-strategy)
+9. [File Map — Backend](#file-map--backend)
+10. [File Map — Frontend](#file-map--frontend)
+11. [API Reference](#api-reference)
+12. [Database Schema](#database-schema)
+13. [Environment Variables](#environment-variables)
+14. [Broker Catalogue](#broker-catalogue)
+15. [International Markets](#international-markets)
+16. [Resilience Architecture](#resilience-architecture)
+17. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
 
 ---
 
@@ -135,6 +144,7 @@ Dashboard: `http://localhost:8002`
 - **MongoDB is required** for startup and persistence.
 - **Default tickers** are seeded automatically for fresh databases.
 - **Broker feeds or yfinance** are required for new market prices; cached prices are used only after a real quote has been stored.
+- **Market replay imports** require yfinance or Alpaca market-data credentials, depending on the selected source. Imported bars are stored locally in MongoDB before playback.
 - **Paper trading** remains available as a trading safety mode, but it is not a demo runtime.
 
 ---
@@ -189,6 +199,17 @@ Add tickers for any of: US, HK (HKEX), AU (ASX), UK (LSE), CA (TSX), CN_SS (Shan
 - **Paper @ Close** — auto-switches from live → paper when US market closes
 - Only triggers on state transitions, not continuously
 
+### Market Replay Testing
+Import a previous trading day's intraday bars, store them as a Pulse replay session, then replay those prices through the normal price path while paper mode is active. This is meant for testing bot behavior against realistic market action: entries, exits, plugin signals, stop-loss behavior, trailing stops, downtrends, reversals, chop, and "never comes back into range" scenarios.
+
+Replay is not random synthetic movement. It uses recorded OHLCV bars from yfinance or Alpaca, converts them into Pulse's internal replay-bar format, and stores them in MongoDB. Once playback is active, `PriceService.get_price()` returns the replay bar close for the requested symbol before checking broker feeds, yfinance, or cache.
+
+Safety rules:
+- Replay can only start while `Simulate 24/7` is enabled.
+- Replay prices are paper/simulation input only.
+- Live mode cannot start a replay session.
+- Symbols not included in the active replay session continue through normal price lookup.
+
 ### Capital Management
 Set a total account balance. Dashboard header tracks: Allocated, Available, Total P&L, Cash Reserve. Over-allocation warning shown on the Add Stock dialog and ticker cards.
 
@@ -203,6 +224,120 @@ Every significant action is recorded: setting changes, ticker CRUD, broker API c
 
 ### Pluggable Signal Strategies
 Drop-in Python files that generate BUY / SELL / HOLD signals. Strategies run before bracket logic and can override it completely. Hot-reload from disk without restarting the server. Full details in the [Pluggable Strategy System](#pluggable-strategy-system) section.
+
+---
+
+## Market Replay Testing
+
+Market replay is the recommended way to test Sentinel Pulse outside live market hours. It gives the bot real historical price action instead of static after-hours quotes or random synthetic ticks.
+
+### What Replay Tests
+
+Use replay sessions to evaluate:
+- Whether the bot buys when a ticker enters range.
+- Whether sell, stop-loss, trailing stop, and take-profit behavior trigger as expected.
+- How strategy plugins react to real intraday movement.
+- Whether a downtrend causes a controlled loss exit or an unwanted hold.
+- Whether repeated rebrackets, cooldowns, partial fills, and broker-allocation logic behave correctly.
+- Whether WebSocket updates, trade logs, audit logs, and P&L calculations stay coherent during faster-than-real-time movement.
+
+### Data Model
+
+Imported data is stored in Pulse-owned MongoDB collections:
+
+| Collection | Purpose |
+|------------|---------|
+| `replay_sessions` | One document per imported replay session. Stores `session_id`, source, symbols, trading date, interval, bar count, import time, and provider metadata. |
+| `replay_bars` | One normalized OHLCV document per symbol per timestamp. Stores `session_id`, `symbol`, `timestamp`, `open`, `high`, `low`, `close`, `volume`, `vwap`, `trade_count`, and source. |
+
+The replay runtime state is stored in `settings` under `key: "active_replay"`.
+
+### Import Sources
+
+| Source | Endpoint | Notes |
+|--------|----------|-------|
+| yfinance | `POST /api/replay/import/yfinance` | Good default/free importer for recent intraday sessions. Supports `1m`, `2m`, `5m`, `15m`, `30m`, and `60m`. 1-minute intraday history is provider-limited, so import recent dates. |
+| Alpaca | `POST /api/replay/import/alpaca` | Uses Alpaca historical stock bars from `https://data.alpaca.markets/v2/stocks/bars`. Supports `iex`, `sip`, and `otc` feeds depending on account permissions. Handles pagination through `next_page_token`. |
+
+### yfinance Import Example
+
+```bash
+curl -X POST http://localhost:8002/api/replay/import/yfinance \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbols": ["SPY", "TSLA"],
+    "trading_date": "2026-06-09",
+    "interval": "1m",
+    "include_prepost": false,
+    "name": "SPY TSLA previous session"
+  }'
+```
+
+### Alpaca Import Example
+
+```bash
+curl -X POST http://localhost:8002/api/replay/import/alpaca \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbols": ["SPY", "TSLA"],
+    "trading_date": "2026-06-09",
+    "interval": "1m",
+    "feed": "iex",
+    "api_key": "<alpaca-key>",
+    "api_secret": "<alpaca-secret>",
+    "name": "SPY TSLA Alpaca IEX"
+  }'
+```
+
+Alpaca credentials can also come from environment variables: `ALPACA_API_KEY` / `ALPACA_API_SECRET` or `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`.
+
+### Playback Flow
+
+1. Enable `Simulate 24/7` so the engine is in paper mode.
+2. Import yfinance or Alpaca bars for the symbols/date you want to test.
+3. Start the replay session with `POST /api/replay/sessions/{session_id}/start`.
+4. Start or resume the bot.
+5. Watch ticker prices, strategy decisions, trades, logs, and P&L as the replay advances.
+6. Stop replay with `POST /api/replay/stop`.
+
+Start example:
+
+```bash
+curl -X POST http://localhost:8002/api/replay/sessions/<session_id>/start \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "speed": 30, "loop": false }'
+```
+
+`speed` is a playback multiplier. `30` means 30 seconds of market time advance for every real second. `loop: true` wraps back to the beginning after the final bar.
+
+### Price Resolution During Replay
+
+When replay is active and the engine is in paper mode, `PriceService.get_price(symbol)` resolves prices in this order:
+
+1. Active replay bar for the symbol.
+2. Fresh broker feed, if configured and preferred.
+3. yfinance live/latest quote.
+4. Cached quote.
+
+If the active replay session does not contain the requested symbol, that symbol falls through to normal broker/yfinance/cache behavior.
+
+### Current Scope
+
+Implemented now:
+- Backend replay storage.
+- yfinance import.
+- Alpaca import.
+- Replay status/list/detail endpoints.
+- Replay start/stop.
+- Replay price source integration for paper mode.
+
+Not yet implemented:
+- A dedicated frontend replay-management panel.
+- A one-click "record today's market" live recorder.
+- Trade-by-trade replay reports or scenario labeling.
 
 ---
 
@@ -712,7 +847,7 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `server.py` | FastAPI app, `lifespan()` startup (index creation, broker init, resilience init, background task launch), `trading_loop()` (5s tick, per-ticker market gate), `price_broadcast_loop()` (2s WebSocket push), router registration |
+| `server.py` | FastAPI app, `lifespan()` startup (index creation, replay indexes, broker init, resilience init, background task launch), `trading_loop()` (5s tick, per-ticker market gate), `price_broadcast_loop()` (2s WebSocket push), router registration |
 | `deps.py` | Shared singletons populated at startup: `db`, `engine`, `ws_manager`, `telegram_service`, `price_service`, `broker_mgr`, `tracer`, `logger`. Import this in any module that needs shared state. |
 | `schemas.py` | All Pydantic models: `TickerConfig` (full ticker doc), `TickerCreate`, `TickerUpdate`, `TradeRecord`, `Position`, `TelegramConfig`, `SettingsUpdate`, `BetaRegistration`, `FeedbackReport`, `PresetStrategy`, `BrokerTestRequest` |
 
@@ -750,7 +885,7 @@ Use this map to quickly locate the code behind any feature.
 
 | File | What lives here |
 |------|----------------|
-| `price_service.py` | `PriceService` singleton. `get_price()` — tries broker feed first, falls back to yfinance, then cache drift. `get_avg_price()` — moving average. `get_ohlcv()` — full OHLCV DataFrame for strategy history. `get_enriched_market_data()` — builds the `market_data` dict injected into `generate_signals()`. `get_fx_rates()` — all foreign currency→USD rates (5-min cache). `update_broker_price()` — live broker WebSocket price update. Also provides volume z-score analysis: `get_volume_zscore()`, `get_volume_ratio()`, `get_signal_strength()` for Edge-style signal scoring. |
+| `price_service.py` | `PriceService` singleton. `get_price()` — in paper replay mode checks active replay bars first, then broker feed, yfinance, then cache. `get_avg_price()` — moving average. `get_ohlcv()` — full OHLCV DataFrame for strategy history. `get_enriched_market_data()` — builds the `market_data` dict injected into `generate_signals()`. `get_fx_rates()` — all foreign currency→USD rates (5-min cache). `update_broker_price()` — live broker WebSocket price update. Also provides volume z-score analysis: `get_volume_zscore()`, `get_volume_ratio()`, `get_signal_strength()` for Edge-style signal scoring. |
 | `markets.py` | `MarketConfig` dataclass with `is_open_now()`, `is_opening_window()`, `is_past_opening_window()`, `status()`, `hours_display()`, `to_dict()`. `MARKETS` dict: `US`, `HK`, `AU`, `UK`, `CA`, `CN_SS`, `CN_SZ`. `detect_market_from_symbol()` — auto-detects market from suffix (`.HK`, `.AX`, `.L`, `.TO`, `.SS`, `.SZ`). `SUFFIX_TO_MARKET` lookup. |
 
 ### Edge Integration
@@ -771,6 +906,7 @@ Use this map to quickly locate the code behind any feature.
 | `email_service.py` | SMTP email delivery for feedback reports. Rate limited to 2/hour. `send_feedback_email()` |
 | `ws_manager.py` | `ConnectionManager` — WebSocket connection pool, `connect()`, `disconnect()`, `broadcast()` (send JSON to all connected clients) |
 | `telemetry.py` | OpenTelemetry setup: `setup_telemetry()`, `get_tracer()`. Configures FastAPI auto-instrumentation and optional OTLP export. |
+| `replay_service.py` | Market replay import/playback service. Normalizes yfinance and Alpaca bars into Pulse replay-bar documents, stores sessions in MongoDB, manages `active_replay`, and resolves active replay prices for paper-mode playback. |
 
 ### API Routes
 
@@ -783,6 +919,7 @@ Use this map to quickly locate the code behind any feature.
 | `routes/health.py` | `/api/health` | Engine status, mode, WebSocket clients, market state, MongoDB connection |
 | `routes/bot.py` | `/api/bot` | `POST /start`, `POST /stop`, `POST /pause`, `POST /resume`, `GET /status`, Telegram config endpoints |
 | `routes/system.py` | `/api` | `GET /audit-logs` (filterable), `GET /audit-logs/event-types`, `GET /rate-limits` (all broker resilience statuses), `GET /rate-limits/{id}`, `POST /rate-limits/{id}` (update config), `POST /circuit/{id}/reset`, `GET /price-sources`, `POST /price-sources/toggle` |
+| `routes/replay.py` | `/api/replay` | Replay session API: list/detail/status, import yfinance bars, import Alpaca bars, start stored-session playback, stop playback. Mounted behind authentication and guarded by paper mode for start. |
 | `routes/markets.py` | `/api` | `GET /markets` (all 7 markets with live status), `GET /markets/{code}`, `GET /fx-rates`, `GET /settings/currency-display`, `POST /settings/currency-display` |
 | `routes/strategies.py` | `/api/strategies` | `GET /registry` (all signal strategies with metadata + JSON schema), `GET /registry/{name}`, `GET /presets` (bracket templates), `POST /reload` (hot-reload from disk) |
 | `routes/edge.py` | `/api/edge` | Edge integration endpoints: `GET /status`, `GET /tickers`, `GET /positions/{symbol}`, `POST /tickers/{symbol}/decision`, `POST /tickers/{symbol}/trailing`, `GET /account/status`, `POST /signals/evaluate` |
@@ -802,6 +939,8 @@ All tests live in `backend/tests/`. Each file maps to a specific feature:
 | `test_manual_sell_feature.py` | Market sell, limit sell, cancel pending sell |
 | `test_rebracket_params.py` | Auto-rebracket trigger, threshold, spread, cooldown, lookback |
 | `test_trading_mode_features.py` | Paper/live mode, `simulate_24_7`, `market_hours_only`, Live@Open/Paper@Close auto-switch |
+| `test_replay_service_units.py` | Replay session IDs, replay bar normalization, Alpaca bar normalization |
+| `test_market_replay_static.py` | Replay service/route contract, router registration, price-service replay source ordering |
 | `test_order_type_feature.py` | MARKET vs LIMIT order types per side |
 | `test_trade_metadata_feature.py` | Full trade record metadata (entry, target, avg, value, broker results) |
 | `test_trading_cooldown.py` | 30-second cooldown between trades per ticker |
@@ -930,6 +1069,17 @@ All tests live in `backend/tests/`. Each file maps to a specific feature:
 | GET | `/api/fx-rates` | Live FX rates → USD for all foreign markets |
 | GET | `/api/settings/currency-display` | Get saved display preference ('usd'\|'native') |
 | POST | `/api/settings/currency-display?mode=native` | Save display preference |
+
+### Market Replay
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/replay/sessions` | List stored replay sessions, newest first |
+| GET | `/api/replay/sessions/{session_id}` | Get one replay session and its stored bars |
+| GET | `/api/replay/status` | Current active replay state from settings |
+| POST | `/api/replay/import/yfinance` | Import historical intraday bars from yfinance into Pulse replay storage |
+| POST | `/api/replay/import/alpaca` | Import historical stock bars from Alpaca into Pulse replay storage |
+| POST | `/api/replay/sessions/{session_id}/start` | Start playback for a stored session; requires `Simulate 24/7` paper mode |
+| POST | `/api/replay/stop` | Stop active replay playback |
 
 ### Resilience (Rate Limits + Circuit Breakers)
 | Method | Endpoint | Description |
@@ -1079,6 +1229,35 @@ Documents keyed by `"key"` field:
 | `cash_reserve` | float | Accumulated take-profit cash |
 | `brokers_resilience` | object | Per-broker resilience config map |
 | `currency_display` | string | "usd" or "native" — price display mode |
+| `active_replay` | object | Current replay playback state: active flag, session id, symbols, speed, loop flag, start time, first/last timestamps |
+
+### `replay_sessions` collection
+```
+session_id        string   — stable id built from source/date/interval/symbols
+name              string
+source            string   — "yfinance" or "alpaca"
+symbols           array    — uppercase ticker symbols
+trading_date      string   — YYYY-MM-DD
+interval          string   — "1m", "2m", "5m", "15m", "30m", or "60m"
+bar_count         int
+imported_at       ISO string
+provider_metadata object   — source-specific flags such as include_prepost/feed
+```
+
+### `replay_bars` collection
+```
+session_id   string
+source       string   — "yfinance" or "alpaca"
+symbol       string
+timestamp    ISO string in UTC
+open         float
+high         float
+low          float
+close        float    — replay price used by PriceService during playback
+volume       float
+vwap         float?
+trade_count  int?
+```
 
 ### `audit_logs` collection
 ```
@@ -1120,6 +1299,8 @@ details      object   — event-specific payload
 | `PULSE_API_URL` | No | Sentinel Edge URL for OTel auto-discovery |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector URL (e.g. Jaeger, Grafana Tempo) |
 | `OTEL_CONSOLE_EXPORT` | No | Set `true` to print spans to console |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | No | Optional default credentials for Alpaca replay imports |
+| `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | No | Alpaca-compatible alternate env names for replay imports |
 
 ### Frontend — `frontend/.env`
 | Variable | Required | Description |
