@@ -127,6 +127,28 @@ function Wait-SentinelPulseFrontend {
     return $false
 }
 
+function Resolve-SentinelPulseFrontendPort {
+    param([int]$RequestedPort, [int]$MaxAttempts = 50)
+    if (-not (Test-PortOpen -Port $RequestedPort)) { return $RequestedPort }
+    if (Test-SentinelPulseFrontend -Port $RequestedPort) { return $RequestedPort }
+
+    for ($port = $RequestedPort + 1; $port -le ($RequestedPort + $MaxAttempts); $port++) {
+        if ((Test-PortOpen -Port $port) -and (Test-SentinelPulseFrontend -Port $port)) {
+            Write-Status "Found existing Sentinel Pulse frontend on port $port" "WARN"
+            return $port
+        }
+    }
+
+    for ($port = $RequestedPort + 1; $port -le ($RequestedPort + $MaxAttempts); $port++) {
+        if (-not (Test-PortOpen -Port $port)) {
+            Write-Status "Frontend port $RequestedPort is used by another app; using port $port for Sentinel Pulse UI" "WARN"
+            return $port
+        }
+    }
+
+    throw "Frontend port $RequestedPort is already in use by another frontend, and no free frontend port was found."
+}
+
 function Wait-PortAttempts {
     param([int]$Port, [int]$Attempts = 3, [int]$IntervalSeconds = 3)
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
@@ -616,6 +638,10 @@ try {
     Write-Status "Launcher transcript: $TranscriptFile"
     Write-Status "MongoDB data path: $DataPath"
     $env:LOG_FILE = $LogFile
+    $frontendPackage = Join-Path $ProjectRoot "frontend\package.json"
+    if (Test-Path $frontendPackage) {
+        $FrontendPort = Resolve-SentinelPulseFrontendPort -RequestedPort $FrontendPort
+    }
     $localCorsOrigins = @(
         "http://localhost:$FrontendPort",
         "http://127.0.0.1:$FrontendPort",
@@ -686,7 +712,6 @@ try {
     }
 
     $url = ("http://127.0.0.1:{0}" -f $AppPort)
-    $frontendPackage = Join-Path $ProjectRoot "frontend\package.json"
     if (Test-Path $frontendPackage) {
         $frontendRoot = Split-Path -Parent $frontendPackage
         $url = "http://127.0.0.1:$FrontendPort"
@@ -708,7 +733,7 @@ try {
             Write-Status "Frontend UI is ready on port $FrontendPort" "OK"
         } else {
             if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
-                throw "Port $FrontendPort is already in use by another frontend. Stop that service or launch Sentinel Pulse with -FrontendPort <free port>."
+                throw "Port $FrontendPort is already in use by another frontend."
             }
             Write-Status "Frontend UI already running on port $FrontendPort" "WARN"
         }

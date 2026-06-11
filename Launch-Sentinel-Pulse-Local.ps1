@@ -119,6 +119,28 @@ function Wait-SentinelPulseFrontend {
     return $false
 }
 
+function Resolve-SentinelPulseFrontendPort {
+    param([int]$RequestedPort, [int]$MaxAttempts = 50)
+    if (-not (Test-PortOpen -Port $RequestedPort)) { return $RequestedPort }
+    if (Test-SentinelPulseFrontend -Port $RequestedPort) { return $RequestedPort }
+
+    for ($port = $RequestedPort + 1; $port -le ($RequestedPort + $MaxAttempts); $port++) {
+        if ((Test-PortOpen -Port $port) -and (Test-SentinelPulseFrontend -Port $port)) {
+            Write-Status "Found existing Sentinel Pulse frontend on port $port" "WARN"
+            return $port
+        }
+    }
+
+    for ($port = $RequestedPort + 1; $port -le ($RequestedPort + $MaxAttempts); $port++) {
+        if (-not (Test-PortOpen -Port $port)) {
+            Write-Status "Frontend port $RequestedPort is used by another app; using port $port for Sentinel Pulse UI" "WARN"
+            return $port
+        }
+    }
+
+    throw "Frontend port $RequestedPort is already in use by another frontend, and no free frontend port was found."
+}
+
 function Find-Mongo {
     $candidates = @(
         "C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe",
@@ -654,6 +676,7 @@ try {
         Start-OwnedProcess -FilePath $npm -ArgumentList @("install") -WorkingDirectory $Frontend -Visible | Wait-Process
     }
 
+    $FrontendPort = Resolve-SentinelPulseFrontendPort -RequestedPort $FrontendPort
     $backendUrl = "http://127.0.0.1:$BackendPort"
     $frontendUrl = "http://127.0.0.1:$FrontendPort"
     $env:PORT = "$BackendPort"
@@ -700,7 +723,7 @@ try {
         Write-Status "Frontend is ready" "OK"
     } else {
         if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
-            throw "Port $FrontendPort is already in use by another frontend. Stop that service or launch Sentinel Pulse with -FrontendPort <free port>."
+            throw "Port $FrontendPort is already in use by another frontend."
         }
         Write-Status "Frontend already running on port $FrontendPort" "WARN"
     }

@@ -70,7 +70,16 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
                 self.assertIn("function Test-SentinelPulseFrontend", text)
                 self.assertIn('$response.Content -match "Sentinel Pulse"', text)
                 self.assertIn("is already in use by another service", text)
-                self.assertIn("is already in use by another frontend", text)
+
+    def test_windows_launchers_auto_resolve_frontend_port_conflicts(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("function Resolve-SentinelPulseFrontendPort", text)
+                self.assertIn("Found existing Sentinel Pulse frontend on port $port", text)
+                self.assertIn("Frontend port $RequestedPort is used by another app; using port $port", text)
+                self.assertIn("$FrontendPort = Resolve-SentinelPulseFrontendPort -RequestedPort $FrontendPort", text)
+                self.assertIn("no free frontend port was found", text)
 
     def test_vite_dev_server_proxies_api_to_backend(self):
         text = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
