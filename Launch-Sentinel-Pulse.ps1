@@ -81,6 +81,52 @@ function Wait-Port {
     return $false
 }
 
+function Test-SentinelPulseBackend {
+    param([int]$Port)
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -Method Get -TimeoutSec 3
+        $properties = @($health.PSObject.Properties.Name)
+        return (
+            $health.status -eq "online" -and
+            $properties -contains "running" -and
+            $properties -contains "market_open" -and
+            $properties -contains "yfinance"
+        )
+    } catch {
+        return $false
+    }
+}
+
+function Wait-SentinelPulseBackend {
+    param([int]$Port, [int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-SentinelPulseBackend -Port $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Test-SentinelPulseFrontend {
+    param([int]$Port)
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 3
+        return ($response.Content -match "Sentinel Pulse")
+    } catch {
+        return $false
+    }
+}
+
+function Wait-SentinelPulseFrontend {
+    param([int]$Port, [int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-SentinelPulseFrontend -Port $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Wait-PortAttempts {
     param([int]$Port, [int]$Attempts = 3, [int]$IntervalSeconds = 3)
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
@@ -628,8 +674,14 @@ try {
         if (-not (Wait-Port -Port $AppPort -Seconds 30)) {
             throw "Sentinel Pulse did not open port $AppPort. Check $LogFile and backend logs."
         }
+        if (-not (Wait-SentinelPulseBackend -Port $AppPort -Seconds 30)) {
+            throw "Port $AppPort opened, but it is not responding as Sentinel Pulse. Check $LogFile and backend logs."
+        }
         Write-Status "Sentinel Pulse is ready on port $AppPort" "OK"
     } else {
+        if (-not (Test-SentinelPulseBackend -Port $AppPort)) {
+            throw "Port $AppPort is already in use by another service. Stop that service or launch Sentinel Pulse with -AppPort <free port>."
+        }
         Write-Status "Sentinel Pulse already running on port $AppPort" "WARN"
     }
 
@@ -650,8 +702,14 @@ try {
             if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
                 throw "Frontend UI did not open port $FrontendPort. Check $LogFile."
             }
+            if (-not (Wait-SentinelPulseFrontend -Port $FrontendPort -Seconds 30)) {
+                throw "Port $FrontendPort opened, but it is not serving the Sentinel Pulse frontend. Check $LogFile."
+            }
             Write-Status "Frontend UI is ready on port $FrontendPort" "OK"
         } else {
+            if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
+                throw "Port $FrontendPort is already in use by another frontend. Stop that service or launch Sentinel Pulse with -FrontendPort <free port>."
+            }
             Write-Status "Frontend UI already running on port $FrontendPort" "WARN"
         }
     }

@@ -73,6 +73,52 @@ function Wait-Port {
     return $false
 }
 
+function Test-SentinelPulseBackend {
+    param([int]$Port)
+    try {
+        $health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/health" -Method Get -TimeoutSec 3
+        $properties = @($health.PSObject.Properties.Name)
+        return (
+            $health.status -eq "online" -and
+            $properties -contains "running" -and
+            $properties -contains "market_open" -and
+            $properties -contains "yfinance"
+        )
+    } catch {
+        return $false
+    }
+}
+
+function Wait-SentinelPulseBackend {
+    param([int]$Port, [int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-SentinelPulseBackend -Port $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
+function Test-SentinelPulseFrontend {
+    param([int]$Port)
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 3
+        return ($response.Content -match "Sentinel Pulse")
+    } catch {
+        return $false
+    }
+}
+
+function Wait-SentinelPulseFrontend {
+    param([int]$Port, [int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-SentinelPulseFrontend -Port $Port) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
+}
+
 function Find-Mongo {
     $candidates = @(
         "C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe",
@@ -631,8 +677,14 @@ try {
         if (-not (Wait-Port -Port $BackendPort -Seconds 45)) {
             throw "Backend did not open port $BackendPort. Check $LogFile."
         }
+        if (-not (Wait-SentinelPulseBackend -Port $BackendPort -Seconds 30)) {
+            throw "Port $BackendPort opened, but it is not responding as Sentinel Pulse. Check $LogFile."
+        }
         Write-Status "Backend is ready" "OK"
     } else {
+        if (-not (Test-SentinelPulseBackend -Port $BackendPort)) {
+            throw "Port $BackendPort is already in use by another service. Stop that service or launch Sentinel Pulse with -BackendPort <free port>."
+        }
         Write-Status "Backend already running on port $BackendPort" "WARN"
     }
 
@@ -642,8 +694,14 @@ try {
         if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
             throw "Frontend did not open port $FrontendPort. Check $LogFile."
         }
+        if (-not (Wait-SentinelPulseFrontend -Port $FrontendPort -Seconds 30)) {
+            throw "Port $FrontendPort opened, but it is not serving the Sentinel Pulse frontend. Check $LogFile."
+        }
         Write-Status "Frontend is ready" "OK"
     } else {
+        if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
+            throw "Port $FrontendPort is already in use by another frontend. Stop that service or launch Sentinel Pulse with -FrontendPort <free port>."
+        }
         Write-Status "Frontend already running on port $FrontendPort" "WARN"
     }
 

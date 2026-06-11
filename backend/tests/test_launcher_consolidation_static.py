@@ -59,6 +59,19 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
                 self.assertIn('$env:REACT_APP_BACKEND_URL = ""', text)
                 self.assertNotIn('$env:VITE_BACKEND_URL = $backendUrl', text)
 
+    def test_windows_launchers_verify_existing_ports_are_sentinel_pulse(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("function Test-SentinelPulseBackend", text)
+                self.assertIn("http://127.0.0.1:$Port/api/health", text)
+                self.assertIn('$health.status -eq "online"', text)
+                self.assertIn('"market_open"', text)
+                self.assertIn("function Test-SentinelPulseFrontend", text)
+                self.assertIn('$response.Content -match "Sentinel Pulse"', text)
+                self.assertIn("is already in use by another service", text)
+                self.assertIn("is already in use by another frontend", text)
+
     def test_vite_dev_server_proxies_api_to_backend(self):
         text = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
         self.assertIn("VITE_BACKEND_URL", text)
