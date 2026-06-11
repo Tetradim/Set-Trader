@@ -122,8 +122,12 @@ class PriceService:
                 from replay_service import get_active_replay_price
                 replay_price = await get_active_replay_price(deps.db, symbol, now)
                 if replay_price:
-                    self._price_source[symbol] = f"replay:{replay_price['session_id']}"
-                    return round(float(replay_price["price"]), 2)
+                    replay_value = float(replay_price["price"])
+                    if not math.isfinite(replay_value) or replay_value <= 0:
+                        deps.logger.warning("Invalid replay price for %s skipped: %s", symbol, replay_price["price"])
+                    else:
+                        self._price_source[symbol] = f"replay:{replay_price['session_id']}"
+                        return round(replay_value, 2)
             except Exception as e:
                 deps.logger.warning(f"Replay price lookup failed for {symbol}: {e}")
         
@@ -131,10 +135,13 @@ class PriceService:
         if self.prefer_broker_feeds and symbol in self._broker_streams:
             broker_data = self._broker_streams[symbol]
             age = (now - broker_data["timestamp"]).total_seconds()
-            if age < 30:  # Broker data fresh within 30 seconds
+            broker_price = float(broker_data["price"])
+            if age < 30 and math.isfinite(broker_price) and broker_price > 0:
                 self._price_source[symbol] = f"broker:{broker_data['broker_id']}"
                 self.record_broker_success(symbol)
-                return broker_data["price"]
+                return broker_price
+            elif age < 30:
+                self.record_broker_failure(symbol, "invalid price")
             else:
                 self.record_broker_failure(symbol, "stale data")
         
@@ -143,9 +150,11 @@ class PriceService:
         last = self._last_fetch.get(symbol)
 
         if cached and last and (now - last).total_seconds() < 15:
-            self.record_cache_hit(symbol)
-            return round(cached["price"], 2)
-        
+            cached_price = float(cached["price"])
+            if math.isfinite(cached_price) and cached_price > 0:
+                self.record_cache_hit(symbol)
+                return round(cached_price, 2)
+
         # Rate limit yfinance calls
         await self._rate_limit_yfinance(symbol)
         
@@ -155,22 +164,24 @@ class PriceService:
                 async with self._yfinance_semaphore:
                     loop = asyncio.get_event_loop()
                     price = await loop.run_in_executor(None, self._fetch_yf, symbol)
-                    if price > 0:
+                    if math.isfinite(price) and price > 0:
                         self._cache[symbol] = {"price": price}
                         self._last_fetch[symbol] = now
                         self._price_source[symbol] = "yfinance"
                         self.record_yfinance_success(symbol)
                         return price
                     else:
-                        self.record_yfinance_failure(symbol, "zero price")
+                        self.record_yfinance_failure(symbol, "zero or invalid price")
             except Exception as e:
                 deps.logger.warning(f"yfinance error for {symbol}: {e}")
                 self.record_yfinance_failure(symbol, str(e))
 
         # Fallback to the most recent real cached quote.
         if cached:
-            self._price_source[symbol] = "cache"
-            return round(cached["price"], 2)
+            cached_price = float(cached["price"])
+            if math.isfinite(cached_price) and cached_price > 0:
+                self._price_source[symbol] = "cache"
+                return round(cached_price, 2)
 
         self._price_source[symbol] = "unavailable"
         raise RuntimeError(f"No live or cached price available for {symbol}")
@@ -195,7 +206,9 @@ class PriceService:
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="1d")
             if not hist.empty:
-                return round(float(hist["Close"].iloc[-1]), 2)
+                price = float(hist["Close"].iloc[-1])
+                if math.isfinite(price) and price > 0:
+                    return round(price, 2)
         except Exception:
             pass
         return 0.0
@@ -219,7 +232,9 @@ class PriceService:
             period = "1mo" if days <= 30 else "3mo" if days <= 90 else "1y"
             hist = ticker.history(period=period)
             if not hist.empty:
-                return round(float(hist["Close"].tail(days).mean()), 2)
+                avg = float(hist["Close"].tail(days).mean())
+                if math.isfinite(avg) and avg > 0:
+                    return round(avg, 2)
         except Exception:
             pass
         return 0.0

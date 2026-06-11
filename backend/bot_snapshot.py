@@ -1,9 +1,20 @@
 """Shared bot/watchlist state snapshot builder."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import deps
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 async def build_bot_snapshot() -> dict[str, Any]:
@@ -18,7 +29,12 @@ async def build_bot_snapshot() -> dict[str, Any]:
         if not symbol:
             continue
         try:
-            prices[symbol] = await deps.price_service.get_price(symbol)
+            price = await deps.price_service.get_price(symbol)
+            if not math.isfinite(price) or price <= 0:
+                price_errors[symbol] = "Non-finite price skipped"
+                deps.logger.warning("Non-finite price skipped for %s while building bot snapshot: %s", symbol, price)
+            else:
+                prices[symbol] = price
         except Exception as exc:
             price_errors[symbol] = str(exc)
             deps.logger.warning("Price lookup failed for %s while building bot snapshot: %s", symbol, exc)
@@ -28,6 +44,8 @@ async def build_bot_snapshot() -> dict[str, Any]:
     for symbol, pos in deps.engine._positions.items():
         if pos.get("qty", 0) > 0:
             current_price = prices.get(symbol, pos.get("avg_entry", 0))
+            if not math.isfinite(float(current_price)):
+                current_price = 0
             market_value = round(current_price * pos["qty"], 2)
             positions[symbol] = {
                 "symbol": symbol,
@@ -54,7 +72,7 @@ async def build_bot_snapshot() -> dict[str, Any]:
 
     trades = await deps.db.trades.find({}, {"_id": 0}).sort("timestamp", -1).limit(50).to_list(50)
 
-    return {
+    return _json_safe({
         "tickers": tickers,
         "prices": prices,
         "price_sources": price_sources,
@@ -76,4 +94,4 @@ async def build_bot_snapshot() -> dict[str, Any]:
         "live_during_market_hours": deps.engine.live_during_market_hours,
         "paper_after_hours": deps.engine.paper_after_hours,
         "replay": replay_doc.get("value") if replay_doc else None,
-    }
+    })

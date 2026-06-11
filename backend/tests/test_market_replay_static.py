@@ -37,6 +37,25 @@ class MarketReplayStaticTest(unittest.TestCase):
 
         self.assertIn("get_active_replay_price", text)
         self.assertIn('self._price_source[symbol] = f"replay:{replay_price', text)
+        self.assertIn("math.isfinite(replay_value)", text)
+        self.assertIn("Invalid replay price", text)
+
+    def test_replay_import_and_playback_reject_non_finite_prices(self):
+        text = self.read("backend/replay_service.py")
+
+        self.assertIn("import math", text)
+        self.assertIn("def _is_finite_positive", text)
+        self.assertIn("if not _is_finite_positive(close):", text)
+        self.assertIn("async def _find_valid_replay_bar", text)
+        self.assertIn("if not _is_finite_positive(bar.get(\"close\")):", text)
+        self.assertIn("return None", text)
+
+    def test_snapshot_never_emits_non_finite_prices(self):
+        text = self.read("backend/bot_snapshot.py")
+
+        self.assertIn("import math", text)
+        self.assertIn("math.isfinite(price)", text)
+        self.assertIn("Non-finite price skipped", text)
 
     def test_replay_router_is_mounted_with_authenticated_api(self):
         text = self.read("backend/server.py")

@@ -5,6 +5,7 @@ are import sources only; playback uses the stored replay_bars collection.
 """
 import asyncio
 import hashlib
+import math
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
@@ -35,9 +36,18 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     if value is None:
         return default
     try:
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else default
     except (TypeError, ValueError):
         return default
+
+
+def _is_finite_positive(value: Any) -> bool:
+    try:
+        number = float(value)
+        return math.isfinite(number) and number > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _to_int_or_none(value: Any) -> int | None:
@@ -109,6 +119,8 @@ def normalize_alpaca_bars(session_id: str, payload: dict[str, Any]) -> list[dict
             timestamp = item.get("t")
             if close is None or not timestamp:
                 continue
+            if not _is_finite_positive(close):
+                continue
             bars.append(build_replay_bar(
                 session_id=session_id,
                 source="alpaca",
@@ -144,6 +156,8 @@ def normalize_yfinance_frame(session_id: str, symbols: Iterable[str], frame: Any
         for timestamp, row in symbol_frame.iterrows():
             close = row.get("Close")
             if close is None:
+                continue
+            if not _is_finite_positive(close):
                 continue
             bars.append(build_replay_bar(
                 session_id=session_id,
@@ -382,6 +396,26 @@ class MarketReplayService:
         )
 
 
+async def _find_valid_replay_bar(db: Any, session_id: str, symbol: str, target_iso: str) -> dict[str, Any] | None:
+    query = {"session_id": session_id, "symbol": symbol, "timestamp": {"$lte": target_iso}}
+    recent_bars = await db[REPLAY_BARS_COLLECTION].find(query, {"_id": 0}).sort("timestamp", -1).limit(500).to_list(500)
+    for bar in recent_bars:
+        if not _is_finite_positive(bar.get("close")):
+            continue
+        return bar
+
+    earliest_bars = await db[REPLAY_BARS_COLLECTION].find(
+        {"session_id": session_id, "symbol": symbol},
+        {"_id": 0},
+    ).sort("timestamp", 1).limit(500).to_list(500)
+    for bar in earliest_bars:
+        if not _is_finite_positive(bar.get("close")):
+            continue
+        return bar
+
+    return None
+
+
 async def get_active_replay_price(db: Any, symbol: str, now: datetime | None = None) -> dict[str, Any] | None:
     doc = await db.settings.find_one({"key": ACTIVE_REPLAY_SETTING}, {"_id": 0})
     state = doc.get("value", {}) if doc else {}
@@ -408,14 +442,7 @@ async def get_active_replay_price(db: Any, symbol: str, now: datetime | None = N
 
     target = _parse_utc_iso(first_timestamp) + timedelta(seconds=elapsed)
     target_iso = target.isoformat()
-    query = {"session_id": session_id, "symbol": clean_symbol, "timestamp": {"$lte": target_iso}}
-    bar = await db[REPLAY_BARS_COLLECTION].find_one(query, {"_id": 0}, sort=[("timestamp", -1)])
-    if not bar:
-        bar = await db[REPLAY_BARS_COLLECTION].find_one(
-            {"session_id": session_id, "symbol": clean_symbol},
-            {"_id": 0},
-            sort=[("timestamp", 1)],
-        )
+    bar = await _find_valid_replay_bar(db, session_id, clean_symbol, target_iso)
     if not bar:
         return None
 
