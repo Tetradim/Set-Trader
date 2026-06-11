@@ -5,6 +5,7 @@ import {
   Bell,
   Briefcase,
   Crosshair,
+  FlaskConical,
   Globe,
   History,
   LayoutDashboard,
@@ -32,6 +33,7 @@ export const GROUP_NAV: Array<{ id: DashboardGroupId; icon: IconComponent; title
 
 export const TAB_DETAILS: Record<DashboardTabId, { label: string; icon: IconComponent }> = {
   watchlist: { label: 'Watchlist', icon: LayoutDashboard },
+  'test-lab': { label: 'Test Lab', icon: FlaskConical },
   portfolio: { label: 'Portfolio', icon: Briefcase },
   positions: { label: 'Positions', icon: Crosshair },
   orders: { label: 'Orders', icon: List },

@@ -136,9 +136,15 @@ export function WatchlistTab() {
 
   const runBotAction = useCallback(async (action: 'start' | 'pause' | 'stop') => {
     try {
-      const result = await apiFetch(`/api/bot/${action}`, { method: 'POST' });
+      const result = await apiFetch(`/api/bot/${action}`, {
+        method: 'POST',
+        body: action === 'pause'
+          ? undefined
+          : JSON.stringify(action === 'start' ? { enable_all: true } : { disable_all: true }),
+      });
       if (typeof result.running === 'boolean') useStore.getState().setRunning(result.running);
       if (typeof result.paused === 'boolean') useStore.getState().setPaused(result.paused);
+      if (Array.isArray(result.tickers)) useStore.getState().setTickers(result.tickers);
     } catch (error: any) {
       toast.error(error.message || `Failed to ${action} bot`);
     }

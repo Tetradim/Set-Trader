@@ -4,6 +4,7 @@ import { TabLoadingState } from './tabs/TabStates';
 import type { DashboardTabId } from '@/lib/dashboard-tabs';
 
 const PortfolioTab = lazy(() => import('./tabs/PortfolioTab').then((module) => ({ default: module.PortfolioTab })));
+const TestLabTab = lazy(() => import('./tabs/TestLabTab').then((module) => ({ default: module.TestLabTab })));
 const PositionsTab = lazy(() => import('./tabs/PositionsTab').then((module) => ({ default: module.PositionsTab })));
 const HistoryTab = lazy(() => import('./tabs/HistoryTab').then((module) => ({ default: module.HistoryTab })));
 const LogsTab = lazy(() => import('./tabs/LogsTab').then((module) => ({ default: module.LogsTab })));
@@ -33,6 +34,7 @@ function TabFallback() {
 function LazyTabContent({ activeTab }: { activeTab: DashboardTabId }) {
   switch (activeTab) {
     case 'portfolio': return <PortfolioTab />;
+    case 'test-lab': return <TestLabTab />;
     case 'positions': return <PositionsTab />;
     case 'preflight': return <PreflightTab />;
     case 'risk-center': return <RiskCenterTab />;

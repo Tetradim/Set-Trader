@@ -162,8 +162,8 @@ async def trading_loop():
                         deps.logger.warning(f"Skipping {t.get('symbol','?')} — {ce}")
                     except Exception as te:
                         deps.logger.error(f"Evaluate {t.get('symbol','?')} error: {te}", exc_info=True)
-            # Always check pending limit sells (even when paused — user explicitly requested)
-            if deps.engine._pending_sells:
+            # Pending limit sells may continue while paused, but a full stop must stop all bot activity.
+            if deps.engine.running and deps.engine._pending_sells:
                 await deps.engine.check_pending_sells()
         except Exception as e:
             deps.logger.error(f"Trading loop error: {e}", exc_info=True)

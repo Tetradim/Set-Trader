@@ -8,8 +8,20 @@ const watchlistSource = fs.readFileSync(watchlistPath, 'utf8');
 
 assert.match(
   watchlistSource,
-  /const runBotAction = useCallback\(async \(action: 'start' \| 'pause' \| 'stop'\) => \{[\s\S]*apiFetch\(`\/api\/bot\/\$\{action\}`,\s*\{\s*method:\s*'POST'\s*\}\)/,
+  /const runBotAction = useCallback\(async \(action: 'start' \| 'pause' \| 'stop'\) => \{[\s\S]*apiFetch\(`\/api\/bot\/\$\{action\}`,[\s\S]*method:\s*'POST'/,
   'Watchlist bot action helper should call authenticated REST bot endpoints',
+);
+
+assert.match(
+  watchlistSource,
+  /action === 'start' \? \{ enable_all: true \} : \{ disable_all: true \}/,
+  'Watchlist Start All and Stop controls should send explicit all-ticker intent',
+);
+
+assert.match(
+  watchlistSource,
+  /if \(Array\.isArray\(result\.tickers\)\) useStore\.getState\(\)\.setTickers\(result\.tickers\)/,
+  'Watchlist bot controls should apply returned ticker enabled states',
 );
 
 assert.match(

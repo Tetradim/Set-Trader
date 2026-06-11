@@ -1,12 +1,12 @@
 import { useStore } from '@/stores/useStore';
-import { useWebSocket } from '@/hooks/useWebSocket';
 import { useEffect } from 'react';
 import { AddTickerDialog } from './AddTickerDialog';
 import { FeedbackDialog } from './FeedbackDialog';
 import { Play, Square } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 
 export function Header() {
-  const { send }       = useWebSocket();
   const running        = useStore((s) => s.running);
   const connected      = useStore((s) => s.connected);
   const marketOpen     = useStore((s) => s.marketOpen);
@@ -27,6 +27,20 @@ export function Header() {
   }, [themeMode, accentColor]);
 
   const modeLabel = simulate247 ? 'PAPER' : 'LIVE';
+
+  const runBotAction = async (action: 'start' | 'stop') => {
+    try {
+      const result = await apiFetch(`/api/bot/${action}`, {
+        method: 'POST',
+        body: JSON.stringify(action === 'start' ? { enable_all: true } : { disable_all: true }),
+      });
+      if (typeof result.running === 'boolean') useStore.getState().setRunning(result.running);
+      if (typeof result.paused === 'boolean') useStore.getState().setPaused(result.paused);
+      if (Array.isArray(result.tickers)) useStore.getState().setTickers(result.tickers);
+    } catch (error: any) {
+      toast.error(error.message || `Failed to ${action} bots`);
+    }
+  };
 
   return (
     <header className="sp-header" data-testid="header">
@@ -81,7 +95,7 @@ export function Header() {
           className="sp-start-btn"
           style={{ marginLeft: 0 }}
           data-testid="start-bot-btn"
-          onClick={() => send('START_BOT')}
+          onClick={() => runBotAction('start')}
         >
           <Play size={11} style={{ display: 'inline', marginRight: 4 }} fill="currentColor" />
           START
@@ -91,7 +105,7 @@ export function Header() {
           className="sp-start-btn"
           style={{ marginLeft: 0, color: '#e03040', borderColor: 'rgba(192,40,46,0.35)' }}
           data-testid="stop-bot-btn"
-          onClick={() => send('STOP_BOT')}
+          onClick={() => runBotAction('stop')}
         >
           <Square size={11} style={{ display: 'inline', marginRight: 4 }} fill="currentColor" />
           STOP

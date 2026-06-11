@@ -1,19 +1,36 @@
 """Bot control endpoints."""
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 import deps
 
 router = APIRouter()
 
 
+class BotControlRequest(BaseModel):
+    enable_all: bool = True
+    disable_all: bool = True
+
+
+async def _broadcast_tickers():
+    docs = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
+    await deps.ws_manager.broadcast({"type": "TICKERS_REORDERED", "tickers": docs})
+    return docs
+
+
 @router.post("/bot/start")
-async def start_bot():
+async def start_bot(body: BotControlRequest | None = None):
+    settings = body or BotControlRequest()
+    tickers = None
+    if settings.enable_all:
+        await deps.db.tickers.update_many({}, {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": ""}})
+        tickers = await _broadcast_tickers()
     deps.engine.running = True
     deps.engine.paused = False
     await deps.engine.save_state()
     await deps.ws_manager.broadcast({"type": "BOT_STATUS", "running": True, "paused": False})
-    deps.logger.info("Bot STARTED via API")
-    return {"running": True, "paused": False}
+    deps.logger.info("Bot STARTED via API; enable_all=%s", settings.enable_all)
+    return {"running": True, "paused": False, "tickers": tickers}
 
 
 @router.post("/bot/pause")
@@ -42,10 +59,16 @@ async def revert_ticker_bracket(symbol: str):
 
 
 @router.post("/bot/stop")
-async def stop_bot():
+async def stop_bot(body: BotControlRequest | None = None):
+    settings = body or BotControlRequest()
     deps.engine.running = False
     deps.engine.paused = False
+    deps.engine._pending_sells.clear()
+    tickers = None
+    if settings.disable_all:
+        await deps.db.tickers.update_many({}, {"$set": {"enabled": False}})
+        tickers = await _broadcast_tickers()
     await deps.engine.save_state()
     await deps.ws_manager.broadcast({"type": "BOT_STATUS", "running": False, "paused": False})
-    deps.logger.info("Bot STOPPED via API")
-    return {"running": False, "paused": False}
+    deps.logger.info("Bot STOPPED via API; disable_all=%s", settings.disable_all)
+    return {"running": False, "paused": False, "tickers": tickers}
