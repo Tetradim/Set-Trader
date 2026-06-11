@@ -116,6 +116,16 @@ class PriceService:
     
     async def get_price(self, symbol: str) -> float:
         now = datetime.now(timezone.utc)
+
+        if getattr(deps.engine, "simulate_24_7", False):
+            try:
+                from replay_service import get_active_replay_price
+                replay_price = await get_active_replay_price(deps.db, symbol, now)
+                if replay_price:
+                    self._price_source[symbol] = f"replay:{replay_price['session_id']}"
+                    return round(float(replay_price["price"]), 2)
+            except Exception as e:
+                deps.logger.warning(f"Replay price lookup failed for {symbol}: {e}")
         
         # Try broker feed first if preferred and available
         if self.prefer_broker_feeds and symbol in self._broker_streams:

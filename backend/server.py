@@ -219,6 +219,8 @@ async def lifespan(application: FastAPI):
         await deps.db.profits.create_index("symbol", unique=True)
         await deps.db.audit_logs.create_index("timestamp")
         await deps.db.audit_logs.create_index("event_type")
+        await deps.db.replay_sessions.create_index("session_id", unique=True)
+        await deps.db.replay_bars.create_index([("session_id", 1), ("timestamp", 1), ("symbol", 1)])
         logger.info("Database indexes created")
     except Exception as e:
         deps.logger.warning(f"Failed to create indexes: {e}")
@@ -421,6 +423,7 @@ from routes.slo import router as slo_router
 from routes.notifications import router as notifications_router
 from routes.portfolio import router as portfolio_router
 from routes.logs import router as logs_router
+from routes.replay import router as replay_router
 from auth import get_current_user
 
 api.include_router(health_router)
@@ -446,6 +449,7 @@ api.include_router(slo_router, dependencies=[Depends(get_current_user)])
 api.include_router(notifications_router, dependencies=[Depends(get_current_user)])
 api.include_router(portfolio_router, dependencies=[Depends(get_current_user)])
 api.include_router(logs_router, dependencies=[Depends(get_current_user)])
+api.include_router(replay_router, dependencies=[Depends(get_current_user)])
 
 app.include_router(api)
 
