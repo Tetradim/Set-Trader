@@ -63,6 +63,15 @@ class MarketReplayStaticTest(unittest.TestCase):
         self.assertIn("from routes.replay import router as replay_router", text)
         self.assertIn("api.include_router(replay_router, dependencies=[Depends(get_current_user)])", text)
 
+    def test_empty_replay_imports_are_not_selectable(self):
+        service = self.read("backend/replay_service.py")
+        router = self.read("backend/routes/replay.py")
+
+        self.assertIn("raise ValueError(", service)
+        self.assertIn("Replay import produced no bars", service)
+        self.assertIn('"bar_count": {"$gt": 0}', router)
+        self.assertIn("include_empty", router)
+
 
 if __name__ == "__main__":
     unittest.main()

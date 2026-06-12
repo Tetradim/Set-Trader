@@ -88,6 +88,18 @@ assert.match(
 
 assert.match(
   watchlistSource,
+  /apiFetch\('\/api\/tickers'\)/,
+  'Watchlist should fall back to the tickers endpoint if bot snapshot is unavailable',
+);
+
+assert.match(
+  watchlistSource,
+  /setTickers\(fallbackTickers\)/,
+  'Watchlist fallback should repopulate ticker cards from /api/tickers',
+);
+
+assert.match(
+  watchlistSource,
   /setInterval\(refreshBotSnapshot,\s*3000\)/,
   'Watchlist should refresh bot snapshots every 3 seconds while visible',
 );

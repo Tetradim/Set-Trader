@@ -264,6 +264,11 @@ class MarketReplayService:
         name: str | None = None,
         provider_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if not bars:
+            raise ValueError(
+                "Replay import produced no bars. Check the trading date, ticker symbols, provider access, and interval."
+            )
+
         session_doc = {
             "session_id": session_id,
             "name": name or f"{source} {trading_date.isoformat()} {', '.join(symbols)}",

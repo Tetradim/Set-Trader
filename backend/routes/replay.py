@@ -37,8 +37,12 @@ class StartReplayRequest(BaseModel):
 
 
 @router.get("/replay/sessions")
-async def list_replay_sessions(limit: int = Query(50, ge=1, le=250)):
-    sessions = await deps.db[REPLAY_SESSIONS_COLLECTION].find({}, {"_id": 0}).sort("imported_at", -1).to_list(limit)
+async def list_replay_sessions(
+    limit: int = Query(50, ge=1, le=250),
+    include_empty: bool = False,
+):
+    query = {} if include_empty else {"bar_count": {"$gt": 0}}
+    sessions = await deps.db[REPLAY_SESSIONS_COLLECTION].find(query, {"_id": 0}).sort("imported_at", -1).to_list(limit)
     return {"sessions": sessions}
 
 

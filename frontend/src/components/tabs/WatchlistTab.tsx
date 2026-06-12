@@ -114,6 +114,12 @@ export function WatchlistTab() {
       applyBotSnapshot(snapshot);
     } catch (error) {
       console.warn('Bot snapshot refresh failed', error);
+      try {
+        const fallbackTickers = await apiFetch('/api/tickers');
+        if (Array.isArray(fallbackTickers)) useStore.getState().setTickers(fallbackTickers);
+      } catch (fallbackError) {
+        console.warn('Ticker fallback refresh failed', fallbackError);
+      }
     }
   }, []);
 
