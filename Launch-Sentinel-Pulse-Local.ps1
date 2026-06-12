@@ -415,6 +415,25 @@ function Stop-ProcessTree {
     }
 }
 
+function Stop-PortOwnerProcess {
+    param([int]$Port, [string]$Label)
+    $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        Where-Object { $_ -and $_ -gt 0 })
+    foreach ($owner in $owners) {
+        Write-Status "Replacing existing $Label on port $Port (process $owner)" "WARN"
+        Stop-ProcessTree -ProcessId $owner
+    }
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-PortOpen -Port $Port)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    if (Test-PortOpen -Port $Port) {
+        throw "Port $Port is still in use after stopping existing $Label."
+    }
+}
+
 function Stop-OwnedProcesses {
     for ($i = $OwnedProcesses.Count - 1; $i -ge 0; $i--) {
         $process = $OwnedProcesses[$i]
@@ -694,6 +713,13 @@ try {
         $env:CORS_ORIGINS = $localCorsOrigins
     }
 
+    if (Test-PortOpen -Port $BackendPort) {
+        if (-not (Test-SentinelPulseBackend -Port $BackendPort)) {
+            throw "Port $BackendPort is already in use by another service. Stop that service or launch Sentinel Pulse with -BackendPort <free port>."
+        }
+        Stop-PortOwnerProcess -Port $BackendPort -Label "Sentinel Pulse backend"
+    }
+
     if (-not (Test-PortOpen -Port $BackendPort)) {
         Write-Status "Starting backend from source on port $BackendPort"
         Start-OwnedProcess -FilePath $venvPython -ArgumentList @("-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "$BackendPort", "--reload") -WorkingDirectory $Backend | Out-Null
@@ -704,11 +730,13 @@ try {
             throw "Port $BackendPort opened, but it is not responding as Sentinel Pulse. Check $LogFile."
         }
         Write-Status "Backend is ready" "OK"
-    } else {
-        if (-not (Test-SentinelPulseBackend -Port $BackendPort)) {
-            throw "Port $BackendPort is already in use by another service. Stop that service or launch Sentinel Pulse with -BackendPort <free port>."
+    }
+
+    if (Test-PortOpen -Port $FrontendPort) {
+        if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
+            throw "Port $FrontendPort is already in use by another frontend."
         }
-        Write-Status "Backend already running on port $BackendPort" "WARN"
+        Stop-PortOwnerProcess -Port $FrontendPort -Label "Sentinel Pulse frontend"
     }
 
     if (-not (Test-PortOpen -Port $FrontendPort)) {
@@ -721,11 +749,6 @@ try {
             throw "Port $FrontendPort opened, but it is not serving the Sentinel Pulse frontend. Check $LogFile."
         }
         Write-Status "Frontend is ready" "OK"
-    } else {
-        if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
-            throw "Port $FrontendPort is already in use by another frontend."
-        }
-        Write-Status "Frontend already running on port $FrontendPort" "WARN"
     }
 
     if (-not $NoBrowser) {

@@ -398,6 +398,25 @@ function Stop-ProcessTree {
     }
 }
 
+function Stop-PortOwnerProcess {
+    param([int]$Port, [string]$Label)
+    $owners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        Where-Object { $_ -and $_ -gt 0 })
+    foreach ($owner in $owners) {
+        Write-Status "Replacing existing $Label on port $Port (process $owner)" "WARN"
+        Stop-ProcessTree -ProcessId $owner
+    }
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-PortOpen -Port $Port)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    if (Test-PortOpen -Port $Port) {
+        throw "Port $Port is still in use after stopping existing $Label."
+    }
+}
+
 function Stop-OwnedProcesses {
     for ($i = $OwnedProcesses.Count - 1; $i -ge 0; $i--) {
         $process = $OwnedProcesses[$i]
@@ -671,6 +690,13 @@ try {
         Write-Status "MongoDB already running on port $MongoPort" "WARN"
     }
 
+    if (Test-PortOpen -Port $AppPort) {
+        if (-not (Test-SentinelPulseBackend -Port $AppPort)) {
+            throw "Port $AppPort is already in use by another service. Stop that service or launch Sentinel Pulse with -AppPort <free port>."
+        }
+        Stop-PortOwnerProcess -Port $AppPort -Label "Sentinel Pulse backend"
+    }
+
     if (-not (Test-PortOpen -Port $AppPort)) {
         $rootExe = Join-Path $ProjectRoot "SentinelPulse.exe"
         $backendExe = Join-Path $ProjectRoot "backend\SentinelPulse.exe"
@@ -704,11 +730,6 @@ try {
             throw "Port $AppPort opened, but it is not responding as Sentinel Pulse. Check $LogFile and backend logs."
         }
         Write-Status "Sentinel Pulse is ready on port $AppPort" "OK"
-    } else {
-        if (-not (Test-SentinelPulseBackend -Port $AppPort)) {
-            throw "Port $AppPort is already in use by another service. Stop that service or launch Sentinel Pulse with -AppPort <free port>."
-        }
-        Write-Status "Sentinel Pulse already running on port $AppPort" "WARN"
     }
 
     $url = ("http://127.0.0.1:{0}" -f $AppPort)
@@ -717,6 +738,13 @@ try {
         $url = "http://127.0.0.1:$FrontendPort"
         $env:VITE_BACKEND_URL = ""
         $env:REACT_APP_BACKEND_URL = ""
+        if (Test-PortOpen -Port $FrontendPort) {
+            if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
+                throw "Port $FrontendPort is already in use by another frontend."
+            }
+            Stop-PortOwnerProcess -Port $FrontendPort -Label "Sentinel Pulse frontend"
+        }
+
         if (-not (Test-PortOpen -Port $FrontendPort)) {
             $npm = Find-Npm
             if (-not $npm) {
@@ -731,11 +759,6 @@ try {
                 throw "Port $FrontendPort opened, but it is not serving the Sentinel Pulse frontend. Check $LogFile."
             }
             Write-Status "Frontend UI is ready on port $FrontendPort" "OK"
-        } else {
-            if (-not (Test-SentinelPulseFrontend -Port $FrontendPort)) {
-                throw "Port $FrontendPort is already in use by another frontend."
-            }
-            Write-Status "Frontend UI already running on port $FrontendPort" "WARN"
         }
     }
 

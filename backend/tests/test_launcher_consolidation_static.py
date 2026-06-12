@@ -71,6 +71,19 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
                 self.assertIn('$response.Content -match "Sentinel Pulse"', text)
                 self.assertIn("is already in use by another service", text)
 
+    def test_windows_launchers_replace_stale_existing_pulse_processes(self):
+        for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
+            with self.subTest(launcher=launcher):
+                text = (ROOT / launcher).read_text(encoding="utf-8")
+                self.assertIn("function Stop-PortOwnerProcess", text)
+                self.assertIn("Replacing existing $Label on port $Port", text)
+                self.assertIn('-Label "Sentinel Pulse backend"', text)
+                self.assertIn('-Label "Sentinel Pulse frontend"', text)
+                self.assertIn("Stop-PortOwnerProcess -Port $", text)
+                self.assertNotIn("already running on port $AppPort", text)
+                self.assertNotIn("already running on port $BackendPort", text)
+                self.assertNotIn("already running on port $FrontendPort", text)
+
     def test_windows_launchers_auto_resolve_frontend_port_conflicts(self):
         for launcher in ["Launch-Sentinel-Pulse.ps1", "Launch-Sentinel-Pulse-Local.ps1"]:
             with self.subTest(launcher=launcher):
