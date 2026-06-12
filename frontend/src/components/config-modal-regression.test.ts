@@ -5,6 +5,8 @@ import path from 'node:path';
 const root = process.cwd();
 const configModalPath = path.join(root, 'src', 'components', 'ConfigModal.tsx');
 const configModalSource = fs.readFileSync(configModalPath, 'utf8');
+const partialFillsPath = path.join(root, 'src', 'components', 'config-modal', 'PartialFillsTab.tsx');
+const partialFillsSource = fs.readFileSync(partialFillsPath, 'utf8');
 
 assert.match(
   configModalSource,
@@ -40,4 +42,16 @@ assert.match(
   configModalSource,
   /persistTickerUpdate\(\{ broker_ids \}\)/,
   'Broker selection should use the same persistent ticker update path as other config fields',
+);
+
+assert.match(
+  partialFillsSource,
+  /import\s+\{[^}]*\bX\b[^}]*\}\s+from\s+'lucide-react';/,
+  'PartialFillsTab must import the X icon used by remove-leg buttons',
+);
+
+assert.match(
+  partialFillsSource,
+  /<X size=\{12\}\s*\/>/,
+  'PartialFillsTab remove-leg buttons should render the imported X icon',
 );

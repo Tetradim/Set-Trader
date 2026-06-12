@@ -1,5 +1,6 @@
 import { TickerConfig } from '@/stores/useStore';
 import { Checkbox } from '@/components/ui/checkbox';
+import { X } from 'lucide-react';
 
 /* ============ Partial Fills Tab ============ */
 
