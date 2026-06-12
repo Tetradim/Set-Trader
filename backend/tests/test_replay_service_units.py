@@ -1,6 +1,26 @@
 import unittest
+from datetime import datetime, timezone
+import asyncio
 
-from backend.replay_service import build_replay_bar, build_session_id, normalize_alpaca_bars
+from backend.replay_service import build_replay_bar, build_session_id, get_active_replay_price, normalize_alpaca_bars
+
+
+class FakeSettingsCollection:
+    def __init__(self, value):
+        self.value = value
+        self.update = None
+
+    async def find_one(self, query, projection=None):
+        return {"key": "active_replay", "value": self.value}
+
+    async def update_one(self, query, update, upsert=False):
+        self.update = update
+        self.value = update["$set"]["value"]
+
+
+class FakeReplayDb:
+    def __init__(self, replay_state):
+        self.settings = FakeSettingsCollection(replay_state)
 
 
 class ReplayServiceUnitTest(unittest.TestCase):
@@ -51,6 +71,31 @@ class ReplayServiceUnitTest(unittest.TestCase):
         self.assertEqual(bars[0]["symbol"], "SPY")
         self.assertEqual(bars[0]["close"], 535.5)
         self.assertEqual(bars[0]["source"], "alpaca")
+
+    def test_non_looping_replay_expires_instead_of_reusing_final_price(self):
+        replay_state = {
+            "active": True,
+            "session_id": "session-expired",
+            "symbols": ["QQQ"],
+            "speed": 5.0,
+            "loop": False,
+            "started_at": "2026-06-12T00:00:00+00:00",
+            "first_timestamp": "2026-06-11T13:30:00+00:00",
+            "last_timestamp": "2026-06-11T13:31:00+00:00",
+            "duration_seconds": 60.0,
+        }
+        db = FakeReplayDb(replay_state)
+
+        result = asyncio.run(get_active_replay_price(
+            db,
+            "QQQ",
+            now=datetime(2026, 6, 12, 0, 1, 1, tzinfo=timezone.utc),
+        ))
+
+        self.assertIsNone(result)
+        self.assertFalse(db.settings.value["active"])
+        self.assertTrue(db.settings.value["completed"])
+        self.assertEqual(db.settings.value["completed_reason"], "replay_finished")
 
 
 if __name__ == "__main__":

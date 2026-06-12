@@ -224,6 +224,7 @@ class MarketReplayService:
         duration_seconds = max(0.0, (_parse_utc_iso(last_timestamp) - _parse_utc_iso(first_timestamp)).total_seconds())
         state = {
             "active": True,
+            "completed": False,
             "session_id": session_id,
             "source": session.get("source"),
             "symbols": session.get("symbols", []),
@@ -443,6 +444,21 @@ async def get_active_replay_price(db: Any, symbol: str, now: datetime | None = N
     if state.get("loop") and duration > 0:
         elapsed = elapsed % duration
     elif duration > 0:
+        if elapsed > duration:
+            completed_state = {
+                **state,
+                "active": False,
+                "completed": True,
+                "completed_reason": "replay_finished",
+                "completed_at": current_time.isoformat(),
+                "elapsed_seconds": elapsed,
+            }
+            await db.settings.update_one(
+                {"key": ACTIVE_REPLAY_SETTING},
+                {"$set": {"value": completed_state}},
+                upsert=True,
+            )
+            return None
         elapsed = min(elapsed, duration)
 
     target = _parse_utc_iso(first_timestamp) + timedelta(seconds=elapsed)
