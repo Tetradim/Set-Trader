@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { apiFetch } from '@/lib/api';
 import { applyBotSnapshot } from '@/lib/botSnapshot';
+import { uiLog } from '@/lib/clientLogger';
 import { toast } from 'sonner';
 
 // ── Tunnel SVG backgrounds per card state ────────────────────────────────────
@@ -113,12 +114,12 @@ export function WatchlistTab() {
       const snapshot = await apiFetch('/api/bot/snapshot');
       applyBotSnapshot(snapshot);
     } catch (error) {
-      console.warn('Bot snapshot refresh failed', error);
+      uiLog.error('watchlist.bot_snapshot_refresh_failed', error);
       try {
         const fallbackTickers = await apiFetch('/api/tickers');
         if (Array.isArray(fallbackTickers)) useStore.getState().setTickers(fallbackTickers);
       } catch (fallbackError) {
-        console.warn('Ticker fallback refresh failed', fallbackError);
+        uiLog.error('watchlist.ticker_fallback_refresh_failed', fallbackError);
       }
     }
   }, []);

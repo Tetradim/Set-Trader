@@ -1,14 +1,13 @@
-"""REST endpoints for Edge ← Pulse integration.
+"""REST endpoints for Edge/Pulse integration.
 
 Edge calls these endpoints to:
-- POST /api/tickers/{symbol}/decision - Buy/sell/stop decisions
-- POST /api/tickers/{symbol}/trailing - Enable trailing stop
-- POST /api/signals - Receive RSI/ORB/volatility signals from Edge
-- GET /api/positions/{symbol} - Get position
-- GET /api/tickers - Get all tickers
-- GET /api/metrics - Prometheus metrics (includes Edge signals)
-
-This matches what sentinel-edge's pulse_client.py expects.
+- POST /api/edge/handoff - Structured broker-control handoffs
+- POST /api/edge/tickers/{symbol}/decision - Legacy buy/sell/stop decisions
+- POST /api/edge/tickers/{symbol}/trailing - Enable trailing stop
+- POST /api/edge/signals/{symbol} - Receive signal context from Edge
+- GET /api/edge/positions/{symbol} - Get position
+- GET /api/edge/tickers - Get all tickers
+- GET /api/edge/account/status - Get account and open positions
 """
 from datetime import datetime, timezone
 
@@ -25,6 +24,8 @@ from shared import (
 
 from routes.edge_contracts import (
     DecisionRequest,
+    PulseHandoffAction,
+    PulseHandoffRequest,
     SignalEvalRequest,
     SignalEvalResponse,
     SignalRequest,
@@ -42,6 +43,157 @@ router = APIRouter(prefix="/edge")
 _signal_cache: dict = {}
 
 
+def _handoff_response(
+    body: PulseHandoffRequest,
+    *,
+    accepted: bool,
+    status: str,
+    reason: str,
+    message: str = "",
+) -> dict:
+    response = {
+        "accepted": accepted,
+        "sent": accepted,
+        "status": status,
+        "reason": reason,
+        "symbol": body.symbol,
+        "action": body.action.value,
+        "handoff_id": body.idempotency_key,
+    }
+    if message:
+        response["message"] = message
+    return response
+
+
+async def _handoff_price(symbol: str, body: PulseHandoffRequest) -> float:
+    metadata = body.metadata if isinstance(body.metadata, dict) else {}
+    for key in ("price", "current_price", "last_price"):
+        value = metadata.get(key)
+        if value is not None:
+            try:
+                price = float(value)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                return price
+    return float(await deps.price_service.get_price(symbol))
+
+
+async def _set_trailing(symbol: str, trailing_percent: float, *, opening_bell: bool = False) -> None:
+    updates = {
+        "trailing_enabled": True,
+        "trailing_percent": trailing_percent,
+    }
+    if opening_bell:
+        updates.update(
+            {
+                "opening_bell_enabled": True,
+                "opening_bell_trail_value": trailing_percent,
+                "opening_bell_trail_is_percent": True,
+            }
+        )
+    await deps.db.tickers.update_one({"symbol": symbol}, {"$set": updates})
+
+
+async def _set_global_trailing(trailing_percent: float, *, opening_bell: bool = False) -> None:
+    updates = {
+        "trailing_enabled": True,
+        "trailing_percent": trailing_percent,
+    }
+    if opening_bell:
+        updates.update(
+            {
+                "opening_bell_enabled": True,
+                "opening_bell_trail_value": trailing_percent,
+                "opening_bell_trail_is_percent": True,
+            }
+        )
+    await deps.db.tickers.update_many({}, {"$set": updates})
+
+
+async def _set_stop_buying(symbol: str, reason: str) -> None:
+    await deps.db.tickers.update_one(
+        {"symbol": symbol},
+        {"$set": {"enabled": False, "auto_stop_reason": reason or "edge_stop_buying"}},
+    )
+
+
+async def _set_dca_plan(symbol: str, body: PulseHandoffRequest) -> None:
+    plan = body.dca.model_dump(exclude_none=True) if body.dca else {}
+    steps = int(plan.get("steps", 1))
+    allocation_pct = float(plan.get("allocation_pct", 100.0 / max(steps, 1)))
+    buy_legs = [
+        {"alloc_pct": allocation_pct, "offset": 0.0, "is_percent": True}
+        for _ in range(max(steps, 1))
+    ]
+    await deps.db.tickers.update_one(
+        {"symbol": symbol},
+        {"$set": {"partial_fills_enabled": True, "buy_legs": buy_legs, "dca_plan": plan}},
+    )
+
+
+async def _process_global_handoff(body: PulseHandoffRequest) -> dict:
+    action = body.action
+
+    try:
+        if action in {
+            PulseHandoffAction.TRAILING_STOP,
+            PulseHandoffAction.TIGHTEN_TRAILING_STOP,
+        }:
+            await _set_global_trailing(float(body.trailing_percent))
+
+        elif action == PulseHandoffAction.OPENING_TRAILING_STOP:
+            await _set_global_trailing(float(body.trailing_percent), opening_bell=True)
+
+        elif action in {PulseHandoffAction.STOP_BUYING, PulseHandoffAction.STOP_ALL}:
+            await deps.db.tickers.update_many(
+                {"enabled": True},
+                {"$set": {"enabled": False, "auto_stop_reason": body.reason or "edge_global_stop"}},
+            )
+            if action == PulseHandoffAction.STOP_ALL:
+                deps.engine.paused = True
+
+        elif action == PulseHandoffAction.EMERGENCY_EXIT:
+            open_positions = [
+                (symbol, position)
+                for symbol, position in list(getattr(deps.engine, "_positions", {}).items())
+                if float(position.get("qty", 0) or 0) > 0
+            ]
+            for symbol, _position in open_positions:
+                await deps.engine.execute_sell(symbol, None)
+            await deps.db.tickers.update_many(
+                {"enabled": True},
+                {"$set": {"enabled": False, "auto_stop_reason": body.reason or "edge_emergency_exit"}},
+            )
+            deps.engine.paused = True
+
+        else:
+            return _handoff_response(
+                body,
+                accepted=False,
+                status="rejected",
+                reason="global_action_not_supported",
+                message=f"{action.value} is not supported for GLOBAL handoffs",
+            )
+
+    except Exception as exc:
+        return _handoff_response(
+            body,
+            accepted=False,
+            status="failed",
+            reason=exc.__class__.__name__,
+            message=str(exc),
+        )
+
+    return _handoff_response(
+        body,
+        accepted=True,
+        status="accepted",
+        reason="pulse_accepted",
+        message=f"{action.value} accepted for GLOBAL",
+    )
+
+
 # --- Endpoints ---
 
 
@@ -57,6 +209,101 @@ async def get_edge_status():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "mongo": edge_client.status_snapshot(),
     }
+
+
+@router.post("/handoff", dependencies=[Depends(validate_api_key)])
+async def post_handoff(body: PulseHandoffRequest):
+    """Process a structured autonomous handoff from Sentinel Edge."""
+    sym = body.symbol
+    if sym == "GLOBAL":
+        return await _process_global_handoff(body)
+
+    ticker = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+    if not ticker:
+        return _handoff_response(
+            body,
+            accepted=False,
+            status="rejected",
+            reason="ticker_not_found",
+            message=f"{sym} is not configured in Pulse",
+        )
+
+    action = body.action
+    position = _current_position(sym)
+    position_qty = float(position.get("qty", 0) or 0)
+
+    try:
+        if action == PulseHandoffAction.BUY:
+            if position_qty > 0:
+                return _handoff_response(
+                    body,
+                    accepted=False,
+                    status="rejected",
+                    reason="already_have_position",
+                    message=f"{sym} already has an open position",
+                )
+            price = await _handoff_price(sym, body)
+            if price <= 0:
+                return _handoff_response(body, accepted=False, status="rejected", reason="price_unavailable")
+            await deps.engine.execute_buy(sym, price)
+
+        elif action in {PulseHandoffAction.SELL, PulseHandoffAction.EMERGENCY_EXIT, PulseHandoffAction.REGULAR_STOP}:
+            if position_qty <= 0:
+                return _handoff_response(
+                    body,
+                    accepted=False,
+                    status="rejected",
+                    reason="no_position",
+                    message=f"{sym} has no open position",
+                )
+            price = await _handoff_price(sym, body)
+            await deps.engine.execute_sell(sym, price)
+
+        elif action == PulseHandoffAction.STOP_BUYING:
+            await _set_stop_buying(sym, body.reason)
+
+        elif action == PulseHandoffAction.STOP_ALL:
+            await deps.db.tickers.update_many(
+                {"enabled": True},
+                {"$set": {"enabled": False, "auto_stop_reason": body.reason or "edge_stop_all"}},
+            )
+            deps.engine.paused = True
+
+        elif action == PulseHandoffAction.TRAILING_STOP:
+            await _set_trailing(sym, float(body.trailing_percent))
+
+        elif action == PulseHandoffAction.OPENING_TRAILING_STOP:
+            await _set_trailing(sym, float(body.trailing_percent), opening_bell=True)
+
+        elif action == PulseHandoffAction.TIGHTEN_TRAILING_STOP:
+            await _set_trailing(sym, float(body.trailing_percent))
+
+        elif action == PulseHandoffAction.TIGHTEN_STOP:
+            metadata = body.metadata if isinstance(body.metadata, dict) else {}
+            updates = {"auto_stop_reason": body.reason or "edge_tighten_stop"}
+            if metadata.get("stop_offset") is not None:
+                updates["stop_offset"] = float(metadata["stop_offset"])
+            await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+
+        elif action == PulseHandoffAction.DCA:
+            await _set_dca_plan(sym, body)
+
+    except Exception as exc:
+        return _handoff_response(
+            body,
+            accepted=False,
+            status="failed",
+            reason=exc.__class__.__name__,
+            message=str(exc),
+        )
+
+    return _handoff_response(
+        body,
+        accepted=True,
+        status="accepted",
+        reason="pulse_accepted",
+        message=f"{action.value} accepted for {sym}",
+    )
 
 
 @router.post("/tickers/{symbol}/decision", dependencies=[Depends(validate_api_key)])

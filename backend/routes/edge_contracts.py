@@ -1,18 +1,18 @@
 """Edge route request/response contracts and security helpers."""
 import secrets
-from typing import Optional
+from enum import Enum
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 import deps
 
 
-_RATE_WINDOW = 60        # seconds
-
-_RATE_LIMIT = 60        # requests per minute
-
+_RATE_WINDOW = 60  # seconds
+_RATE_LIMIT = 60  # requests per minute
 _rate_limits: dict = {}  # ip -> [(timestamp, count), ...]
+
 
 class SignalRequest(BaseModel):
     """Signal request from Edge.
@@ -50,9 +50,114 @@ class SignalResponse(BaseModel):
     order_id: Optional[str] = None
     message: str = ""
 
+
+class PulseHandoffAction(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+    STOP_BUYING = "stop_buying"
+    STOP_ALL = "stop_all"
+    REGULAR_STOP = "regular_stop"
+    TRAILING_STOP = "trailing_stop"
+    OPENING_TRAILING_STOP = "opening_trailing_stop"
+    TIGHTEN_STOP = "tighten_stop"
+    TIGHTEN_TRAILING_STOP = "tighten_trailing_stop"
+    DCA = "dca"
+    EMERGENCY_EXIT = "emergency_exit"
+
+
+class PulseHandoffMode(str, Enum):
+    PAPER = "paper"
+    LIVE = "live"
+
+
+class PulseHandoffStopType(str, Enum):
+    REGULAR = "regular"
+    TRAILING = "trailing"
+    TIGHTEN = "tighten"
+    TIGHTEN_TRAILING = "tighten_trailing"
+
+
+class PulseHandoffDcaPlan(BaseModel):
+    steps: Optional[int] = Field(default=None, ge=1)
+    interval_seconds: Optional[int] = Field(default=None, ge=0)
+    allocation_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class PulseHandoffRequest(BaseModel):
+    contract_version: Literal["edge.pulse.handoff.v1"] = "edge.pulse.handoff.v1"
+    symbol: str
+    action: PulseHandoffAction
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str = ""
+    mode: PulseHandoffMode
+    orb_session: str = "market_open"
+    stop_type: Optional[PulseHandoffStopType] = None
+    trailing_percent: Optional[float] = Field(default=None, gt=0.0)
+    dca: Optional[PulseHandoffDcaPlan] = None
+    idempotency_key: str = Field(min_length=1)
+    source: Literal["sentinel_edge"] = "sentinel_edge"
+    created_at: float = Field(gt=0.0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def _normalise_symbol(cls, value: Any) -> str:
+        symbol = str(value or "").strip().upper()
+        if not symbol:
+            raise ValueError("symbol is required")
+        return symbol
+
+    @field_validator("reason", "orb_session", "idempotency_key", mode="before")
+    @classmethod
+    def _strip_text(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+    @model_validator(mode="after")
+    def _validate_action_context(self) -> "PulseHandoffRequest":
+        required_stop_types = {
+            PulseHandoffAction.REGULAR_STOP: PulseHandoffStopType.REGULAR,
+            PulseHandoffAction.TRAILING_STOP: PulseHandoffStopType.TRAILING,
+            PulseHandoffAction.OPENING_TRAILING_STOP: PulseHandoffStopType.TRAILING,
+            PulseHandoffAction.TIGHTEN_STOP: PulseHandoffStopType.TIGHTEN,
+            PulseHandoffAction.TIGHTEN_TRAILING_STOP: PulseHandoffStopType.TIGHTEN_TRAILING,
+        }
+        trailing_actions = {
+            PulseHandoffAction.TRAILING_STOP,
+            PulseHandoffAction.OPENING_TRAILING_STOP,
+            PulseHandoffAction.TIGHTEN_TRAILING_STOP,
+        }
+        required_stop_type = required_stop_types.get(self.action)
+        if required_stop_type is not None:
+            if self.stop_type is None:
+                raise ValueError(f"stop_type is required for {self.action.value} handoff actions")
+            if self.stop_type != required_stop_type:
+                raise ValueError(
+                    f"stop_type must be {required_stop_type.value} for {self.action.value} handoff actions"
+                )
+
+        if self.action in trailing_actions and self.trailing_percent is None:
+            raise ValueError("trailing_percent is required for trailing handoff actions")
+
+        if self.stop_type in {
+            PulseHandoffStopType.TRAILING,
+            PulseHandoffStopType.TIGHTEN_TRAILING,
+        } and self.trailing_percent is None:
+            raise ValueError("trailing_percent is required when stop_type is trailing")
+
+        if self.action == PulseHandoffAction.DCA and self.dca is None:
+            raise ValueError("dca is required for dca handoff actions")
+
+        return self
+
+
 def _current_position(symbol: str) -> dict:
     """Return the latest in-memory position snapshot for a symbol."""
     return deps.engine._positions.get(symbol, {})
+
 
 def _check_rate_limit(client_ip: str) -> bool:
     """Check if client is within rate limit."""
