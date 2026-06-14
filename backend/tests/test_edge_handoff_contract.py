@@ -11,6 +11,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from routes import edge as edge_routes  # noqa: E402
+from trading_engine import TradingEngine  # noqa: E402
 
 
 class _UpdateResult:
@@ -135,6 +136,46 @@ class EdgeHandoffContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(response["accepted"])
         self.assertEqual([("AAPL", 123.45)], engine.sell_calls)
+
+    async def test_handoff_route_executes_with_real_trading_engine(self):
+        db = _Db()
+        db.tickers.docs["AAPL"].update({
+            "base_power": 1000.0,
+            "broker_ids": [],
+            "broker_allocations": {},
+        })
+        engine = TradingEngine()
+        engine.simulate_24_7 = True
+        trades = []
+        profit_updates = []
+
+        async def record_trade(trade):
+            trades.append(trade)
+
+        async def update_profit(symbol, pnl, compound=False):
+            profit_updates.append((symbol, pnl, compound))
+
+        engine._record_trade = record_trade
+        engine._update_profit = update_profit
+        route = self._handoff_route()
+
+        with patch.object(edge_routes.deps, "db", db), patch.object(edge_routes.deps, "engine", engine):
+            buy_response = await route.endpoint(self._request(metadata={"price": 100.0}))
+            sell_response = await route.endpoint(
+                self._request(
+                    action="sell",
+                    idempotency_key="edge:AAPL:sell:market_open:123:real-engine",
+                    metadata={"price": 110.0},
+                )
+            )
+
+        self.assertTrue(buy_response["accepted"])
+        self.assertTrue(sell_response["accepted"])
+        self.assertEqual(0, engine._positions["AAPL"]["qty"])
+        self.assertEqual(["BUY", "SELL"], [trade.side for trade in trades])
+        self.assertEqual(100.0, trades[0].price)
+        self.assertEqual(110.0, trades[1].price)
+        self.assertEqual([("AAPL", 100.0, True)], profit_updates)
 
     async def test_opening_trailing_handoff_updates_opening_bell_settings(self):
         db = _Db()

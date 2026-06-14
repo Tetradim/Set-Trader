@@ -8,6 +8,100 @@ from resilience import CircuitOpenError
 
 
 class OrderLifecycleMixin:
+    async def execute_buy(self, symbol: str, price: float) -> dict:
+        """Execute an immediate buy from an external control path such as Edge."""
+        sym = symbol.upper()
+        try:
+            exec_price = float(price)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid buy price for {sym}")
+        if exec_price <= 0:
+            raise ValueError(f"Invalid buy price for {sym}")
+
+        pos = self._positions.get(sym, {})
+        if float(pos.get("qty", 0) or 0) > 0:
+            raise ValueError(f"Open position already exists for {sym}")
+
+        ticker_doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if not ticker_doc:
+            raise ValueError(f"{sym} is not configured")
+
+        effective_power = float(ticker_doc.get("base_power", 0) or 0)
+        qty = round(effective_power / exec_price, 4) if exec_price > 0 else 0
+        if qty <= 0:
+            raise ValueError(f"No buying power configured for {sym}")
+
+        broker_ids = ticker_doc.get("broker_ids", []) or []
+        broker_allocs = ticker_doc.get("broker_allocations", {}) or {}
+        is_paper = self.simulate_24_7
+        broker_results = []
+
+        if not is_paper and broker_ids:
+            broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                broker_ids=broker_ids,
+                allocations=broker_allocs,
+                order_template={
+                    "symbol": sym,
+                    "side": "BUY",
+                    "order_type": "MARKET",
+                    "price": exec_price,
+                },
+            )
+            any_success = any(result.get("status") not in ("error",) for result in broker_results)
+            if not any_success and broker_results:
+                deps.logger.warning(f"All broker orders failed for {sym} BUY - skipping position tracking")
+                raise RuntimeError(f"All broker orders failed for {sym} BUY")
+
+        self._prices[sym] = exec_price
+        self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
+        trade = TradeRecord(
+            symbol=sym,
+            side="BUY",
+            price=exec_price,
+            quantity=qty,
+            reason="Edge handoff buy",
+            order_type="MARKET",
+            rule_mode="EDGE",
+            target_price=exec_price,
+            total_value=round(exec_price * qty, 2),
+            buy_power=effective_power,
+            trading_mode="paper" if is_paper or not broker_ids else "live",
+            broker_results=broker_results,
+        )
+        await self._record_trade(trade)
+
+        return {
+            "status": "executed",
+            "symbol": sym,
+            "order_type": "market",
+            "price": exec_price,
+            "quantity": qty,
+            "total_value": round(exec_price * qty, 2),
+            "trading_mode": trade.trading_mode,
+        }
+
+    async def execute_sell(self, symbol: str, price: float = None) -> dict:
+        """Execute an immediate sell from an external control path such as Edge."""
+        sym = symbol.upper()
+        pos = self._positions.get(sym)
+        if not pos or float(pos.get("qty", 0) or 0) <= 0:
+            raise ValueError(f"No open position for {sym}")
+
+        qty = float(pos.get("qty", 0) or 0)
+        entry = float(pos.get("avg_entry", 0) or 0)
+        if price is None:
+            exec_price = self._prices.get(sym) or await deps.price_service.get_price(sym)
+        else:
+            try:
+                exec_price = float(price)
+            except (TypeError, ValueError):
+                raise ValueError(f"Invalid sell price for {sym}")
+        if exec_price <= 0:
+            raise ValueError(f"Invalid sell price for {sym}")
+
+        self._prices[sym] = exec_price
+        return await self._execute_sell(sym, exec_price, qty, entry, "MARKET", "Edge handoff sell")
+
     async def manual_sell(self, symbol: str, order_type: str, limit_price: float = 0) -> dict:
         """Execute a manual sell from the Positions tab.
         order_type: 'market' (immediate) or 'limit' (pending).
