@@ -4,9 +4,30 @@
 
 Trade the same ticker across multiple broker accounts simultaneously with independent buy-power allocation per broker. Features bracket orders, trailing stops, opening-bell risk rules, partial fills, auto-rebracket, per-broker circuit breakers and token-bucket rate limiting, international market support (7 exchanges), a **pluggable Python signal-strategy system** with hot-reload, structured audit logs, Telegram alerts, OpenTelemetry tracing, MongoDB-backed persistence, and a Windows `.exe` installer.
 
+## Current Sentinel Suite Role
+
+Sentinel Pulse is the execution worker in the Sentinel suite.
+
+| System | Role | Pulse relationship |
+|--------|------|--------------------|
+| Sentinel Pulse | Broker-facing execution service | Owns broker adapters, order placement, account truth, positions, audit logs, replay playback, paper/live mode, and execution safety controls. |
+| Sentinel Edge | Analysis and decision layer | Can read Pulse state and send gated structured handoffs or legacy decision commands. Pulse reports fills, positions, account state, and health back through Edge-compatible contracts. |
+| Tandem Suite | Unified operator console | Reads Pulse and Edge through server-side connectors and displays status, drift, handoff, account, and position state without exposing Pulse keys to browser code. |
+| Simulation Engine | Broker-free contract simulator | Can stand in for Pulse when testing Tandem/Edge workflows without live broker connectivity. |
+
+Pulse remains the only Sentinel component that should talk to broker APIs. Edge, Tandem, and Simulation workflows must treat Pulse activity as paper/simulation unless the operator has explicitly configured and validated live broker mode, account permissions, risk limits, and emergency controls.
+
 ---
 
 ## Recent Updates
+
+### v1.0.5 - Local Launcher Lifecycle Alignment
+
+- **Dedicated browser profile**: `Launch-Sentinel-Pulse-Local.ps1` opens the dashboard in an isolated Edge/Chrome app window when a supported browser is available.
+- **Browser closes process**: Closing the dedicated browser window shuts down Pulse processes started by the local launcher.
+- **Process closes browser**: Closing the launcher window or pressing Ctrl+C closes the dedicated browser profile and stops owned backend/frontend/MongoDB process trees.
+- **Hidden watchdog**: A background watchdog cleans up the browser profile and owned processes if the launcher process exits unexpectedly.
+- **Suite alignment**: Sentinel Edge, Tandem Suite, and Simulation Engine use the same local lifecycle pattern so local bot tests do not leave stale services running after the operator UI is closed.
 
 ### v1.0.4 - Market Replay Foundation
 
@@ -62,7 +83,8 @@ Trade the same ticker across multiple broker accounts simultaneously with indepe
 14. [Broker Catalogue](#broker-catalogue)
 15. [International Markets](#international-markets)
 16. [Resilience Architecture](#resilience-architecture)
-17. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
+17. [Local Launcher Lifecycle](#local-launcher-lifecycle)
+18. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
 
 ---
 
@@ -118,6 +140,8 @@ The launcher will:
 5. Open the dashboard in your browser
 
 **That's it!**
+
+For local source runs, `Launch-Sentinel-Pulse-Local.ps1` opens a dedicated browser profile and monitors it. Closing that dedicated browser window stops the backend/frontend processes started by the launcher. Closing the launcher window or pressing Ctrl+C closes the dedicated browser profile and stops the owned processes.
 
 ---
 
@@ -759,6 +783,23 @@ If Sentinel Edge is not running when Pulse starts, Pulse continues normal startu
 
 The Edge retry attempt limit is configurable in Settings and is stored as `edge_retry_max_attempts`. The default is `10`; setting it to `0` stops retries after the first post-connection Edge failure.
 
+### Tandem and Simulation Integration
+
+Pulse exposes the Edge-facing endpoints that Tandem reads from the server side:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/health` | Pulse service health. |
+| `/api/edge/status` | Pulse Edge API, Mongo command-channel, and key status. |
+| `/api/edge/account/status` | Broker-backed account and position state. |
+| `/api/edge/tickers` | Configured tickers and protection state. |
+| `/api/edge/positions/{symbol}` | Per-symbol position detail. |
+| `/api/edge/tickers/{symbol}/decision` | Legacy Edge-to-Pulse decision bridge. |
+| `/api/edge/tickers/{symbol}/trailing` | Legacy trailing-stop bridge. |
+| `/api/edge/signals/evaluate` | Lightweight Edge-style signal scoring. |
+
+For broker-free testing, Tandem can point `PULSE_API_URL` to Sentinel Simulation Engine. That lets operators test the Tandem dashboard, handoff visibility, drift monitor, account panel, and position rendering without loading a broker-connected Pulse instance.
+
 ### Files
 
 | File | Purpose |
@@ -1396,6 +1437,62 @@ broker_manager._place_single()
 - `HALF_OPEN` — allows `half_open_max_calls` test calls; success closes it, failure reopens it
 
 Manage via API: `GET /api/rate-limits`, `POST /api/rate-limits/{id}` (update config), `POST /api/circuit/{id}/reset` (manual reset).
+
+---
+
+## Local Launcher Lifecycle
+
+`Launch-Sentinel-Pulse-Local.ps1` is the preferred Windows-local source launcher when running the edited repository directly.
+
+What it owns:
+
+- MongoDB process started by the launcher, unless MongoDB was already running.
+- FastAPI backend process started by the launcher.
+- Vite frontend process started by the launcher.
+- Dedicated Edge/Chrome app-window process tree tied to the temporary Pulse browser profile.
+- Temporary watchdog script and stop-file in the system temp folder.
+
+What it does not own:
+
+- Normal personal browser windows and profiles.
+- Broker desktop applications.
+- Edge, Tandem, or Simulation processes started by their own launchers.
+- Existing MongoDB instances that were already running before Pulse started.
+
+Lifecycle flow:
+
+1. The launcher resolves MongoDB, Python, npm, backend, and frontend paths.
+2. It creates/uses the backend virtual environment.
+3. It installs dependencies when requested or missing.
+4. It starts MongoDB when needed.
+5. It starts the backend on `127.0.0.1:$BackendPort`.
+6. It starts the frontend on `127.0.0.1:$FrontendPort`.
+7. It verifies backend and frontend identity.
+8. Unless `-NoBrowser` is set, it opens the UI in a dedicated Edge/Chrome app window with a temporary `--user-data-dir`.
+9. It records the browser profile processes and the visible browser window process.
+10. It starts a hidden watchdog that closes the browser profile and owned process trees if the launcher window exits unexpectedly.
+11. The foreground loop watches the browser window. If the dedicated browser window closes, the launcher logs `Browser window closed; shutting down Sentinel Pulse` and cleans up owned tasks.
+
+Local URLs:
+
+```text
+Backend:  http://127.0.0.1:8002
+Frontend: http://127.0.0.1:3000
+```
+
+Useful local-source flags:
+
+| Flag | Purpose |
+|------|---------|
+| `-MongoPort 27017` | Choose MongoDB port. |
+| `-BackendPort 8002` | Choose backend port. |
+| `-FrontendPort 3000` | Choose frontend port. |
+| `-DataPath <path>` | Choose MongoDB data directory. |
+| `-NoBrowser` | Disable automatic browser launch and browser-close monitoring. |
+| `-SkipMongo` | Use an already-running MongoDB instance. |
+| `-InstallDeps` | Install backend/frontend dependencies before launch. |
+
+This local lifecycle is now aligned with Sentinel Edge, Tandem Suite, and Simulation Engine: closing the bot UI closes the local process stack, and closing the launcher closes the bot UI.
 
 ---
 
