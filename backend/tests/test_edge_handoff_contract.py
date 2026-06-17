@@ -22,9 +22,19 @@ class _TickerCollection:
     def __init__(self):
         self.docs = {"AAPL": {"symbol": "AAPL", "enabled": True, "trailing_percent": 2.0}}
         self.updates = []
+        self.inserted = []
 
-    async def find_one(self, query, projection=None):
+    async def find_one(self, query=None, projection=None, **kwargs):
+        query = query or {}
+        if not query:
+            docs = sorted(self.docs.values(), key=lambda doc: doc.get("sort_order", 0), reverse=True)
+            return docs[0] if docs else None
         return self.docs.get(query.get("symbol"))
+
+    async def insert_one(self, doc):
+        self.inserted.append(doc)
+        self.docs[doc["symbol"]] = doc
+        return object()
 
     async def update_one(self, query, update):
         self.updates.append((query, update))
@@ -114,6 +124,28 @@ class EdgeHandoffContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response["accepted"])
         self.assertEqual("accepted", response["status"])
         self.assertEqual([("AAPL", 111.11)], engine.buy_calls)
+
+    async def test_buy_handoff_creates_missing_ticker_before_buy(self):
+        db = _Db()
+        engine = _Engine()
+        route = self._handoff_route()
+
+        with patch.object(edge_routes.deps, "db", db), patch.object(edge_routes.deps, "engine", engine):
+            response = await route.endpoint(
+                self._request(
+                    symbol="PLTR",
+                    idempotency_key="edge:PLTR:buy:market_open:123:test",
+                    metadata={"price": 25.0},
+                )
+            )
+
+        self.assertTrue(response["accepted"])
+        self.assertEqual("accepted", response["status"])
+        self.assertEqual([("PLTR", 25.0)], engine.buy_calls)
+        self.assertEqual(1, len(db.tickers.inserted))
+        created = db.tickers.docs["PLTR"]
+        self.assertEqual(100.0, created["base_power"])
+        self.assertTrue(created["enabled"])
 
     async def test_sell_handoff_executes_sell_with_pulse_price(self):
         db = _Db()

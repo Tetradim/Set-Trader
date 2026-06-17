@@ -136,7 +136,7 @@ async def trading_loop():
                 await deps.ws_manager.broadcast({
                     "type": "MODE_SWITCH",
                     "simulate_24_7": deps.engine.simulate_24_7,
-                    "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
+                    "trading_mode": deps.engine.get_trading_mode(),
                 })
             
             if deps.engine.running and not deps.engine.paused:
@@ -225,6 +225,10 @@ async def lifespan(application: FastAPI):
         logger.info("Engine state loaded")
     except Exception as e:
         deps.logger.warning(f"Failed to load engine state: {e}")
+    try:
+        await asyncio.wait_for(deps.engine.load_recent_exit_cooldowns(), timeout=3.0)
+    except Exception as e:
+        deps.logger.warning(f"Failed to load recent exit cooldowns: {e}")
     
     # Load price service preference
     try:

@@ -133,7 +133,7 @@ async def get_release_preflight():
             "running": deps.engine.running,
             "paused": deps.engine.paused,
             "market_open": deps.engine.is_market_open(),
-            "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
+            "trading_mode": deps.engine.get_trading_mode(),
             "account_balance": round(account_balance, 2),
             "allocated": allocated,
             "available": round(account_balance - allocated, 2),

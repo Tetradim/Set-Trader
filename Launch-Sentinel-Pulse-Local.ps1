@@ -3,8 +3,8 @@
 
 param(
     [int]$MongoPort = 27017,
-    [int]$BackendPort = 8002,
-    [int]$FrontendPort = 3000,
+    [int]$BackendPort = 8001,
+    [int]$FrontendPort = 3001,
     [string]$DataPath = "",
     [switch]$NoBrowser,
     [switch]$SkipMongo,

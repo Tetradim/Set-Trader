@@ -26,6 +26,10 @@ class OrderLifecycleMixin:
         if not ticker_doc:
             raise ValueError(f"{sym} is not configured")
 
+        remaining = self._reentry_cooldown_remaining(sym, ticker_doc)
+        if remaining > 0:
+            raise ValueError(f"{sym} re-entry cooldown active for {remaining:.0f}s")
+
         effective_power = float(ticker_doc.get("base_power", 0) or 0)
         qty = round(effective_power / exec_price, 4) if exec_price > 0 else 0
         if qty <= 0:
@@ -33,7 +37,7 @@ class OrderLifecycleMixin:
 
         broker_ids = ticker_doc.get("broker_ids", []) or []
         broker_allocs = ticker_doc.get("broker_allocations", {}) or {}
-        is_paper = self.simulate_24_7
+        is_paper = self.is_paper_trading()
         broker_results = []
 
         if not is_paper and broker_ids:
@@ -127,6 +131,7 @@ class OrderLifecycleMixin:
                 "limit_price": limit_price,
                 "qty": qty,
             })
+            await self._persist_trade_state()
             deps.logger.info(f"PENDING LIMIT SELL: {sym} @ ${limit_price:.2f} x{qty:.4f}")
             return {
                 "status": "pending",
@@ -146,6 +151,7 @@ class OrderLifecycleMixin:
         removed = self._pending_sells.pop(sym, None)
         if removed:
             await deps.ws_manager.broadcast({"type": "PENDING_SELL_CANCELLED", "symbol": sym})
+            await self._persist_trade_state()
             return {"status": "cancelled", "symbol": sym}
         return {"error": f"No pending sell for {sym}"}
 
@@ -162,11 +168,13 @@ class OrderLifecycleMixin:
                 to_remove.append(sym)
         for sym in to_remove:
             self._pending_sells.pop(sym, None)
+        if to_remove:
+            await self._persist_trade_state()
 
     async def _execute_sell(self, sym: str, price: float, qty: float, entry: float, order_type: str, reason: str) -> dict:
         """Shared sell execution logic for both manual and engine-driven sells."""
         pnl = round((price - entry) * qty, 2)
-        is_paper = self.simulate_24_7
+        is_paper = self.is_paper_trading()
         ticker_doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
         broker_ids = ticker_doc.get("broker_ids", []) if ticker_doc else []
         broker_allocs = ticker_doc.get("broker_allocations", {}) if ticker_doc else {}

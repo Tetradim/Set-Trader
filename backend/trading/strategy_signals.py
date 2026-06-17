@@ -53,10 +53,15 @@ class StrategySignalMixin:
             deps.logger.debug(f"[{sym}] Strategy HOLD (confidence={signal.confidence:.2f})")
             return True   # explicitly hold — skip everything this cycle
 
-        is_paper = self.simulate_24_7
+        is_paper = self.is_paper_trading()
 
         # --- BUY ---
         if signal.action == "BUY" and pos["qty"] == 0:
+            if ticker_doc.get("buying_paused", False):
+                deps.logger.debug(f"[{sym}] Strategy BUY blocked because buying is paused")
+                return True
+            if self._is_reentry_cooldown_active(sym, ticker_doc):
+                return True
             qty = round(effective_power / price, 4) if price > 0 else 0
             if qty <= 0:
                 return False
@@ -85,6 +90,10 @@ class StrategySignalMixin:
             return True
 
         # --- SELL / STOP_LOSS ---
+        if signal.action in ("SELL", "STOP_LOSS", "TAKE_PROFIT") and pos["qty"] <= 0:
+            deps.logger.debug(f"[{sym}] Strategy {signal.action} while flat; skipping bracket fallback")
+            return True
+
         if signal.action in ("SELL", "STOP_LOSS", "TAKE_PROFIT") and pos["qty"] > 0:
             pnl = round((price - entry) * pos["qty"], 2)
             broker_results = []

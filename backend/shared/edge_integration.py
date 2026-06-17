@@ -177,7 +177,7 @@ async def send_account_update_command() -> bool:
         profits_list = await deps.db.profits.find({}, {"_id": 0}).to_list(100)
         total_realized_pnl = round(sum(p.get("total_pnl", 0) for p in profits_list), 2)
         
-        trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+        trading_mode = deps.engine.get_trading_mode()
         
         acc_update = build_account_update(
             account_balance=account_balance,
@@ -221,7 +221,7 @@ async def send_pulse_status_command() -> bool:
     if not edge_client.is_enabled or not edge_client.is_connected:
         return False
     
-    trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+    trading_mode = deps.engine.get_trading_mode()
     market_state = determine_market_state()
     
     connected_brokers = sum(1 for _ in deps.broker_mgr._adapters)
@@ -267,7 +267,7 @@ async def send_broker_status_command(
     if not edge_client.is_enabled or not edge_client.is_connected:
         return False
     
-    trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+    trading_mode = deps.engine.get_trading_mode()
     state = "connected" if connected else ("error" if error_message else "disconnected")
     
     broker_status = build_broker_status(
@@ -312,7 +312,7 @@ async def send_auto_stop_triggered_command(
     if not edge_client.is_enabled or not edge_client.is_connected:
         return False
     
-    trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+    trading_mode = deps.engine.get_trading_mode()
     
     # Get broker_id from ticker
     ticker = await deps.db.tickers.find_one({"symbol": symbol}, {"_id": 0})

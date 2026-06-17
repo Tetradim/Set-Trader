@@ -177,10 +177,10 @@ class BracketManagementMixin:
             else:
                 updates = {"buy_offset": old_buy, "sell_offset": old_sell}
             
-            # Clear prev_bracket
-            updates.pop("prev_bracket", None)
-            
-            await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+            await deps.db.tickers.update_one(
+                {"symbol": sym},
+                {"$set": updates, "$unset": {"prev_bracket": ""}},
+            )
             doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
             if doc:
                 await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
@@ -197,13 +197,14 @@ class BracketManagementMixin:
     ):
         buy_legs = ticker_doc.get("buy_legs", [])
         sell_legs = ticker_doc.get("sell_legs", [])
-        is_paper = self.simulate_24_7
+        is_paper = self.is_paper_trading()
 
         filled_buy = pos.get("buy_legs_filled", [])
         filled_sell = pos.get("sell_legs_filled", [])
+        buying_paused = ticker_doc.get("buying_paused", False)
 
         # --- PARTIAL BUY LEGS ---
-        if buy_legs:
+        if buy_legs and not buying_paused and not self._is_reentry_cooldown_active(sym, ticker_doc):
             for i, leg in enumerate(buy_legs):
                 if i in filled_buy:
                     continue
@@ -262,7 +263,7 @@ class BracketManagementMixin:
         # --- STOP LOSS (applies to entire remaining position) ---
         if pos.get("qty", 0) > 0 and entry > 0:
             current_stop = round(entry * (1 + ticker_doc.get("stop_offset", -6.0) / 100), 2) if is_stop_pct else round(ticker_doc.get("stop_offset", 0), 2)
-            should_stop = (stop_otype == "market") or (price <= current_stop)
+            should_stop = price <= current_stop
             if should_stop:
                 pnl = round((price - entry) * pos["qty"], 2)
                 broker_results = []
@@ -348,6 +349,62 @@ class BracketManagementMixin:
             # If all sell legs filled and no position remains, clear
             if pos.get("qty", 0) <= 0.0001:
                 self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
+                self._trailing_highs.pop(sym, None)
+                await self._persist_trade_state()
+
+        # --- TRAILING STOP for remaining partial-fill position ---
+        if ticker_doc.get("trailing_enabled", False) and pos.get("qty", 0) > 0 and entry > 0:
+            trail_pct = ticker_doc.get("trailing_percent", 2.0)
+            trail_is_pct = ticker_doc.get("trailing_percent_mode", True)
+            trail_otype = ticker_doc.get("trailing_order_type", "limit")
+
+            if sym not in self._trailing_highs:
+                self._trailing_highs[sym] = price
+                high = price
+                await self._persist_trade_state()
+            else:
+                high = self._trailing_highs[sym]
+            if price > high:
+                self._trailing_highs[sym] = price
+                high = price
+                await self._persist_trade_state()
+
+            trail_stop = round(high * (1 - trail_pct / 100), 2) if trail_is_pct else round(high - trail_pct, 2)
+            should_trail = price <= trail_stop
+            if should_trail:
+                exec_price = price
+                pnl = round((exec_price - entry) * pos["qty"], 2)
+                order_label = "MKT" if trail_otype == "market" else "LMT"
+                broker_results = []
+                if not is_paper and broker_ids:
+                    broker_results = await deps.broker_mgr.place_orders_for_ticker(
+                        broker_ids=broker_ids, allocations=broker_allocs,
+                        order_template={
+                            "symbol": sym, "side": "SELL", "order_type": "STOP",
+                            "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
+                        },
+                    )
+
+                trade = TradeRecord(
+                    symbol=sym, side="TRAILING_STOP", price=exec_price,
+                    quantity=pos["qty"],
+                    reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})",
+                    pnl=pnl, order_type=trail_otype.upper(),
+                    rule_mode="PERCENT" if trail_is_pct else "DOLLAR",
+                    entry_price=entry, target_price=trail_stop,
+                    total_value=round(exec_price * pos["qty"], 2),
+                    buy_power=effective_power, avg_price=avg,
+                    stop_target=stop_target,
+                    trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
+                    trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
+                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    broker_results=broker_results,
+                )
+                await self._record_trade(trade)
+                self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
+                self._trailing_highs.pop(sym, None)
+                await self._update_profit(sym, pnl, compound)
+                return
 
         # --- AUTO REBRACKET for partial fills ---
         # Rebracket should still work when no position is held

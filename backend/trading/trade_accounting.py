@@ -8,6 +8,50 @@ from resilience import CircuitOpenError
 
 
 class TradeAccountingMixin:
+    async def _persist_trade_state(self):
+        try:
+            await self.save_state()
+        except Exception as exc:
+            deps.logger.error(f"Failed to persist engine state after trade update: {exc}")
+
+    def _reentry_cooldown_seconds(self, ticker_doc: Optional[dict] = None) -> float:
+        configured = None
+        if ticker_doc:
+            configured = ticker_doc.get("reentry_cooldown_seconds")
+        if configured is None:
+            configured = getattr(self, "REENTRY_COOLDOWN_SECS", 300)
+        try:
+            return max(0.0, float(configured))
+        except (TypeError, ValueError):
+            return float(getattr(self, "REENTRY_COOLDOWN_SECS", 300))
+
+    def _reentry_cooldown_remaining(
+        self,
+        symbol: str,
+        ticker_doc: Optional[dict] = None,
+        now: Optional[datetime] = None,
+    ) -> float:
+        cooldown = self._reentry_cooldown_seconds(ticker_doc)
+        if cooldown <= 0:
+            return 0.0
+
+        last_exit = getattr(self, "_last_exit_ts", {}).get(symbol)
+        if not last_exit:
+            return 0.0
+        if last_exit.tzinfo is None:
+            last_exit = last_exit.replace(tzinfo=timezone.utc)
+
+        current = now or datetime.now(timezone.utc)
+        elapsed = (current - last_exit).total_seconds()
+        return max(0.0, cooldown - elapsed)
+
+    def _is_reentry_cooldown_active(self, symbol: str, ticker_doc: Optional[dict] = None) -> bool:
+        remaining = self._reentry_cooldown_remaining(symbol, ticker_doc)
+        if remaining > 0:
+            deps.logger.debug(f"[{symbol}] Re-entry cooldown active ({remaining:.0f}s remaining)")
+            return True
+        return False
+
     async def _record_trade(self, trade: TradeRecord):
         with deps.tracer.start_as_current_span("trade.execute", attributes={
             "trade.id": trade.id, "trade.symbol": trade.symbol, "trade.side": trade.side,
@@ -17,7 +61,12 @@ class TradeAccountingMixin:
         }) as span:
             doc = trade.model_dump()
             await deps.db.trades.insert_one(doc)
-            self._last_trade_ts[trade.symbol] = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            self._last_trade_ts[trade.symbol] = now
+            if trade.side != "BUY":
+                self._last_exit_ts[trade.symbol] = now
+            else:
+                await self._persist_trade_state()
             
             # Send ORDER_FILLED command to Edge if enabled
             try:
@@ -107,6 +156,7 @@ class TradeAccountingMixin:
         if pnl < 0:
             await self._check_auto_stop(symbol)
             await self._check_global_daily_drawdown()
+        await self._persist_trade_state()
 
     async def _check_global_daily_drawdown(self):
         cfg_doc = await deps.db.settings.find_one({"key": "global_daily_drawdown"}, {"_id": 0})

@@ -150,7 +150,10 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                         await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
 
             elif action == "START_BOT":
-                await deps.db.tickers.update_many({}, {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": ""}})
+                await deps.db.tickers.update_many(
+                    {},
+                    {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": "", "buying_paused": False}},
+                )
                 tickers = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
                 deps.engine.running = True
                 deps.engine.paused = False

@@ -15,6 +15,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import PlainTextResponse
 
 import deps
+from markets import detect_market_from_symbol
+from schemas import TickerConfig
 from shared import (
     edge_client,
     build_pulse_status,
@@ -41,6 +43,46 @@ router = APIRouter(prefix="/edge")
 # In-memory signal cache (reset on restart)
 # Key = symbol, Value = latest signal dict
 _signal_cache: dict = {}
+
+
+async def _broadcast_edge_created_ticker(doc: dict) -> None:
+    try:
+        await deps.ws_manager.broadcast({"type": "TICKER_ADDED", "ticker": doc})
+        balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+        account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
+        tickers = await deps.db.tickers.find({}, {"_id": 0, "base_power": 1}).to_list(100)
+        allocated = round(sum(t.get("base_power", 0) for t in tickers), 2)
+        await deps.ws_manager.broadcast(
+            {
+                "type": "ACCOUNT_UPDATE",
+                "account_balance": account_balance,
+                "allocated": allocated,
+                "available": round(account_balance - allocated, 2),
+            }
+        )
+    except Exception as exc:
+        deps.logger.warning("Edge-created ticker broadcast failed for %s: %s", doc.get("symbol"), exc)
+
+
+async def _create_ticker_from_edge_buy(symbol: str) -> dict:
+    max_order = await deps.db.tickers.find_one(
+        {},
+        sort=[("sort_order", -1)],
+        projection={"sort_order": 1},
+    )
+    next_order = (max_order.get("sort_order", 0) + 1) if max_order else 0
+    ticker = TickerConfig(
+        symbol=symbol,
+        base_power=100.0,
+        sort_order=next_order,
+        market=detect_market_from_symbol(symbol),
+        compound_profits=False,
+    )
+    doc = ticker.model_dump()
+    await deps.db.tickers.insert_one(doc)
+    doc.pop("_id", None)
+    await _broadcast_edge_created_ticker(doc)
+    return doc
 
 
 def _handoff_response(
@@ -112,9 +154,19 @@ async def _set_global_trailing(trailing_percent: float, *, opening_bell: bool = 
 
 
 async def _set_stop_buying(symbol: str, reason: str) -> None:
+    position = _current_position(symbol)
+    position_qty = position.get("qty", 0) if position else 0
+    updates = {
+        "buying_paused": True,
+        "auto_stop_reason": reason or "edge_stop_buying",
+    }
+    if position_qty > 0:
+        updates["enabled"] = True
+    else:
+        updates["enabled"] = False
     await deps.db.tickers.update_one(
         {"symbol": symbol},
-        {"$set": {"enabled": False, "auto_stop_reason": reason or "edge_stop_buying"}},
+        {"$set": updates},
     )
 
 
@@ -215,10 +267,23 @@ async def get_edge_status():
 async def post_handoff(body: PulseHandoffRequest):
     """Process a structured autonomous handoff from Sentinel Edge."""
     sym = body.symbol
+    action = body.action
     if sym == "GLOBAL":
         return await _process_global_handoff(body)
 
     ticker = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+    if not ticker:
+        if action == PulseHandoffAction.BUY:
+            ticker = await _create_ticker_from_edge_buy(sym)
+        else:
+            return _handoff_response(
+                body,
+                accepted=False,
+                status="rejected",
+                reason="ticker_not_found",
+                message=f"{sym} is not configured in Pulse",
+            )
+
     if not ticker:
         return _handoff_response(
             body,
@@ -228,7 +293,6 @@ async def post_handoff(body: PulseHandoffRequest):
             message=f"{sym} is not configured in Pulse",
         )
 
-    action = body.action
     position = _current_position(sym)
     position_qty = float(position.get("qty", 0) or 0)
 
@@ -331,7 +395,7 @@ async def post_decision(symbol: str, body: DecisionRequest):
     position = _current_position(sym)
     position_qty = position.get("qty", 0)
     
-    trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+    trading_mode = deps.engine.get_trading_mode()
     market_open = deps.engine.is_market_open()
     
     # Process decision
@@ -385,10 +449,7 @@ async def post_decision(symbol: str, body: DecisionRequest):
             result["message"] = "trailing_percent required"
     
     elif decision == "stop_buying":
-        await deps.db.tickers.update_one(
-            {"symbol": sym},
-            {"$set": {"enabled": False, "auto_stop_reason": "stop_buying"}},
-        )
+        await _set_stop_buying(sym, "stop_buying")
         result["message"] = f"buying stopped for {sym}"
     
     elif decision == "emergency_stop":
@@ -604,7 +665,7 @@ async def get_account_status():
     profits_list = await deps.db.profits.find({}, {"_id": 0}).to_list(100)
     total_realized_pnl = round(sum(p.get("total_pnl", 0) for p in profits_list), 2)
     
-    trading_mode = "paper" if deps.engine.simulate_24_7 else "live"
+    trading_mode = deps.engine.get_trading_mode()
     
     return {
         "account_balance": account_balance,

@@ -47,6 +47,7 @@
     "dev": "vite",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "verify:ui": "node scripts/verify-ui.mjs",
+    "test:bots": "node scripts/test-all-bots.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

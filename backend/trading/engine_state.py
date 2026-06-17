@@ -11,6 +11,30 @@ _ET = ZoneInfo("America/New_York")
 
 
 class EngineStateMixin:
+    def _serialize_timestamps(self, values: dict) -> dict:
+        serialized = {}
+        for key, value in (values or {}).items():
+            if isinstance(value, datetime):
+                serialized[key] = value.astimezone(timezone.utc).isoformat()
+            else:
+                serialized[key] = value
+        return serialized
+
+    def _restore_timestamps(self, values: dict) -> dict:
+        restored = {}
+        for key, value in (values or {}).items():
+            if isinstance(value, datetime):
+                ts = value
+            else:
+                try:
+                    ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            restored[key] = ts.astimezone(timezone.utc)
+        return restored
+
     def record_ticker_error(self, symbol: str, error: Exception):
         """Record an error for a ticker for backpressure."""
         now = datetime.now(timezone.utc)
@@ -44,6 +68,7 @@ class EngineStateMixin:
         return self._ticker_errors.get(symbol, 0) >= self._max_consecutive_errors
 
     async def save_state(self):
+        now = datetime.now(timezone.utc).isoformat()
         await deps.db.settings.update_one(
             {"key": "engine_state"},
             {"$set": {"value": {
@@ -53,7 +78,12 @@ class EngineStateMixin:
                 "market_hours_only": self.market_hours_only,
                 "live_during_market_hours": self.live_during_market_hours,
                 "paper_after_hours": self.paper_after_hours,
-            }}},
+                "positions": self._positions,
+                "prices": self._prices,
+                "trailing_highs": self._trailing_highs,
+                "pending_sells": self._pending_sells,
+                "last_exit_ts": self._serialize_timestamps(self._last_exit_ts),
+            }, "updated_at": now}},
             upsert=True,
         )
 
@@ -67,7 +97,42 @@ class EngineStateMixin:
             self.market_hours_only = v.get("market_hours_only", True)
             self.live_during_market_hours = v.get("live_during_market_hours", False)
             self.paper_after_hours = v.get("paper_after_hours", False)
+            self._positions = v.get("positions", {}) or {}
+            self._prices = v.get("prices", {}) or {}
+            self._trailing_highs = v.get("trailing_highs", {}) or {}
+            self._pending_sells = v.get("pending_sells", {}) or {}
+            self._last_exit_ts.update(self._restore_timestamps(v.get("last_exit_ts", {}) or {}))
             deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
+
+    async def load_recent_exit_cooldowns(self, limit: int = 200):
+        """Hydrate recent exit timestamps so restart/reload preserves re-entry guards."""
+        docs = await deps.db.trades.find(
+            {"side": {"$ne": "BUY"}},
+            {"_id": 0, "symbol": 1, "side": 1, "timestamp": 1},
+        ).sort("timestamp", -1).limit(limit).to_list(limit)
+
+        loaded = 0
+        for trade in docs:
+            if trade.get("side") == "BUY":
+                continue
+            sym = trade.get("symbol")
+            raw_ts = trade.get("timestamp")
+            if not sym or not raw_ts or sym in self._last_exit_ts:
+                continue
+            try:
+                if isinstance(raw_ts, datetime):
+                    ts = raw_ts
+                else:
+                    ts = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            self._last_exit_ts[sym] = ts.astimezone(timezone.utc)
+            loaded += 1
+
+        if loaded:
+            deps.logger.info(f"Hydrated recent exit cooldowns for {loaded} symbols")
 
     async def reconcile_positions(self):
         """Reconcile positions from DB on startup to recover state."""
@@ -175,14 +240,13 @@ class EngineStateMixin:
 
     def get_trading_mode(self) -> str:
         """Get current trading mode as string: 'paper' or 'live'."""
-        if self.simulate_24_7:
+        if self.is_paper_trading():
             return "paper"
-        # Live mode: trading with real broker
         return "live"
 
     def is_paper_trading(self) -> bool:
         """Check if we're currently in paper trading mode."""
-        return self.simulate_24_7
+        return self.simulate_24_7 or not self.live_during_market_hours
 
     async def _validate_order_mode(self, broker_ids: list, ticker_doc: dict) -> tuple[bool, str]:
         """Validate that order mode is appropriate for the configuration.
@@ -194,7 +258,7 @@ class EngineStateMixin:
             return True, ""
         
         # Have brokers - check mode
-        if self.simulate_24_7:
+        if self.is_paper_trading():
             # Paper mode with brokers - this is valid for simulation
             return True, ""
         
@@ -218,7 +282,7 @@ class EngineStateMixin:
             return issues
             
         # Check if we have live brokers but are in paper mode
-        if self.simulate_24_7 and broker_ids:
+        if self.is_paper_trading() and broker_ids:
             issues.append("Tickers configured with brokers but running in paper mode")
         
         # Check for broker connection issues

@@ -52,7 +52,10 @@ async def start_bot(body: BotControlRequest | None = None):
     settings = body or BotControlRequest()
     tickers = None
     if settings.enable_all:
-        await deps.db.tickers.update_many({}, {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": ""}})
+        await deps.db.tickers.update_many(
+            {},
+            {"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": "", "buying_paused": False}},
+        )
         tickers = await _broadcast_tickers()
     deps.engine.running = True
     deps.engine.paused = False
@@ -73,6 +76,17 @@ async def pause_bot():
     })
     deps.logger.info("Bot PAUSE toggled via API: paused=%s", deps.engine.paused)
     return {"running": deps.engine.running, "paused": deps.engine.paused}
+
+
+@router.post("/bot/reload-state")
+async def reload_bot_state():
+    """Reload persisted runtime state without changing bot mode."""
+    await deps.engine.load_state()
+    return {
+        "running": deps.engine.running,
+        "paused": deps.engine.paused,
+        "positions": len(getattr(deps.engine, "_positions", {}) or {}),
+    }
 
 
 @router.post("/tickers/{symbol}/rebracket/revert")

@@ -92,12 +92,12 @@ Pulse remains the only Sentinel component that should talk to broker APIs. Edge,
 
 ```
                       ┌─────────────────────────────────┐
-                      │   React + Vite  (Port 3000)     │
+                      │   React + Vite  (Port 3001)     │
                       │   TypeScript · Tailwind · Zustand│
                       └──────────────┬──────────────────┘
                                      │  WebSocket + REST
                       ┌──────────────▼──────────────────┐
-                      │   FastAPI Server  (Port 8002)   │
+                      │   FastAPI Server  (Port 8001)   │
                       │   Motor · yfinance · Telegram   │
                       └───┬──────┬──────┬──────┬────────┘
                           │      │      │      │
@@ -153,7 +153,7 @@ Manual start for development:
 # Backend
 cd backend
 pip install -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8002
+uvicorn server:app --host 0.0.0.0 --port 8001
 
 # Frontend
 cd frontend
@@ -161,7 +161,7 @@ yarn install
 yarn dev
 ```
 
-Dashboard: `http://localhost:8002`
+Dashboard: `http://localhost:8001`
 
 ### Runtime Requirements
 
@@ -286,7 +286,7 @@ The replay runtime state is stored in `settings` under `key: "active_replay"`.
 ### yfinance Import Example
 
 ```bash
-curl -X POST http://localhost:8002/api/replay/import/yfinance \
+curl -X POST http://localhost:8001/api/replay/import/yfinance \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -301,7 +301,7 @@ curl -X POST http://localhost:8002/api/replay/import/yfinance \
 ### Alpaca Import Example
 
 ```bash
-curl -X POST http://localhost:8002/api/replay/import/alpaca \
+curl -X POST http://localhost:8001/api/replay/import/alpaca \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -329,7 +329,7 @@ Alpaca credentials can also come from environment variables: `ALPACA_API_KEY` / 
 Start example:
 
 ```bash
-curl -X POST http://localhost:8002/api/replay/sessions/<session_id>/start \
+curl -X POST http://localhost:8001/api/replay/sessions/<session_id>/start \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{ "speed": 30, "loop": false }'
@@ -1336,7 +1336,7 @@ details      object   — event-specific payload
 | `SMTP_PASSWORD` | No | SMTP password |
 | `SMTP_RECIPIENT` | No | Admin email for feedback/beta notifications |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins (default `*`) |
-| `PORT` | No | Server port (default `8002`) |
+| `PORT` | No | Server port (local launcher default `8001`) |
 | `PULSE_API_URL` | No | Sentinel Edge URL for OTel auto-discovery |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector URL (e.g. Jaeger, Grafana Tempo) |
 | `OTEL_CONSOLE_EXPORT` | No | Set `true` to print spans to console |
@@ -1476,8 +1476,8 @@ Lifecycle flow:
 Local URLs:
 
 ```text
-Backend:  http://127.0.0.1:8002
-Frontend: http://127.0.0.1:3000
+Backend:  http://127.0.0.1:8001
+Frontend: http://127.0.0.1:3001
 ```
 
 Useful local-source flags:
@@ -1485,8 +1485,8 @@ Useful local-source flags:
 | Flag | Purpose |
 |------|---------|
 | `-MongoPort 27017` | Choose MongoDB port. |
-| `-BackendPort 8002` | Choose backend port. |
-| `-FrontendPort 3000` | Choose frontend port. |
+| `-BackendPort 8001` | Choose backend port. |
+| `-FrontendPort 3001` | Choose frontend port. |
 | `-DataPath <path>` | Choose MongoDB data directory. |
 | `-NoBrowser` | Disable automatic browser launch and browser-close monitoring. |
 | `-SkipMongo` | Use an already-running MongoDB instance. |

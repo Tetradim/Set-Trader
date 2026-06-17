@@ -7,8 +7,8 @@ param(
     [string]$LogPath = "",
     [string]$SettingsPath = "",
     [int]$MongoPort = 27017,
-    [int]$AppPort = 8002,
-    [int]$FrontendPort = 3000,
+    [int]$AppPort = 8001,
+    [int]$FrontendPort = 3001,
     [switch]$NoBrowser,
     [switch]$SmokeTest
 )

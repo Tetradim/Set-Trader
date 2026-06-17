@@ -20,7 +20,10 @@ class BotControlsStaticTest(unittest.TestCase):
     def test_start_all_enables_tickers(self):
         text = self.read("backend/routes/bot.py")
 
-        self.assertIn('"$set": {"enabled": True, "auto_stopped": False, "auto_stop_reason": ""}', text)
+        self.assertIn('"enabled": True', text)
+        self.assertIn('"auto_stopped": False', text)
+        self.assertIn('"auto_stop_reason": ""', text)
+        self.assertIn('"buying_paused": False', text)
         self.assertIn("enable_all=%s", text)
 
     def test_stopped_engine_does_not_process_pending_sells(self):

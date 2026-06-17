@@ -110,7 +110,7 @@ async def get_settings():
         "market_hours_only": deps.engine.market_hours_only,
         "live_during_market_hours": deps.engine.live_during_market_hours,
         "paper_after_hours": deps.engine.paper_after_hours,
-        "trading_mode": "paper" if deps.engine.simulate_24_7 else "live",
+        "trading_mode": deps.engine.get_trading_mode(),
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": deps.telegram_service.running,
         "increment_step": inc_doc.get("value", 0.5) if inc_doc else 0.5,

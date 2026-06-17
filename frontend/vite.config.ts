@@ -2,7 +2,7 @@ import path from "path"
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 
-const backendUrl = process.env.VITE_BACKEND_URL || process.env.REACT_APP_BACKEND_URL || 'http://127.0.0.1:8002'
+const backendUrl = process.env.VITE_BACKEND_URL || process.env.REACT_APP_BACKEND_URL || 'http://127.0.0.1:8001'
 
 export default defineConfig({
   plugins: [react()],
@@ -32,7 +32,7 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    port: 3000,
+    port: 3001,
     allowedHosts: true,
     proxy: {
       '/api': {

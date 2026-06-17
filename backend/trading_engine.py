@@ -29,6 +29,7 @@ class TradingEngine(
     TradeAccountingMixin,
 ):
     TRADE_COOLDOWN_SECS = 30
+    REENTRY_COOLDOWN_SECS = 300
     # Idempotency TTL - how long to remember order IDs to prevent duplicates
     IDEMPOTENCY_TTL_SECONDS = 300  # 5 minutes
 
@@ -48,6 +49,7 @@ class TradingEngine(
         self._positions: Dict[str, dict] = {}
         self._trailing_highs: Dict[str, float] = {}
         self._last_trade_ts: Dict[str, datetime] = {}
+        self._last_exit_ts: Dict[str, datetime] = {}
         self._recent_prices: Dict[str, list] = {}
         self._last_rebracket_ts: Dict[str, datetime] = {}
         self._pending_sells: Dict[str, dict] = {}  # symbol -> {limit_price, qty, entry}
@@ -127,7 +129,7 @@ class TradingEngine(
     
     def is_live_trading(self) -> bool:
         """Check if actually trading live (not paper)."""
-        return not self.simulate_24_7
+        return not self.is_paper_trading()
     
     def _log_trading_error(self, context: str, error: Exception, symbol: str = None):
         """Enhanced error logging for trading errors with Telegram alerts."""

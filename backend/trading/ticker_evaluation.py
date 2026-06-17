@@ -58,6 +58,7 @@ class TickerEvaluationMixin:
         buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
         pos = self._positions.get(sym, {"qty": 0, "avg_entry": 0})
         entry = pos.get("avg_entry", 0)
+        buying_paused = ticker_doc.get("buying_paused", False)
 
         if pos["qty"] > 0 and entry > 0:
             sell_target = round(entry * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
@@ -95,13 +96,13 @@ class TickerEvaluationMixin:
             return
 
         # --- BUY ---
-        if pos["qty"] == 0:
+        if pos["qty"] == 0 and not buying_paused:
             should_buy = (buy_otype == "market") or (price <= buy_target)
-            if should_buy:
+            if should_buy and not self._is_reentry_cooldown_active(sym, ticker_doc):
                 exec_price = price
                 qty = round(effective_power / exec_price, 4)
                 if qty > 0:
-                    is_paper = self.simulate_24_7
+                    is_paper = self.is_paper_trading()
                     broker_results = []
 
                     if not is_paper and broker_ids:
@@ -174,7 +175,7 @@ class TickerEvaluationMixin:
                         # Opening bell trailing stop triggered - SELL
                         exec_price = price
                         pnl = round((exec_price - entry) * pos["qty"], 2)
-                        is_paper = self.simulate_24_7
+                        is_paper = self.is_paper_trading()
                         broker_results = []
                         if not is_paper and broker_ids:
                             broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -233,17 +234,23 @@ class TickerEvaluationMixin:
                 if lock_trailing and self._is_opening_window(30, ticker_doc):
                     pass  # Skip trailing stop evaluation during opening window
                 else:
-                    high = self._trailing_highs.get(sym, price)
+                    if sym not in self._trailing_highs:
+                        self._trailing_highs[sym] = price
+                        high = price
+                        await self._persist_trade_state()
+                    else:
+                        high = self._trailing_highs[sym]
                     if price > high:
                         self._trailing_highs[sym] = price
                         high = price
+                        await self._persist_trade_state()
                     trail_stop = round(high * (1 - trail_pct / 100), 2) if trail_is_pct else round(high - trail_pct, 2)
-                    should_trail = (trail_otype == "market") or (price <= trail_stop)
+                    should_trail = price <= trail_stop
                     if should_trail:
                         exec_price = price
                         pnl = round((exec_price - entry) * pos["qty"], 2)
                         order_label = "MKT" if trail_otype == "market" else "LMT"
-                        is_paper = self.simulate_24_7
+                        is_paper = self.is_paper_trading()
                         broker_results = []
                         if not is_paper and broker_ids:
                             broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -274,12 +281,12 @@ class TickerEvaluationMixin:
                         await self._update_profit(sym, pnl, compound)
                         return
 
-            should_sell = (sell_otype == "market") or (price >= sell_target)
+            should_sell = price >= sell_target
             if should_sell:
                 exec_price = price
                 pnl = round((exec_price - entry) * pos["qty"], 2)
                 order_label = "MKT" if sell_otype == "market" else "LMT"
-                is_paper = self.simulate_24_7
+                is_paper = self.is_paper_trading()
                 broker_results = []
                 if not is_paper and broker_ids:
                     broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -292,7 +299,7 @@ class TickerEvaluationMixin:
                     )
                 trade = TradeRecord(
                     symbol=sym, side="SELL", price=exec_price, quantity=pos["qty"],
-                    reason=f"[{order_label}] Price ${exec_price} {'(market)' if sell_otype == 'market' else f'>= sell target ${sell_target}'}",
+                    reason=f"[{order_label}] Price ${exec_price} >= sell target ${sell_target}",
                     pnl=pnl, order_type=sell_otype.upper(),
                     rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
                     entry_price=entry, target_price=sell_target,
@@ -307,21 +314,20 @@ class TickerEvaluationMixin:
                 self._trailing_highs.pop(sym, None)
                 await self._update_profit(sym, pnl, compound)
 
-            elif price <= stop_target or stop_otype == "market":
-                # TIME RULE: Halve stop loss (0.5x) during first 30 min after open
-                # This tightens the stop to prevent being dragged down by opening volatility
+            else:
+                # TIME RULE: Halve stop loss (0.5x) during first 30 min after open.
+                # The tightened stop is the actual trigger; order type only controls execution style.
                 effective_stop = stop_target
                 halve_stop = ticker_doc.get("halve_stop_at_open", False)
                 if halve_stop and self._is_opening_window(30, ticker_doc) and entry > 0:
                     stop_distance = entry - stop_target
                     effective_stop = round(entry - (stop_distance * 0.5), 2)
 
-                should_stop = (stop_otype == "market") or (price <= effective_stop)
-                if should_stop:
+                if price <= effective_stop:
                     exec_price = price
                     pnl = round((exec_price - entry) * pos["qty"], 2)
                     order_label = "MKT" if stop_otype == "market" else "LMT"
-                    is_paper = self.simulate_24_7
+                    is_paper = self.is_paper_trading()
                     broker_results = []
                     if not is_paper and broker_ids:
                         broker_results = await deps.broker_mgr.place_orders_for_ticker(
@@ -334,7 +340,7 @@ class TickerEvaluationMixin:
                     stop_note = f" [0.5x halved from ${stop_target}]" if effective_stop != stop_target else ""
                     trade = TradeRecord(
                         symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
-                        reason=f"[{order_label}] Stop-loss hit ${exec_price} {'(market)' if stop_otype == 'market' else f'<= ${effective_stop}'}{stop_note}",
+                        reason=f"[{order_label}] Stop-loss hit ${exec_price} <= ${effective_stop}{stop_note}",
                         pnl=pnl, order_type=stop_otype.upper(),
                         rule_mode="PERCENT" if is_stop_pct else "DOLLAR",
                         entry_price=entry, target_price=stop_target,
@@ -351,5 +357,6 @@ class TickerEvaluationMixin:
 
         # --- AUTO REBRACKET ---
         rebracket_on = ticker_doc.get("auto_rebracket", False)
-        if rebracket_on and pos["qty"] == 0:
+        current_pos = self._positions.get(sym, {"qty": 0})
+        if rebracket_on and current_pos.get("qty", 0) == 0:
             await self._auto_rebracket(sym, ticker_doc, price, buy_target, sell_target)

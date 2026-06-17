@@ -37,7 +37,7 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
 
     def test_root_launcher_opens_source_frontend_instead_of_backend_root(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
-        self.assertIn("[int]$FrontendPort = 3000", text)
+        self.assertIn("[int]$FrontendPort = 3001", text)
         self.assertIn("function Find-Npm", text)
         self.assertIn('Join-Path $ProjectRoot "frontend\\package.json"', text)
         self.assertIn('$env:VITE_BACKEND_URL = ""', text)
@@ -97,7 +97,7 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
     def test_vite_dev_server_proxies_api_to_backend(self):
         text = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
         self.assertIn("VITE_BACKEND_URL", text)
-        self.assertIn("'http://127.0.0.1:8002'", text)
+        self.assertIn("'http://127.0.0.1:8001'", text)
         self.assertIn("proxy:", text)
         self.assertIn("'/api':", text)
         self.assertIn("target: backendUrl", text)
