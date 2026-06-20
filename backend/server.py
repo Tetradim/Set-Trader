@@ -403,6 +403,7 @@ from routes.system import router as system_router
 from routes.markets import router as markets_router
 from routes.strategies import router as strategies_router
 from routes.edge import router as edge_router
+from routes.bot_bus import router as bot_bus_router
 from routes.risk import router as risk_router
 from routes.auth import router as auth_router
 from routes.orders import router as orders_router
@@ -429,6 +430,7 @@ api.include_router(system_router, dependencies=[Depends(get_current_user)])
 api.include_router(markets_router, dependencies=[Depends(get_current_user)])
 api.include_router(strategies_router, dependencies=[Depends(get_current_user)])
 api.include_router(edge_router)
+api.include_router(bot_bus_router)
 api.include_router(risk_router, dependencies=[Depends(get_current_user)])
 api.include_router(auth_router)
 api.include_router(orders_router, dependencies=[Depends(get_current_user)])
