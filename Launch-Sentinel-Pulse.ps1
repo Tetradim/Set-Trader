@@ -41,6 +41,15 @@ $CancelKeyPressHandler = $null
 $LauncherWatchdogProcess = $null
 $LauncherWatchdogStopFile = $null
 $LauncherWatchdogScriptFile = $null
+$VcRedistUrl = "https://aka.ms/vc14/vc_redist.x64.exe"
+$MongoPortableVersion = "8.0.26"
+$MongoPortableZipUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.26.zip"
+$MongoPortableMsiUrl = "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.26-signed.msi"
+$DependencyRoot = if ($env:LOCALAPPDATA) {
+    Join-Path $env:LOCALAPPDATA "Sentinel Pulse\dependencies"
+} else {
+    Join-Path $ProjectRoot ".dependencies"
+}
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -162,6 +171,116 @@ function Wait-PortAttempts {
     return $false
 }
 
+function Test-ProcessElevated {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Test-VisualCRuntimeInstalled {
+    $keys = @(
+        "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    )
+
+    foreach ($key in $keys) {
+        try {
+            $runtime = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+            if ($runtime -and $runtime.Installed -eq 1) { return $true }
+        } catch {
+        }
+    }
+
+    return $false
+}
+
+function Remove-DirectoryInside {
+    param(
+        [string]$Path,
+        [string]$ParentPath
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    $resolvedParent = [System.IO.Path]::GetFullPath($ParentPath)
+    if (-not $resolvedParent.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $resolvedParent = $resolvedParent + [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    if (-not $resolvedPath.StartsWith($resolvedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove dependency path outside $resolvedParent"
+    }
+
+    Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+}
+
+function Invoke-DependencyDownload {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [string]$Label
+    )
+
+    New-Item -ItemType Directory -Path (Split-Path -Parent $OutFile) -Force | Out-Null
+    if (Test-Path -LiteralPath $OutFile) {
+        Write-Status "$Label already downloaded"
+        return $OutFile
+    }
+
+    Write-Status "Downloading $Label"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    } catch {
+    }
+
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 180
+    } catch {
+        throw "Could not download $Label from $Url. $($_.Exception.Message)"
+    }
+
+    if (-not (Test-Path -LiteralPath $OutFile)) {
+        throw "$Label download did not create $OutFile"
+    }
+
+    return $OutFile
+}
+
+function Install-VisualCRuntimeIfMissing {
+    if (Test-VisualCRuntimeInstalled) {
+        Write-Status "Microsoft Visual C++ Runtime is installed" "OK"
+        return
+    }
+
+    Write-Status "Microsoft Visual C++ Runtime was not found; installing it automatically" "WARN"
+    $installer = Join-Path $DependencyRoot "vc_redist.x64.exe"
+    Invoke-DependencyDownload -Url $VcRedistUrl -OutFile $installer -Label "Microsoft Visual C++ Runtime" | Out-Null
+
+    $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+    if (@(0, 3010, 1638) -contains $process.ExitCode) {
+        Write-Status "Microsoft Visual C++ Runtime installer completed with code $($process.ExitCode)" "OK"
+        return
+    }
+
+    Write-Status "Microsoft Visual C++ Runtime installer exited with code $($process.ExitCode). Sentinel Pulse will continue and report any startup error." "WARN"
+}
+
+function Find-DownloadedMongo {
+    if (-not $DependencyRoot -or -not (Test-Path -LiteralPath $DependencyRoot)) { return $null }
+
+    $candidate = Get-ChildItem -LiteralPath $DependencyRoot -Filter "mongod.exe" -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match "\\bin\\mongod\.exe$" } |
+        Select-Object -First 1
+
+    if ($candidate) { return $candidate.FullName }
+    return $null
+}
+
 function Find-Mongo {
     if ($MongoPath) {
         $candidate = Join-Path $MongoPath "mongod.exe"
@@ -169,7 +288,12 @@ function Find-Mongo {
         if (Test-Path $MongoPath) { return $MongoPath }
     }
 
+    $downloaded = Find-DownloadedMongo
+    if ($downloaded) { return $downloaded }
+
     $candidates = @(
+        (Join-Path $ProjectRoot "mongodb\bin\mongod.exe"),
+        (Join-Path $ProjectRoot "mongodb\mongod.exe"),
         "C:\Program Files\MongoDB\Server\8.2\bin\mongod.exe",
         "C:\Program Files\MongoDB\Server\8.0\bin\mongod.exe",
         "C:\Program Files\MongoDB\Server\7.0\bin\mongod.exe",
@@ -183,6 +307,109 @@ function Find-Mongo {
     $cmd = Get-Command mongod.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     return $null
+}
+
+function Install-MongoDbPortableDependency {
+    $existing = Find-DownloadedMongo
+    if ($existing) {
+        Write-Status "Using downloaded MongoDB at $existing" "OK"
+        return $existing
+    }
+
+    New-Item -ItemType Directory -Path $DependencyRoot -Force | Out-Null
+    $zipPath = Join-Path $DependencyRoot "mongodb-windows-x86_64-$MongoPortableVersion.zip"
+    $extractRoot = Join-Path $DependencyRoot "mongodb-$MongoPortableVersion"
+    $extractingRoot = Join-Path $DependencyRoot "mongodb-$MongoPortableVersion.extracting"
+
+    Invoke-DependencyDownload -Url $MongoPortableZipUrl -OutFile $zipPath -Label "MongoDB Community Server $MongoPortableVersion" | Out-Null
+
+    Remove-DirectoryInside -Path $extractingRoot -ParentPath $DependencyRoot
+    New-Item -ItemType Directory -Path $extractingRoot -Force | Out-Null
+
+    try {
+        Write-Status "Extracting MongoDB runtime"
+        Expand-Archive -Path $zipPath -DestinationPath $extractingRoot -Force
+    } catch {
+        Remove-DirectoryInside -Path $extractingRoot -ParentPath $DependencyRoot
+        throw "Could not extract MongoDB runtime. $($_.Exception.Message)"
+    }
+
+    $mongoExe = Get-ChildItem -LiteralPath $extractingRoot -Filter "mongod.exe" -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match "\\bin\\mongod\.exe$" } |
+        Select-Object -First 1
+
+    if (-not $mongoExe) {
+        Remove-DirectoryInside -Path $extractingRoot -ParentPath $DependencyRoot
+        throw "MongoDB download did not contain mongod.exe."
+    }
+
+    Remove-DirectoryInside -Path $extractRoot -ParentPath $DependencyRoot
+    Move-Item -LiteralPath $extractingRoot -Destination $extractRoot
+
+    $installed = Find-DownloadedMongo
+    if (-not $installed) {
+        throw "MongoDB was extracted, but mongod.exe could not be found afterward."
+    }
+
+    Write-Status "MongoDB runtime is ready at $installed" "OK"
+    return $installed
+}
+
+function Install-MongoDbMsiDependency {
+    if (-not (Test-ProcessElevated)) {
+        Write-Status "Skipping MongoDB MSI fallback because the launcher is not running as administrator" "WARN"
+        return $null
+    }
+
+    $msiPath = Join-Path $DependencyRoot "mongodb-windows-x86_64-$MongoPortableVersion-signed.msi"
+    Invoke-DependencyDownload -Url $MongoPortableMsiUrl -OutFile $msiPath -Label "MongoDB Community Server MSI $MongoPortableVersion" | Out-Null
+
+    Write-Status "Installing MongoDB Community Server from MSI"
+    $msiArgs = "/i `"$msiPath`" SHOULD_INSTALL_COMPASS=0 /qn /norestart"
+    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $msiArgs -Wait -PassThru
+    if (-not (@(0, 3010, 1638) -contains $process.ExitCode)) {
+        throw "MongoDB MSI installer exited with code $($process.ExitCode)."
+    }
+
+    return Find-Mongo
+}
+
+function Ensure-LauncherDependencies {
+    param([int]$MongoPort)
+
+    Write-Status "Checking Sentinel Pulse launcher dependencies"
+
+    try {
+        Install-VisualCRuntimeIfMissing
+    } catch {
+        Write-Status "Could not install Microsoft Visual C++ Runtime automatically. $($_.Exception.Message)" "WARN"
+    }
+
+    if (Test-PortOpen -Port $MongoPort) {
+        Write-Status "MongoDB is already reachable on port $MongoPort" "OK"
+        return
+    }
+
+    $mongoExe = Find-Mongo
+    if ($mongoExe) {
+        Write-Status "MongoDB executable found at $mongoExe" "OK"
+        return
+    }
+
+    Write-Status "MongoDB was not found; downloading a local runtime for Sentinel Pulse" "WARN"
+    try {
+        Install-MongoDbPortableDependency | Out-Null
+    } catch {
+        Write-Status "Portable MongoDB install failed. $($_.Exception.Message)" "WARN"
+        Install-MongoDbMsiDependency | Out-Null
+    }
+
+    $mongoExe = Find-Mongo
+    if (-not $mongoExe) {
+        throw "MongoDB could not be installed automatically. Please send $LogFile and $TranscriptFile to Sentinel Pulse support."
+    }
+
+    Write-Status "MongoDB dependency is ready at $mongoExe" "OK"
 }
 
 function Find-Python {
@@ -670,6 +897,8 @@ try {
     if (-not $env:CORS_ORIGINS) {
         $env:CORS_ORIGINS = $localCorsOrigins
     }
+
+    Ensure-LauncherDependencies -MongoPort $MongoPort
 
     if (-not (Test-PortOpen -Port $MongoPort)) {
         $mongoExe = Find-Mongo

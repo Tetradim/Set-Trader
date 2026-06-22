@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 import deps
 from schemas import TickerConfig, TickerCreate, TickerUpdate
 from strategies import PRESET_STRATEGIES
+from routes.runtime_state import reset_trailing_state_if_needed
 
 router = APIRouter()
 
@@ -57,6 +58,7 @@ async def update_ticker(symbol: str, body: TickerUpdate):
     result = await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(404, f"{sym} not found")
+    await reset_trailing_state_if_needed(updates, [sym])
     doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
     await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
     if "base_power" in updates:
@@ -101,8 +103,11 @@ async def apply_strategy(symbol: str, preset: str):
         if backup:
             backup["strategy"] = "custom"
             await deps.db.tickers.update_one({"symbol": sym}, {"$set": backup, "$unset": {"custom_backup": ""}})
+            await reset_trailing_state_if_needed(backup, [sym])
         else:
-            await deps.db.tickers.update_one({"symbol": sym}, {"$set": {"strategy": "custom"}})
+            updates = {"strategy": "custom"}
+            await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+            await reset_trailing_state_if_needed(updates, [sym])
         doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
         return doc
 
@@ -125,6 +130,7 @@ async def apply_strategy(symbol: str, preset: str):
     updates["strategy"] = preset
     updates["custom_backup"] = backup_fields
     await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+    await reset_trailing_state_if_needed(updates, [sym])
     doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
     return doc
 

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
+from trading.broker_execution import LiveOrderExecutionError
 
 
 class OrderLifecycleMixin:
@@ -40,10 +41,12 @@ class OrderLifecycleMixin:
         is_paper = self.is_paper_trading()
         broker_results = []
 
-        if not is_paper and broker_ids:
-            broker_results = await deps.broker_mgr.place_orders_for_ticker(
+        try:
+            broker_results = await self._place_live_order_or_raise(
+                sym=sym,
                 broker_ids=broker_ids,
-                allocations=broker_allocs,
+                broker_allocs=broker_allocs,
+                action_label="EDGE_BUY",
                 order_template={
                     "symbol": sym,
                     "side": "BUY",
@@ -51,10 +54,9 @@ class OrderLifecycleMixin:
                     "price": exec_price,
                 },
             )
-            any_success = any(result.get("status") not in ("error",) for result in broker_results)
-            if not any_success and broker_results:
-                deps.logger.warning(f"All broker orders failed for {sym} BUY - skipping position tracking")
-                raise RuntimeError(f"All broker orders failed for {sym} BUY")
+        except LiveOrderExecutionError as exc:
+            deps.logger.warning(str(exc))
+            raise RuntimeError(str(exc)) from exc
 
         self._prices[sym] = exec_price
         self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
@@ -180,14 +182,20 @@ class OrderLifecycleMixin:
         broker_allocs = ticker_doc.get("broker_allocations", {}) if ticker_doc else {}
         broker_results = []
 
-        if not is_paper and broker_ids:
-            broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                broker_ids=broker_ids, allocations=broker_allocs,
+        try:
+            broker_results = await self._place_live_order_or_raise(
+                sym=sym,
+                broker_ids=broker_ids,
+                broker_allocs=broker_allocs,
+                action_label=f"{order_type}_SELL",
                 order_template={
                     "symbol": sym, "side": "SELL", "order_type": order_type,
                     "price": price, "quantity": qty,
                 },
             )
+        except LiveOrderExecutionError as exc:
+            deps.logger.warning(str(exc))
+            raise RuntimeError(str(exc)) from exc
 
         trade = TradeRecord(
             symbol=sym, side="SELL", price=price, quantity=qty,

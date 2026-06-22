@@ -2,11 +2,20 @@
 
 Provides endpoints for risk controls, exposure limits, and kill switches.
 """
-from typing import List
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from auth import get_current_user, TokenData, require_roles, Role
+from advanced_risk import (
+    AdvancedRiskLimits,
+    CircuitBreakerAdjustmentInput,
+    LiquiditySizingInput,
+    PortfolioPosition,
+    TradeRiskInput,
+    VarCvarInput,
+    advanced_risk_manager,
+)
 from risk_controls import (
     risk_controls, ExposureLimit, KillSwitchLevel, 
     OrderRestriction
@@ -52,6 +61,90 @@ class RiskCheckRequest(BaseModel):
     desk: str = None
     strategy: str = None
     broker: str = None
+
+
+class AdvancedRiskLimitsRequest(BaseModel):
+    max_trade_risk_score: float = 85.0
+    max_var_pct: float = 0.05
+    max_cvar_pct: float = 0.08
+
+
+class TradeRiskScoreRequest(BaseModel):
+    symbol: str
+    side: str
+    order_value: float
+    account_equity: float
+    price: float = 0.0
+    quantity: float = 0.0
+    volatility_pct: float = 0.0
+    average_daily_volume: float = 0.0
+    broker_risk_level: str = "medium"
+    existing_symbol_exposure: float = 0.0
+    portfolio_notional: float = 0.0
+    daily_drawdown_pct: float = 0.0
+    strategy_confidence: float = 1.0
+
+
+class LiquiditySizingRequest(BaseModel):
+    symbol: str
+    requested_order_value: float
+    price: float
+    account_equity: float
+    average_daily_volume: float
+    recent_volume: float = 0.0
+    max_participation_rate: float = 0.01
+    volatility_pct: float = 0.0
+    risk_score: float = 0.0
+    recent_volume_weight: float = 0.65
+
+
+class PortfolioPositionRequest(BaseModel):
+    symbol: str
+    quantity: float
+    price: float
+
+
+class VarCvarRequest(BaseModel):
+    positions: List[PortfolioPositionRequest]
+    historical_returns: Dict[str, List[float]]
+    confidence_level: float = 0.95
+    limits: AdvancedRiskLimitsRequest = Field(default_factory=AdvancedRiskLimitsRequest)
+
+
+class CircuitBreakerAdjustmentRequest(BaseModel):
+    volatility_pct: float
+    liquidity_score: float = 1.0
+    market_stress_score: float = 0.0
+    broker_risk_level: str = "medium"
+    apply: bool = False
+
+
+class AdvancedRiskCheckRequest(BaseModel):
+    trade: TradeRiskScoreRequest
+    limits: AdvancedRiskLimitsRequest = Field(default_factory=AdvancedRiskLimitsRequest)
+    liquidity: Optional[LiquiditySizingRequest] = None
+    var_cvar: Optional[VarCvarRequest] = None
+
+
+def _advanced_limits(request: AdvancedRiskLimitsRequest) -> AdvancedRiskLimits:
+    return AdvancedRiskLimits(**request.model_dump())
+
+
+def _trade_input(request: TradeRiskScoreRequest) -> TradeRiskInput:
+    return TradeRiskInput(**request.model_dump())
+
+
+def _liquidity_input(request: LiquiditySizingRequest) -> LiquiditySizingInput:
+    return LiquiditySizingInput(**request.model_dump())
+
+
+def _var_cvar_input(request: VarCvarRequest) -> VarCvarInput:
+    return VarCvarInput(
+        positions=[PortfolioPosition(**position.model_dump()) for position in request.positions],
+        historical_returns={symbol.upper(): returns for symbol, returns in request.historical_returns.items()},
+        confidence_level=request.confidence_level,
+        limits=_advanced_limits(request.limits),
+    )
 
 
 @router.get("/limits")
@@ -227,6 +320,87 @@ async def check_order_risk(
         "message": result.message,
         "rejected_fields": result.rejected_fields
     }
+
+
+@router.post("/advanced/score")
+async def score_advanced_trade_risk(
+    request: TradeRiskScoreRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Score predictive risk for a proposed trade."""
+    score = advanced_risk_manager.score_trade(_trade_input(request))
+    return score.to_dict()
+
+
+@router.post("/advanced/liquidity-size")
+async def recommend_liquidity_position_size(
+    request: LiquiditySizingRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Recommend order size from predicted tradable volume and market stress."""
+    result = advanced_risk_manager.recommend_position_size(_liquidity_input(request))
+    return result.to_dict()
+
+
+@router.post("/advanced/var-cvar")
+async def evaluate_portfolio_var_cvar(
+    request: VarCvarRequest,
+    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
+):
+    """Evaluate historical-simulation VaR/CVaR against configured limits."""
+    result = advanced_risk_manager.evaluate_var_cvar(_var_cvar_input(request))
+    return result.to_dict()
+
+
+@router.post("/advanced/circuit-breakers/{broker_id}/adjust")
+async def adjust_dynamic_circuit_breaker(
+    broker_id: str,
+    request: CircuitBreakerAdjustmentRequest,
+    current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
+):
+    """Recommend or apply volatility-aware broker circuit-breaker settings."""
+    from audit_service import audit_service
+    from resilience import broker_resilience
+
+    old_config = broker_resilience.get_config(broker_id)
+    recommendation = advanced_risk_manager.recommend_circuit_breaker(
+        old_config,
+        CircuitBreakerAdjustmentInput(
+            broker_id=broker_id,
+            volatility_pct=request.volatility_pct,
+            liquidity_score=request.liquidity_score,
+            market_stress_score=request.market_stress_score,
+            broker_risk_level=request.broker_risk_level,
+        ),
+    )
+
+    if request.apply:
+        broker_resilience.set_config(broker_id, recommendation.config)
+        await broker_resilience.save_config()
+        await audit_service.log_setting_change(
+            f"dynamic_resilience_{broker_id}",
+            vars(old_config),
+            vars(recommendation.config),
+        )
+
+    payload = recommendation.to_dict()
+    payload["applied"] = request.apply
+    return payload
+
+
+@router.post("/advanced/check")
+async def check_advanced_order_risk(
+    request: AdvancedRiskCheckRequest,
+    current_user: TokenData = Depends(get_current_user)
+):
+    """Run combined advanced pre-trade checks."""
+    assessment = advanced_risk_manager.assess_trade(
+        _trade_input(request.trade),
+        limits=_advanced_limits(request.limits),
+        liquidity=_liquidity_input(request.liquidity) if request.liquidity else None,
+        var_cvar=_var_cvar_input(request.var_cvar) if request.var_cvar else None,
+    )
+    return assessment.to_dict()
 
 
 @router.get("/status")

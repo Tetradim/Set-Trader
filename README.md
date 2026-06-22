@@ -84,7 +84,6 @@ Pulse remains the only Sentinel component that should talk to broker APIs. Edge,
 15. [International Markets](#international-markets)
 16. [Resilience Architecture](#resilience-architecture)
 17. [Local Launcher Lifecycle](#local-launcher-lifecycle)
-18. [Roadmap: Planned Upgrades & Enhancements](#roadmap-planned-upgrades--enhancements)
 
 ---
 
@@ -142,6 +141,43 @@ The launcher will:
 **That's it!**
 
 For local source runs, `Launch-Sentinel-Pulse-Local.ps1` opens a dedicated browser profile and monitors it. Closing that dedicated browser window stops the backend/frontend processes started by the launcher. Closing the launcher window or pressing Ctrl+C closes the dedicated browser profile and stops the owned processes.
+
+---
+
+### macOS Beta Installer
+
+MacBook beta testers can install the local source build with the bundled macOS installer script. It creates the backend virtual environment, installs frontend dependencies, and adds a double-click launcher to the Desktop.
+
+Prerequisites:
+
+- macOS with Python 3.11, 3.12, or 3.13 on `PATH`
+- Node.js with `npm`
+- MongoDB Community with `mongod` available on `PATH`
+
+Install MongoDB with Homebrew if needed:
+
+```bash
+brew tap mongodb/brew
+brew install mongodb-community
+```
+
+From the repository root:
+
+```bash
+chmod +x install-macos.sh
+./install-macos.sh
+```
+
+After installation, double-click `Sentinel Pulse.command` on the Desktop. The launcher starts MongoDB when it is not already listening on port `27017`, starts the backend on `8001`, starts the frontend on `3001`, and opens the dashboard. Logs are written to `~/Desktop/Sentinel-Pulse-Local.log` and `~/Desktop/Sentinel-Pulse-MongoDB.log`.
+
+Manual launch options:
+
+```bash
+./install-macos.sh --launch
+./install-macos.sh --launch --install-deps
+./install-macos.sh --launch --backend-port 8001 --frontend-port 3001 --no-browser
+./install-macos.sh --launch --skip-mongo
+```
 
 ---
 
@@ -211,6 +247,13 @@ Every broker API call passes through `resilience.py`:
 - Conservative defaults for Robinhood/Webull (2 RPS, 120s recovery)
 - Telegram alert + WebSocket broadcast on circuit state change
 - Manual reset via `POST /api/circuit/{broker_id}/reset`
+
+### Advanced Risk Management
+The advanced risk engine in `advanced_risk.py` adds explainable pre-trade controls on top of the baseline risk gateway:
+- **ML Risk Assessment**: deterministic predictive scoring per trade with risk drivers for size, concentration, volatility, liquidity, drawdown, broker risk, and strategy confidence.
+- **Dynamic Circuit Breakers**: volatility-aware broker resilience recommendations that can tighten request rate, burst capacity, failure thresholds, recovery windows, and opening-window skips.
+- **Predictive Liquidity**: recommended position size from predicted tradable volume, max participation rate, volatility haircut, and trade risk score.
+- **VaR/CVaR Limits**: historical-simulation portfolio tail-risk checks with configurable confidence, max VaR percentage, and max CVaR percentage.
 
 ### International Markets (7 Exchanges)
 Add tickers for any of: US, HK (HKEX), AU (ASX), UK (LSE), CA (TSX), CN_SS (Shanghai SSE), CN_SZ (Shenzhen SZSE). Auto-detected from symbol suffix (`.HK`, `.AX`, `.L`, `.TO`, `.SS`, `.SZ`). Each market has:
@@ -1130,6 +1173,15 @@ All tests live in `backend/tests/`. Each file maps to a specific feature:
 | POST | `/api/rate-limits/{broker_id}` | Update token-bucket + circuit-breaker config |
 | POST | `/api/circuit/{broker_id}/reset` | Manually reset tripped circuit breaker to CLOSED |
 
+### Advanced Risk Management
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/risk/advanced/score` | ML Risk Assessment: score predictive per-trade risk and explain drivers |
+| POST | `/api/risk/advanced/liquidity-size` | Predictive Liquidity: recommend order size from predicted volume and stress inputs |
+| POST | `/api/risk/advanced/var-cvar` | VaR/CVaR Limits: evaluate portfolio tail-risk limits |
+| POST | `/api/risk/advanced/circuit-breakers/{broker_id}/adjust` | Dynamic Circuit Breakers: recommend or apply volatility-aware broker resilience settings |
+| POST | `/api/risk/advanced/check` | Combined advanced pre-trade check with score, liquidity, and optional VaR/CVaR |
+
 ### Audit & System
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -1528,6 +1580,10 @@ This section tracks the implementation status of all features documented in this
 | Exposure Limits | ✅ Implemented | `backend/risk_controls.py` |
 | Fat-Finger Protection | ✅ Implemented | `backend/risk_controls.py` |
 | Symbol Restrictions | ✅ Implemented | `backend/risk_controls.py` |
+| ML Risk Assessment | ✅ Implemented | `backend/advanced_risk.py` |
+| Dynamic Circuit Breakers | ✅ Implemented | `backend/advanced_risk.py`, `backend/routes/risk.py` |
+| Predictive Liquidity | ✅ Implemented | `backend/advanced_risk.py` |
+| VaR/CVaR Limits | ✅ Implemented | `backend/advanced_risk.py` |
 
 ### Backend API Routes
 
@@ -1544,7 +1600,7 @@ This section tracks the implementation status of all features documented in this
 | `/api/strategies` | ✅ Implemented | Strategy registry |
 | `/api/edge` | ✅ Implemented | Edge integration |
 | `/api/auth` | ✅ Implemented | Login, API keys |
-| `/api/risk` | ✅ Implemented | Risk controls |
+| `/api/risk` | ✅ Implemented | Risk controls and advanced risk management |
 | `/api/orders` | ✅ Implemented | Order management |
 | `/api/reconciliation` | 🔵 Partial | Demo data, needs broker integration |
 | `/api/audit` | 🔵 Partial | Demo events, needs full audit pipeline |
@@ -1615,53 +1671,6 @@ The beta-facing endpoints below are backed by live application state or persiste
 | MongoDB integration | ✅ Verified |
 | Multi-broker execution | ✅ Verified |
 | Paper/live trading | ✅ Verified |
-## Roadmap: Planned Upgrades & Enhancements
-
-The following features and improvements are planned for future releases. Priority may shift based on user feedback and market developments.
-
-> **Note:** Items marked with ✅ have been implemented in the current release.
-
-### 1. UI/UX Improvements ✅
-- **Theme System**: Dark/light mode toggles, custom accent colors, compact vs. expanded card views
-- **Enhanced Charts**: TradingView-powered charts with drawing tools, annotations, and multi-timeframe analysis
-- **Widget System**: Drag-and-drop dashboard customization
-- **Keyboard Navigation**: Full keyboard shortcuts for power users
-
-### 2. Advanced Portfolio Analytics ✅
-- **Multi-Account Views**: Unified portfolio view across all connected brokers
-- **Portfolio Comparison**: Side-by-side performance analytics across accounts
-- **Tax Reporting**: Realized/unrealized P&L with cost-basis tracking (wash sale warnings)
-- **Performance Attribution**: Return decomposition by ticker, strategy, and time period
-
-### 3. Enhanced Notification Systems ✅
-- **Email Notifications**: Rich HTML email alerts with charts
-- **Mobile Companion**: iOS/Android companion app for monitoring
-- **Slack Integration**: Slack channel alerts with actionable buttons
-- **Webhook System**: Custom outbound webhooks for automation
-
-### 4. Developer Experience & Extensibility ✅
-- **Web-Based Terminal**: In-browser Python REPL for custom scripting
-- **Public API**: Documented REST API for third-party integrations
-- **SDK**: TypeScript/Python SDKs for building extensions
-- **Plugin System**: First-class plugin architecture for custom indicators
-
-### 5. Advanced Risk Management
-- **ML Risk Assessment**: Predictive risk scoring per trade
-- **Dynamic Circuit Breakers**: AI-adjusted rate limits based on market volatility
-- **Predictive Liquidity**: Position sizing based on predicted volume
-- **Var/Cvar Limits**: Value-at-risk portfolio limits
-
-### 6. Desktop Integration Enhancements ✅
-- **System Tray**: Background operation with tray icon and menu
-- **Global Hotkeys**: Trade execution from anywhere (keyboard shortcuts)
-- **Native Notifications**: OS-native push notifications
-- **Auto-Start**: Launch on system boot
-
-### 7. Security & Compliance ✅
-- **SSO/SAML**: Enterprise single sign-on
-- **2FA**: Hardware key support (YubiKey)
-- **Audit Dashboard**: Real-time compliance and access logging
-- **Role-Based Access**: Fine-grained permissions for teams
 
 ---
 

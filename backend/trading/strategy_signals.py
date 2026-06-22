@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
+from trading.broker_execution import LiveOrderExecutionError
 
 
 class StrategySignalMixin:
@@ -66,15 +67,17 @@ class StrategySignalMixin:
             if qty <= 0:
                 return False
             broker_results = []
-            if not is_paper and broker_ids:
-                broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                    broker_ids=broker_ids, allocations=broker_allocs,
+            try:
+                broker_results = await self._place_live_order_or_raise(
+                    sym=sym,
+                    broker_ids=broker_ids,
+                    broker_allocs=broker_allocs,
+                    action_label=f"STRATEGY_{strategy.metadata.name}_BUY",
                     order_template={"symbol": sym, "side": "BUY", "order_type": "MARKET", "price": price},
                 )
-                if any(r.get("status") == "error" for r in broker_results) and broker_results:
-                    all_failed = all(r.get("status") == "error" for r in broker_results)
-                    if all_failed:
-                        return False
+            except LiveOrderExecutionError as exc:
+                deps.logger.warning(str(exc))
+                return True
             self._positions[sym] = {"qty": qty, "avg_entry": price}
             trade = TradeRecord(
                 symbol=sym, side="BUY", price=price, quantity=qty,
@@ -97,14 +100,20 @@ class StrategySignalMixin:
         if signal.action in ("SELL", "STOP_LOSS", "TAKE_PROFIT") and pos["qty"] > 0:
             pnl = round((price - entry) * pos["qty"], 2)
             broker_results = []
-            if not is_paper and broker_ids:
-                broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                    broker_ids=broker_ids, allocations=broker_allocs,
+            try:
+                broker_results = await self._place_live_order_or_raise(
+                    sym=sym,
+                    broker_ids=broker_ids,
+                    broker_allocs=broker_allocs,
+                    action_label=f"STRATEGY_{strategy.metadata.name}_{signal.action}",
                     order_template={
                         "symbol": sym, "side": "SELL", "order_type": "MARKET",
                         "price": price, "quantity": pos["qty"],
                     },
                 )
+            except LiveOrderExecutionError as exc:
+                deps.logger.warning(str(exc))
+                return True
             trade = TradeRecord(
                 symbol=sym, side=signal.action if signal.action != "STOP_LOSS" else "STOP",
                 price=price, quantity=pos["qty"],

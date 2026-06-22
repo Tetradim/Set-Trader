@@ -10,6 +10,7 @@ import deps
 from auth import TokenData, verify_token
 from bot_snapshot import build_bot_snapshot
 from default_tickers import ensure_default_tickers
+from routes.runtime_state import reset_trailing_state_if_needed
 from schemas import TickerConfig
 from strategies import PRESET_STRATEGIES
 
@@ -143,6 +144,7 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                             break
                 if updates and valid:
                     result = await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+                    await reset_trailing_state_if_needed(updates, [sym])
                     logger.info(f"[UPDATE_TICKER] result={result.modified_count} modified")
                     doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:
@@ -184,8 +186,11 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                         backup["strategy"] = "custom"
                         backup.pop("custom_backup", None)
                         await deps.db.tickers.update_one({"symbol": sym}, {"$set": backup, "$unset": {"custom_backup": ""}})
+                        await reset_trailing_state_if_needed(backup, [sym])
                     else:
-                        await deps.db.tickers.update_one({"symbol": sym}, {"$set": {"strategy": "custom"}})
+                        updates = {"strategy": "custom"}
+                        await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+                        await reset_trailing_state_if_needed(updates, [sym])
                     doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:
                         await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
@@ -209,6 +214,7 @@ async def ws_endpoint(websocket: WebSocket, token: Optional[str] = None):
                     updates["strategy"] = preset
                     updates["custom_backup"] = backup_fields
                     await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+                    await reset_trailing_state_if_needed(updates, [sym])
                     doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
                     if doc:
                         await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})

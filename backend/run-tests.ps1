@@ -9,6 +9,9 @@ Set-Location $RepoRoot
 $python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 
 $staticSuites = @(
+    "backend.tests.test_advanced_risk",
+    "backend.tests.test_advanced_risk_routes_static",
+    "backend.tests.test_readme_advanced_risk_static",
     "backend.tests.test_no_demo_artifacts",
     "backend.tests.test_upload_hygiene_static",
     "backend.tests.test_release_security_static",

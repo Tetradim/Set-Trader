@@ -25,6 +25,13 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertNotIn("-v2", text)
         self.assertNotIn("-v3", text)
 
+    def test_batch_wrapper_uses_system_powershell_before_path_lookup(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.bat").read_text(encoding="utf-8")
+
+        self.assertIn("%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", text)
+        self.assertIn('"%POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File', text)
+        self.assertIn("PowerShell was not found", text)
+
     def test_launcher_settings_are_local_only(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("launcher-settings.ini", gitignore)
@@ -34,6 +41,27 @@ class LauncherConsolidationStaticTests(unittest.TestCase):
         self.assertIn("$serverWillOpenBrowser = $false", text)
         self.assertIn('$env:SENTINEL_OPEN_BROWSER = "0"', text)
         self.assertIn("$BrowserProcess = Start-BrowserWindow -Url $url", text)
+
+    def test_root_launcher_bootstraps_beta_runtime_dependencies(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("function Ensure-LauncherDependencies", text)
+        self.assertIn("function Test-VisualCRuntimeInstalled", text)
+        self.assertIn("https://aka.ms/vc14/vc_redist.x64.exe", text)
+        self.assertIn("function Install-MongoDbPortableDependency", text)
+        self.assertIn("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.26.zip", text)
+        self.assertIn("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.26-signed.msi", text)
+        self.assertIn('Join-Path $env:LOCALAPPDATA "Sentinel Pulse\\dependencies"', text)
+        self.assertIn("Expand-Archive", text)
+        self.assertIn("Ensure-LauncherDependencies -MongoPort $MongoPort", text)
+
+    def test_root_launcher_bootstrap_runs_before_mongodb_startup_failure_path(self):
+        text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")
+
+        bootstrap_index = text.index("Ensure-LauncherDependencies -MongoPort $MongoPort")
+        mongo_start_index = text.index('throw "MongoDB was not found. Install MongoDB Community Server or pass -MongoPath."')
+
+        self.assertLess(bootstrap_index, mongo_start_index)
 
     def test_root_launcher_opens_source_frontend_instead_of_backend_root(self):
         text = (ROOT / "Launch-Sentinel-Pulse.ps1").read_text(encoding="utf-8")

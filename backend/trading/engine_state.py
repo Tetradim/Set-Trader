@@ -83,6 +83,10 @@ class EngineStateMixin:
                 "trailing_highs": self._trailing_highs,
                 "pending_sells": self._pending_sells,
                 "last_exit_ts": self._serialize_timestamps(self._last_exit_ts),
+                "recent_prices": self._recent_prices,
+                "last_rebracket_ts": self._serialize_timestamps(self._last_rebracket_ts),
+                "opening_bell_highs": self._opening_bell_highs,
+                "opening_bell_rebracket_done": self._opening_bell_rebracket_done,
             }, "updated_at": now}},
             upsert=True,
         )
@@ -102,7 +106,20 @@ class EngineStateMixin:
             self._trailing_highs = v.get("trailing_highs", {}) or {}
             self._pending_sells = v.get("pending_sells", {}) or {}
             self._last_exit_ts.update(self._restore_timestamps(v.get("last_exit_ts", {}) or {}))
+            self._recent_prices = v.get("recent_prices", {}) or {}
+            self._last_rebracket_ts.update(self._restore_timestamps(v.get("last_rebracket_ts", {}) or {}))
+            self._opening_bell_highs = v.get("opening_bell_highs", {}) or {}
+            self._opening_bell_rebracket_done = v.get("opening_bell_rebracket_done", {}) or {}
             deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
+
+    async def reset_trailing_runtime_state(self, symbols: list[str] | None = None):
+        """Clear cached trailing highs when trailing configuration changes."""
+        if symbols is None:
+            self._trailing_highs.clear()
+        else:
+            for symbol in symbols:
+                self._trailing_highs.pop(str(symbol).upper(), None)
+        await self.save_state()
 
     async def load_recent_exit_cooldowns(self, limit: int = 200):
         """Hydrate recent exit timestamps so restart/reload preserves re-entry guards."""

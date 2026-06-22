@@ -5,9 +5,38 @@ from zoneinfo import ZoneInfo
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
+from trading.broker_execution import LiveOrderExecutionError
 
 
 class BracketManagementMixin:
+    def _previous_bracket_snapshot(self, ticker_doc, buy_target, sell_target, timestamp):
+        return {
+            "buy_target": buy_target,
+            "sell_target": sell_target,
+            "buy_offset": ticker_doc.get("buy_offset"),
+            "sell_offset": ticker_doc.get("sell_offset"),
+            "buy_percent": ticker_doc.get("buy_percent", True),
+            "sell_percent": ticker_doc.get("sell_percent", True),
+            "timestamp": timestamp.isoformat(),
+        }
+
+    async def _set_absolute_bracket(
+        self, sym, ticker_doc, buy_target, sell_target, new_buy, new_sell, *, timestamp=None
+    ):
+        now = timestamp or datetime.now(timezone.utc)
+        updates = {
+            "buy_offset": round(new_buy, 2),
+            "buy_percent": False,
+            "sell_offset": round(new_sell, 2),
+            "sell_percent": False,
+            "prev_bracket": self._previous_bracket_snapshot(ticker_doc, buy_target, sell_target, now),
+        }
+        await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
+        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
+        if doc:
+            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
+        return updates
+
     async def _auto_rebracket(self, sym, ticker_doc, price, buy_target, sell_target):
         """Auto-rebracket to current price when price drifts beyond threshold.
         
@@ -68,13 +97,6 @@ class BracketManagementMixin:
         if not (drifted_up or drifted_down):
             return
         
-        # Save previous bracket for potential revert
-        prev_bracket = {
-            "buy_target": buy_target,
-            "sell_target": sell_target,
-            "timestamp": now.isoformat(),
-        }
-        
         # Calculate new bracket based on recent low/high
         old_buy = buy_target
         old_sell = sell_target
@@ -90,38 +112,9 @@ class BracketManagementMixin:
             new_sell = round(new_buy + spread, 2)
             direction = "DOWN"
         
-        # Handle offset mode (percentage vs absolute)
-        is_pct = ticker_doc.get("sell_percent", True)
-        
-        if is_pct:
-            # Store as percentage offsets relative to current price
-            new_buy_pct = round((new_buy / price - 1) * 100, 2)
-            new_sell_pct = round((new_sell / price - 1) * 100, 2)
-            updates = {
-                "buy_offset": new_buy_pct,
-                "buy_percent": True,
-                "sell_offset": new_sell_pct,
-                "sell_percent": True,
-            }
-        else:
-            # Store as absolute prices
-            updates = {
-                "buy_offset": new_buy,
-                "buy_percent": False,
-                "sell_offset": new_sell,
-                "sell_percent": False,
-            }
-        
-        # Also add previous bracket for revert capability
-        updates["prev_bracket"] = prev_bracket
-        
-        await deps.db.tickers.update_one(
-            {"symbol": sym},
-            {"$set": updates}
+        await self._set_absolute_bracket(
+            sym, ticker_doc, buy_target, sell_target, new_buy, new_sell, timestamp=now
         )
-        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
-        if doc:
-            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
         
         self._last_rebracket_ts[sym] = now
         deps.logger.info(
@@ -147,6 +140,7 @@ class BracketManagementMixin:
             pass
 
         self._recent_prices[sym] = []
+        await self._persist_trade_state()
 
     async def revert_bracket(self, sym: str) -> dict:
         """Revert to previous bracket if available.
@@ -162,21 +156,32 @@ class BracketManagementMixin:
         if not prev:
             return {"success": False, "error": "No previous bracket to revert to"}
         
-        # Restore previous bracket
-        old_buy = prev.get("buy_target")
-        old_sell = prev.get("sell_target")
-        
-        if old_buy and old_sell:
+        if "buy_offset" in prev and "sell_offset" in prev:
+            updates = {
+                "buy_offset": prev.get("buy_offset"),
+                "sell_offset": prev.get("sell_offset"),
+                "buy_percent": prev.get("buy_percent", True),
+                "sell_percent": prev.get("sell_percent", True),
+            }
+            old_buy = prev.get("buy_target", prev.get("buy_offset"))
+            old_sell = prev.get("sell_target", prev.get("sell_offset"))
+        else:
+            # Legacy prev_bracket snapshots only stored target prices.
+            old_buy = prev.get("buy_target")
+            old_sell = prev.get("sell_target")
+            if not old_buy or not old_sell:
+                return {"success": False, "error": "Could not restore previous bracket"}
             price = await deps.price_service.get_price(sym)
             is_pct = ticker.get("sell_percent", True)
-            
             if is_pct:
-                buy_pct = round((old_buy / price - 1) * 100, 2)
-                sell_pct = round((old_sell / price - 1) * 100, 2)
-                updates = {"buy_offset": buy_pct, "sell_offset": sell_pct}
+                updates = {
+                    "buy_offset": round((old_buy / price - 1) * 100, 2),
+                    "sell_offset": round((old_sell / price - 1) * 100, 2),
+                }
             else:
                 updates = {"buy_offset": old_buy, "sell_offset": old_sell}
-            
+
+        if old_buy and old_sell:
             await deps.db.tickers.update_one(
                 {"symbol": sym},
                 {"$set": updates, "$unset": {"prev_bracket": ""}},
@@ -224,14 +229,20 @@ class BracketManagementMixin:
 
                     # Broker routing
                     broker_results = []
-                    if not is_paper and broker_ids:
-                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                            broker_ids=broker_ids, allocations=broker_allocs,
+                    try:
+                        broker_results = await self._place_live_order_or_raise(
+                            sym=sym,
+                            broker_ids=broker_ids,
+                            broker_allocs=broker_allocs,
+                            action_label=f"PARTIAL_BUY_LEG_{i+1}",
                             order_template={
                                 "symbol": sym, "side": "BUY", "order_type": "LIMIT",
                                 "price": price, "limit_price": trigger,
                             },
                         )
+                    except LiveOrderExecutionError as exc:
+                        deps.logger.warning(str(exc))
+                        return
 
                     # Update position with weighted average
                     old_qty = pos.get("qty", 0)
@@ -263,21 +274,32 @@ class BracketManagementMixin:
         # --- STOP LOSS (applies to entire remaining position) ---
         if pos.get("qty", 0) > 0 and entry > 0:
             current_stop = round(entry * (1 + ticker_doc.get("stop_offset", -6.0) / 100), 2) if is_stop_pct else round(ticker_doc.get("stop_offset", 0), 2)
-            should_stop = price <= current_stop
+            effective_stop = current_stop
+            if ticker_doc.get("halve_stop_at_open", False) and self._is_opening_window(30, ticker_doc):
+                stop_distance = entry - current_stop
+                effective_stop = round(entry - (stop_distance * 0.5), 2)
+            should_stop = price <= effective_stop
             if should_stop:
                 pnl = round((price - entry) * pos["qty"], 2)
                 broker_results = []
-                if not is_paper and broker_ids:
-                    broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                        broker_ids=broker_ids, allocations=broker_allocs,
+                try:
+                    broker_results = await self._place_live_order_or_raise(
+                        sym=sym,
+                        broker_ids=broker_ids,
+                        broker_allocs=broker_allocs,
+                        action_label="PARTIAL_STOP",
                         order_template={
                             "symbol": sym, "side": "SELL", "order_type": "STOP",
-                            "price": price, "quantity": pos["qty"], "stop_price": current_stop,
+                            "price": price, "quantity": pos["qty"], "stop_price": effective_stop,
                         },
                     )
+                except LiveOrderExecutionError as exc:
+                    deps.logger.warning(str(exc))
+                    return
+                stop_note = f" [0.5x halved from ${current_stop:.2f}]" if effective_stop != current_stop else ""
                 trade = TradeRecord(
                     symbol=sym, side="STOP", price=price, quantity=pos["qty"],
-                    reason=f"[STOP] Full position stopped @ ${price:.2f} (stop ${current_stop:.2f})",
+                    reason=f"[STOP] Full position stopped @ ${price:.2f} (stop ${effective_stop:.2f}){stop_note}",
                     pnl=pnl, order_type="STOP",
                     entry_price=entry, target_price=current_stop,
                     total_value=round(price * pos["qty"], 2),
@@ -314,14 +336,20 @@ class BracketManagementMixin:
                     pnl = round((price - entry) * sell_qty, 2)
 
                     broker_results = []
-                    if not is_paper and broker_ids:
-                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                            broker_ids=broker_ids, allocations=broker_allocs,
+                    try:
+                        broker_results = await self._place_live_order_or_raise(
+                            sym=sym,
+                            broker_ids=broker_ids,
+                            broker_allocs=broker_allocs,
+                            action_label=f"PARTIAL_SELL_LEG_{i+1}",
                             order_template={
                                 "symbol": sym, "side": "SELL", "order_type": "LIMIT",
                                 "price": price, "quantity": sell_qty, "limit_price": trigger,
                             },
                         )
+                    except LiveOrderExecutionError as exc:
+                        deps.logger.warning(str(exc))
+                        return
 
                     remaining = round(current_qty - sell_qty, 4)
                     filled_sell = list(filled_sell) + [i]
@@ -357,6 +385,8 @@ class BracketManagementMixin:
             trail_pct = ticker_doc.get("trailing_percent", 2.0)
             trail_is_pct = ticker_doc.get("trailing_percent_mode", True)
             trail_otype = ticker_doc.get("trailing_order_type", "limit")
+            if ticker_doc.get("lock_trailing_at_open", False) and self._is_opening_window(30, ticker_doc):
+                return
 
             if sym not in self._trailing_highs:
                 self._trailing_highs[sym] = price
@@ -376,14 +406,20 @@ class BracketManagementMixin:
                 pnl = round((exec_price - entry) * pos["qty"], 2)
                 order_label = "MKT" if trail_otype == "market" else "LMT"
                 broker_results = []
-                if not is_paper and broker_ids:
-                    broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                        broker_ids=broker_ids, allocations=broker_allocs,
+                try:
+                    broker_results = await self._place_live_order_or_raise(
+                        sym=sym,
+                        broker_ids=broker_ids,
+                        broker_allocs=broker_allocs,
+                        action_label="PARTIAL_TRAILING_STOP",
                         order_template={
                             "symbol": sym, "side": "SELL", "order_type": "STOP",
                             "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
                         },
                     )
+                except LiveOrderExecutionError as exc:
+                    deps.logger.warning(str(exc))
+                    return
 
                 trade = TradeRecord(
                     symbol=sym, side="TRAILING_STOP", price=exec_price,
@@ -411,11 +447,11 @@ class BracketManagementMixin:
         rebracket_on = ticker_doc.get("auto_rebracket", False)
         if rebracket_on and pos.get("qty", 0) == 0:
             # Need to compute buy_target for rebracket check
-            avg = ticker_doc.get("avg_price", price)
+            avg_price = avg or price
             buy_off = ticker_doc.get("buy_offset", -3.0)
             is_buy_pct = ticker_doc.get("buy_percent", True)
             sell_off = ticker_doc.get("sell_offset", 2.0)
             is_sell_pct = ticker_doc.get("sell_percent", True)
-            buy_target = round(avg * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
-            sell_target = round(avg * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
+            buy_target = round(avg_price * (1 + buy_off / 100), 2) if is_buy_pct else round(buy_off, 2)
+            sell_target = round(avg_price * (1 + sell_off / 100), 2) if is_sell_pct else round(sell_off, 2)
             await self._auto_rebracket(sym, ticker_doc, price, buy_target, sell_target)

@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse
 
 import deps
 from markets import detect_market_from_symbol
+from routes.runtime_state import reset_trailing_state_if_needed
 from schemas import TickerConfig
 from shared import (
     edge_client,
@@ -135,6 +136,7 @@ async def _set_trailing(symbol: str, trailing_percent: float, *, opening_bell: b
             }
         )
     await deps.db.tickers.update_one({"symbol": symbol}, {"$set": updates})
+    await reset_trailing_state_if_needed(updates, [symbol])
 
 
 async def _set_global_trailing(trailing_percent: float, *, opening_bell: bool = False) -> None:
@@ -151,6 +153,7 @@ async def _set_global_trailing(trailing_percent: float, *, opening_bell: bool = 
             }
         )
     await deps.db.tickers.update_many({}, {"$set": updates})
+    await reset_trailing_state_if_needed(updates)
 
 
 async def _set_stop_buying(symbol: str, reason: str) -> None:
@@ -444,6 +447,10 @@ async def post_decision(symbol: str, body: DecisionRequest):
                 {"symbol": sym},
                 {"$set": {"trailing_enabled": True, "trailing_percent": body.trailing_percent}},
             )
+            await reset_trailing_state_if_needed(
+                {"trailing_enabled": True, "trailing_percent": body.trailing_percent},
+                [sym],
+            )
             result["message"] = f"trailing stop enabled: {body.trailing_percent}%"
         else:
             result["message"] = "trailing_percent required"
@@ -498,6 +505,10 @@ async def enable_trailing(symbol: str, body: TrailingRequest):
     await deps.db.tickers.update_one(
         {"symbol": sym},
         {"$set": {"trailing_enabled": True, "trailing_percent": body.trailing_percent}},
+    )
+    await reset_trailing_state_if_needed(
+        {"trailing_enabled": True, "trailing_percent": body.trailing_percent},
+        [sym],
     )
     
     return {"status": "ok", "symbol": sym, "trailing_enabled": True, "trailing_percent": body.trailing_percent}

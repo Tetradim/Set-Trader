@@ -44,12 +44,12 @@ class TickerConfig(BaseModel):
     auto_stopped: bool = False
     auto_stop_reason: str = ""
     auto_rebracket: bool = False
-    rebracket_threshold: float = Field(2.0, ge=0, le=50, description="Rebracket threshold percentage")
-    rebracket_spread: float = Field(0.80, ge=0.1, le=1.0, description="Rebracket spread")
-    rebracket_cooldown: int = Field(0, ge=0, le=1440, description="Rebracket cooldown in minutes")
-    rebracket_lookback: int = Field(10, ge=1, le=100, description="Rebracket lookback days")
-    rebracket_buffer: float = Field(0.10, ge=0, le=1.0, description="Rebracket buffer percentage")
-    rebracket_min_drift: float = Field(0.50, ge=0, le=10, description="Minimum price movement to trigger rebracket")
+    rebracket_threshold: float = Field(2.0, ge=0, le=99999, description="Absolute price drift required to rebracket")
+    rebracket_spread: float = Field(0.80, ge=0.01, le=99999, description="Absolute price width of the new bracket")
+    rebracket_cooldown: int = Field(0, ge=0, le=3600, description="Cooldown between rebrackets in seconds")
+    rebracket_lookback: int = Field(10, ge=2, le=100, description="Recent price sample count for rebracket anchoring")
+    rebracket_buffer: float = Field(0.10, ge=0, le=99999, description="Absolute price buffer below the recent anchor")
+    rebracket_min_drift: float = Field(0.50, ge=0, le=99999, description="Minimum absolute price movement to trigger rebracket")
     
     @field_validator('symbol')
     @classmethod

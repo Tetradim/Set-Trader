@@ -57,6 +57,10 @@ def test_engine_state_persists_runtime_positions(monkeypatch):
     engine._trailing_highs = {"AAPL": 292.0}
     engine._pending_sells = {"AAPL": {"limit_price": 300.0, "qty": 3.4349, "entry": 291.13}}
     engine._last_exit_ts = {"SPY": exit_ts}
+    engine._last_rebracket_ts = {"AAPL": exit_ts}
+    engine._recent_prices = {"AAPL": [290.0, 291.0, 292.0]}
+    engine._opening_bell_highs = {"AAPL": 293.0}
+    engine._opening_bell_rebracket_done = {"AAPL": "2026-06-15"}
 
     asyncio.run(engine.save_state())
 
@@ -72,6 +76,24 @@ def test_engine_state_persists_runtime_positions(monkeypatch):
     assert restored._trailing_highs == engine._trailing_highs
     assert restored._pending_sells == engine._pending_sells
     assert restored._last_exit_ts["SPY"] == exit_ts
+    assert restored._last_rebracket_ts["AAPL"] == exit_ts
+    assert restored._recent_prices == engine._recent_prices
+    assert restored._opening_bell_highs == engine._opening_bell_highs
+    assert restored._opening_bell_rebracket_done == engine._opening_bell_rebracket_done
+
+
+def test_reset_trailing_runtime_state_persists_requested_symbols(monkeypatch):
+    db = _Db()
+    monkeypatch.setattr(deps, "db", db)
+    monkeypatch.setattr(deps, "logger", _Logger())
+
+    engine = TradingEngine()
+    engine._trailing_highs = {"AAPL": 292.0, "MSFT": 430.0}
+
+    asyncio.run(engine.reset_trailing_runtime_state(["AAPL"]))
+
+    assert engine._trailing_highs == {"MSFT": 430.0}
+    assert db.settings.doc["value"]["trailing_highs"] == {"MSFT": 430.0}
 
 
 def test_bot_reload_state_endpoint_loads_saved_runtime_state(monkeypatch):

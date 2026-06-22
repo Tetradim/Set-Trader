@@ -10,6 +10,7 @@ from resilience import CircuitOpenError
 from risk_controls import RiskControls, RiskCheckResult, OrderRestriction, KillSwitchLevel
 from trading.idempotency import OrderIdempotencyMixin
 from trading.engine_state import EngineStateMixin
+from trading.broker_execution import BrokerExecutionMixin
 from trading.order_lifecycle import OrderLifecycleMixin
 from trading.ticker_evaluation import TickerEvaluationMixin
 from trading.strategy_signals import StrategySignalMixin
@@ -22,6 +23,7 @@ _ET = ZoneInfo("America/New_York")   # US Eastern, DST-aware.
 class TradingEngine(
     OrderIdempotencyMixin,
     EngineStateMixin,
+    BrokerExecutionMixin,
     OrderLifecycleMixin,
     TickerEvaluationMixin,
     StrategySignalMixin,

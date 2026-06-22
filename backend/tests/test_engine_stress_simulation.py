@@ -1,6 +1,7 @@
 import asyncio
 import sys
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -195,6 +196,20 @@ class _Db:
         self.settings = _Collection(key_field="key")
 
 
+class _BrokerMgr:
+    def __init__(self, results):
+        self.results = results
+        self.calls = []
+
+    async def place_orders_for_ticker(self, broker_ids, allocations, order_template):
+        self.calls.append({
+            "broker_ids": list(broker_ids),
+            "allocations": dict(allocations),
+            "order_template": deepcopy(order_template),
+        })
+        return deepcopy(self.results)
+
+
 @pytest.fixture
 def engine_env(monkeypatch):
     tickers = [
@@ -383,6 +398,87 @@ def test_gap_widening_stress_runs_repeated_cycles_without_state_leaks(engine_env
     assert "GAP" not in env.engine._trailing_highs
 
 
+def test_live_buy_with_empty_broker_results_does_not_create_internal_position(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "LIVEBUY",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 1,
+        "buy_percent": False,
+        "buy_offset": 100.0,
+        "buy_order_type": "limit",
+        "sell_percent": False,
+        "sell_offset": 110.0,
+        "stop_percent": False,
+        "stop_offset": 90.0,
+        "trailing_enabled": False,
+        "broker_ids": ["b1"],
+        "broker_allocations": {"b1": 1_000.0},
+        "compound_profits": False,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.price_service.prices_by_symbol["LIVEBUY"] = [99.0]
+    deps.broker_mgr = _BrokerMgr([])
+    env.engine.simulate_24_7 = False
+    env.engine.live_during_market_hours = True
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    assert [trade for trade in env.db.trades.docs if trade["symbol"] == "LIVEBUY"] == []
+    assert env.engine._positions.get("LIVEBUY", {}).get("qty", 0) == 0
+
+
+@pytest.mark.parametrize(
+    ("symbol", "price", "ticker_updates", "trailing_high"),
+    [
+        ("LIVESELL", 111.0, {"sell_offset": 110.0, "stop_offset": 90.0, "trailing_enabled": False}, None),
+        ("LIVESTOP", 89.0, {"sell_offset": 120.0, "stop_offset": 90.0, "trailing_enabled": False}, None),
+        (
+            "LIVETRAIL",
+            108.0,
+            {"sell_offset": 120.0, "stop_offset": 90.0, "trailing_enabled": True, "trailing_percent": 1.0},
+            110.0,
+        ),
+    ],
+)
+def test_live_exit_with_all_broker_errors_keeps_position_open(engine_env, symbol, price, ticker_updates, trailing_high):
+    env = engine_env
+    ticker = {
+        "symbol": symbol,
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 1,
+        "buy_percent": False,
+        "buy_offset": 90.0,
+        "sell_percent": False,
+        "sell_order_type": "limit",
+        "stop_percent": False,
+        "stop_order_type": "limit",
+        "trailing_percent_mode": True,
+        "trailing_order_type": "limit",
+        "broker_ids": ["b1"],
+        "broker_allocations": {"b1": 1_000.0},
+        "compound_profits": False,
+        **ticker_updates,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.engine._positions[symbol] = {"qty": 10.0, "avg_entry": 100.0, "high": 100.0}
+    if trailing_high is not None:
+        env.engine._trailing_highs[symbol] = trailing_high
+    env.price_service.prices_by_symbol[symbol] = [price]
+    deps.broker_mgr = _BrokerMgr([{"broker_id": "b1", "status": "error", "error": "broker down"}])
+    env.engine.simulate_24_7 = False
+    env.engine.live_during_market_hours = True
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    assert [trade for trade in env.db.trades.docs if trade["symbol"] == symbol] == []
+    assert env.engine._positions[symbol]["qty"] == 10.0
+
+
 def test_market_sell_order_type_waits_for_sell_target(engine_env):
     env = engine_env
     ticker = {
@@ -514,6 +610,83 @@ def test_halved_opening_stop_uses_tightened_threshold(engine_env):
     assert env.engine._positions["ORD"]["qty"] == 0
 
 
+def test_wait_day_after_buy_still_allows_stop_loss_exit(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "WAITSTOP",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 1,
+        "buy_percent": False,
+        "buy_offset": 90.0,
+        "sell_percent": False,
+        "sell_offset": 120.0,
+        "stop_percent": False,
+        "stop_offset": 95.0,
+        "stop_order_type": "limit",
+        "wait_day_after_buy": True,
+        "trailing_enabled": False,
+        "broker_ids": [],
+        "broker_allocations": {},
+        "compound_profits": False,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.engine._positions["WAITSTOP"] = {"qty": 10.0, "avg_entry": 100.0, "high": 100.0}
+    env.price_service.prices_by_symbol["WAITSTOP"] = [94.0]
+    env.db.trades.docs.append({
+        "symbol": "WAITSTOP",
+        "side": "BUY",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    trades = [trade for trade in env.db.trades.docs if trade["symbol"] == "WAITSTOP" and trade["side"] == "STOP"]
+    assert len(trades) == 1
+    assert env.engine._positions["WAITSTOP"]["qty"] == 0
+
+
+def test_partial_fill_trailing_lock_at_open_keeps_remaining_position(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "PARTLOCK",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 1,
+        "partial_fills_enabled": True,
+        "buy_legs": [],
+        "sell_legs": [],
+        "stop_percent": False,
+        "stop_offset": 90.0,
+        "trailing_enabled": True,
+        "trailing_percent": 1.0,
+        "trailing_percent_mode": True,
+        "trailing_order_type": "limit",
+        "lock_trailing_at_open": True,
+        "broker_ids": [],
+        "broker_allocations": {},
+        "compound_profits": False,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.engine._positions["PARTLOCK"] = {
+        "qty": 10.0,
+        "avg_entry": 100.0,
+        "buy_legs_filled": [0],
+        "sell_legs_filled": [],
+    }
+    env.engine._trailing_highs["PARTLOCK"] = 110.0
+    env.engine._is_opening_window = lambda *_args, **_kwargs: True
+    env.price_service.prices_by_symbol["PARTLOCK"] = [108.0]
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    assert [trade for trade in env.db.trades.docs if trade["symbol"] == "PARTLOCK"] == []
+    assert env.engine._positions["PARTLOCK"]["qty"] == 10.0
+    assert env.engine._trailing_highs["PARTLOCK"] == 110.0
+
+
 def test_auto_rebracket_does_not_recenter_immediately_after_buy(engine_env):
     env = engine_env
     ticker = _ticker(env, "REB")
@@ -528,6 +701,86 @@ def test_auto_rebracket_does_not_recenter_immediately_after_buy(engine_env):
     assert "prev_bracket" not in updated
     assert updated["buy_offset"] == 103.0
     assert updated["sell_offset"] == 104.0
+
+
+def test_auto_rebracket_converts_percent_config_to_absolute_bracket(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "PCTREB",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 100.0,
+        "avg_days": 30,
+        "buy_percent": True,
+        "buy_offset": -3.0,
+        "sell_percent": True,
+        "sell_offset": 3.0,
+        "auto_rebracket": True,
+        "rebracket_threshold": 2.0,
+        "rebracket_min_drift": 0.50,
+        "rebracket_spread": 0.80,
+        "rebracket_buffer": 0.10,
+        "rebracket_lookback": 3,
+        "rebracket_cooldown": 0,
+        "broker_ids": [],
+        "broker_allocations": {},
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+
+    asyncio.run(env.engine._auto_rebracket("PCTREB", ticker, 120.0, 97.0, 103.0))
+
+    updated = _ticker(env, "PCTREB")
+    assert updated["buy_percent"] is False
+    assert updated["sell_percent"] is False
+    assert updated["buy_offset"] == 119.9
+    assert updated["sell_offset"] == 120.7
+    assert updated["prev_bracket"]["buy_offset"] == -3.0
+    assert updated["prev_bracket"]["sell_offset"] == 3.0
+    assert updated["prev_bracket"]["buy_percent"] is True
+    assert updated["prev_bracket"]["sell_percent"] is True
+    state_doc = next(doc for doc in env.db.settings.docs if doc["key"] == "engine_state")
+    assert "PCTREB" in state_doc["value"]["last_rebracket_ts"]
+
+
+def test_opening_bell_post_window_sets_real_absolute_bracket(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "OPENRB",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 30,
+        "buy_percent": False,
+        "buy_offset": 90.0,
+        "sell_percent": False,
+        "sell_offset": 110.0,
+        "sell_order_type": "limit",
+        "stop_percent": False,
+        "stop_offset": 80.0,
+        "trailing_enabled": False,
+        "opening_bell_enabled": True,
+        "rebracket_spread": 0.80,
+        "rebracket_buffer": 0.10,
+        "broker_ids": [],
+        "broker_allocations": {},
+        "compound_profits": False,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.engine._positions["OPENRB"] = {"qty": 10.0, "avg_entry": 100.0, "high": 100.0}
+    env.engine._opening_bell_highs["OPENRB"] = 105.0
+    env.engine._is_opening_window = lambda *_args, **_kwargs: False
+    env.engine._is_past_opening_window = lambda *_args, **_kwargs: True
+    env.price_service.prices_by_symbol["OPENRB"] = [104.0]
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    updated = _ticker(env, "OPENRB")
+    assert updated["buy_percent"] is False
+    assert updated["sell_percent"] is False
+    assert updated["buy_offset"] == 104.9
+    assert updated["sell_offset"] == 105.7
+    assert updated["prev_bracket"]["buy_offset"] == 90.0
+    assert updated["prev_bracket"]["sell_offset"] == 110.0
 
 
 def test_manual_pending_sell_and_rebracket_revert_paths(engine_env):

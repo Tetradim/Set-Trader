@@ -5,6 +5,10 @@ from zoneinfo import ZoneInfo
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
+from trading.broker_execution import LiveOrderExecutionError
+
+
+_ET = ZoneInfo("America/New_York")
 
 
 class TickerEvaluationMixin:
@@ -87,7 +91,9 @@ class TickerEvaluationMixin:
                     return  # signal was executed — skip bracket logic
 
         # --- PARTIAL FILLS BRANCH ---
-        if ticker_doc.get("partial_fills_enabled") and (ticker_doc.get("buy_legs") or ticker_doc.get("sell_legs")):
+        has_partial_legs = ticker_doc.get("buy_legs") or ticker_doc.get("sell_legs")
+        has_partial_position = pos.get("qty", 0) > 0
+        if ticker_doc.get("partial_fills_enabled") and (has_partial_legs or has_partial_position):
             await self._evaluate_partial_fills(
                 ticker_doc, sym, price, avg, pos, entry,
                 effective_power, broker_ids, broker_allocs,
@@ -104,20 +110,21 @@ class TickerEvaluationMixin:
                 if qty > 0:
                     is_paper = self.is_paper_trading()
                     broker_results = []
-
-                    if not is_paper and broker_ids:
-                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                            broker_ids=broker_ids, allocations=broker_allocs,
+                    try:
+                        broker_results = await self._place_live_order_or_raise(
+                            sym=sym,
+                            broker_ids=broker_ids,
+                            broker_allocs=broker_allocs,
+                            action_label="BUY",
                             order_template={
                                 "symbol": sym, "side": "BUY", "order_type": buy_otype.upper(),
                                 "price": exec_price,
                                 "limit_price": buy_target if buy_otype == "limit" else None,
                             },
                         )
-                        any_success = any(r.get("status") not in ("error",) for r in broker_results)
-                        if not any_success and broker_results:
-                            deps.logger.warning(f"All broker orders failed for {sym} BUY — skipping position tracking")
-                            return
+                    except LiveOrderExecutionError as exc:
+                        deps.logger.warning(str(exc))
+                        return
 
                     self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
                     order_label = "MKT" if buy_otype == "market" else "LMT"
@@ -139,6 +146,7 @@ class TickerEvaluationMixin:
         elif pos["qty"] > 0:
             entry = pos["avg_entry"]
 
+            defer_profit_sell = False
             wait_day = ticker_doc.get("wait_day_after_buy", False)
             if wait_day:
                 last_buy = await deps.db.trades.find_one(
@@ -151,7 +159,7 @@ class TickerEvaluationMixin:
                     buy_date = buy_dt.date()
                     today_et = datetime.now(_ET).date()
                     if buy_date >= today_et:
-                        return
+                        defer_profit_sell = True
 
             # --- OPENING BELL MODE ---
             # During first 30 min: force trailing stop, override normal sell rules
@@ -164,10 +172,11 @@ class TickerEvaluationMixin:
 
                 if self._is_opening_window(30, ticker_doc):
                     # During opening window: force trailing stop
-                    ob_high = self._opening_bell_highs.get(sym, price)
-                    if price > ob_high:
+                    ob_high = self._opening_bell_highs.get(sym)
+                    if ob_high is None or price > ob_high:
                         self._opening_bell_highs[sym] = price
                         ob_high = price
+                        await self._persist_trade_state()
 
                     ob_trail_stop = round(ob_high * (1 - ob_trail_val / 100), 2) if ob_trail_is_pct else round(ob_high - ob_trail_val, 2)
 
@@ -177,14 +186,20 @@ class TickerEvaluationMixin:
                         pnl = round((exec_price - entry) * pos["qty"], 2)
                         is_paper = self.is_paper_trading()
                         broker_results = []
-                        if not is_paper and broker_ids:
-                            broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                                broker_ids=broker_ids, allocations=broker_allocs,
+                        try:
+                            broker_results = await self._place_live_order_or_raise(
+                                sym=sym,
+                                broker_ids=broker_ids,
+                                broker_allocs=broker_allocs,
+                                action_label="OPENING_BELL_TRAILING_STOP",
                                 order_template={
                                     "symbol": sym, "side": "SELL", "order_type": "STOP",
                                     "price": exec_price, "quantity": pos["qty"], "stop_price": ob_trail_stop,
                                 },
                             )
+                        except LiveOrderExecutionError as exc:
+                            deps.logger.warning(str(exc))
+                            return
                         trade = TradeRecord(
                             symbol=sym, side="TRAILING_STOP", price=exec_price,
                             quantity=pos["qty"],
@@ -213,19 +228,19 @@ class TickerEvaluationMixin:
                     # Past opening window - auto-rebracket once per day
                     if self._opening_bell_rebracket_done.get(sym) != today_str:
                         ob_high = self._opening_bell_highs.get(sym, price)
-                        # Rebracket: use the opening high as new base for brackets
-                        # Update the ticker's bracket center to the opening high
-                        await deps.db.tickers.update_one(
-                            {"symbol": sym},
-                            {"$set": {"avg_days": 1}}  # Short lookback so avg converges to recent price
+                        # Rebracket: use the opening high as a real absolute bracket anchor.
+                        spread = ticker_doc.get("rebracket_spread", 0.80)
+                        buffer = ticker_doc.get("rebracket_buffer", 0.10)
+                        new_buy = round(ob_high - buffer, 2)
+                        new_sell = round(new_buy + spread, 2)
+                        await self._set_absolute_bracket(
+                            sym, ticker_doc, buy_target, sell_target, new_buy, new_sell,
+                            timestamp=datetime.now(timezone.utc),
                         )
                         self._opening_bell_rebracket_done[sym] = today_str
                         self._opening_bell_highs.pop(sym, None)
+                        await self._persist_trade_state()
                         deps.logger.info(f"OPENING BELL REBRACKET: {sym} brackets reset after opening window (high was ${ob_high:.2f})")
-                        # Broadcast update
-                        doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
-                        if doc:
-                            await deps.ws_manager.broadcast({"type": "TICKER_UPDATED", "ticker": doc})
                     # Continue to normal trading logic below
 
             if trailing:
@@ -252,20 +267,26 @@ class TickerEvaluationMixin:
                         order_label = "MKT" if trail_otype == "market" else "LMT"
                         is_paper = self.is_paper_trading()
                         broker_results = []
-                        if not is_paper and broker_ids:
-                            broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                                broker_ids=broker_ids, allocations=broker_allocs,
+                        try:
+                            broker_results = await self._place_live_order_or_raise(
+                                sym=sym,
+                                broker_ids=broker_ids,
+                                broker_allocs=broker_allocs,
+                                action_label="TRAILING_STOP",
                                 order_template={
                                     "symbol": sym, "side": "SELL", "order_type": "STOP",
                                     "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
                                 },
                             )
+                        except LiveOrderExecutionError as exc:
+                            deps.logger.warning(str(exc))
+                            return
                         trade = TradeRecord(
                             symbol=sym, side="TRAILING_STOP", price=exec_price,
                             quantity=pos["qty"],
                             reason=f"[{order_label}] Trailing stop hit ${trail_stop} (high ${high})",
                             pnl=pnl, order_type=trail_otype.upper(),
-                            rule_mode="PERCENT" if is_sell_pct else "DOLLAR",
+                            rule_mode="PERCENT" if trail_is_pct else "DOLLAR",
                             entry_price=entry, target_price=trail_stop,
                             total_value=round(exec_price * pos["qty"], 2),
                             buy_power=effective_power, avg_price=avg,
@@ -281,22 +302,28 @@ class TickerEvaluationMixin:
                         await self._update_profit(sym, pnl, compound)
                         return
 
-            should_sell = price >= sell_target
+            should_sell = price >= sell_target and not defer_profit_sell
             if should_sell:
                 exec_price = price
                 pnl = round((exec_price - entry) * pos["qty"], 2)
                 order_label = "MKT" if sell_otype == "market" else "LMT"
                 is_paper = self.is_paper_trading()
                 broker_results = []
-                if not is_paper and broker_ids:
-                    broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                        broker_ids=broker_ids, allocations=broker_allocs,
+                try:
+                    broker_results = await self._place_live_order_or_raise(
+                        sym=sym,
+                        broker_ids=broker_ids,
+                        broker_allocs=broker_allocs,
+                        action_label="SELL",
                         order_template={
                             "symbol": sym, "side": "SELL", "order_type": sell_otype.upper(),
                             "price": exec_price, "quantity": pos["qty"],
                             "limit_price": sell_target if sell_otype == "limit" else None,
                         },
                     )
+                except LiveOrderExecutionError as exc:
+                    deps.logger.warning(str(exc))
+                    return
                 trade = TradeRecord(
                     symbol=sym, side="SELL", price=exec_price, quantity=pos["qty"],
                     reason=f"[{order_label}] Price ${exec_price} >= sell target ${sell_target}",
@@ -329,14 +356,20 @@ class TickerEvaluationMixin:
                     order_label = "MKT" if stop_otype == "market" else "LMT"
                     is_paper = self.is_paper_trading()
                     broker_results = []
-                    if not is_paper and broker_ids:
-                        broker_results = await deps.broker_mgr.place_orders_for_ticker(
-                            broker_ids=broker_ids, allocations=broker_allocs,
+                    try:
+                        broker_results = await self._place_live_order_or_raise(
+                            sym=sym,
+                            broker_ids=broker_ids,
+                            broker_allocs=broker_allocs,
+                            action_label="STOP",
                             order_template={
                                 "symbol": sym, "side": "SELL", "order_type": "STOP",
                                 "price": exec_price, "quantity": pos["qty"], "stop_price": effective_stop,
                             },
                         )
+                    except LiveOrderExecutionError as exc:
+                        deps.logger.warning(str(exc))
+                        return
                     stop_note = f" [0.5x halved from ${stop_target}]" if effective_stop != stop_target else ""
                     trade = TradeRecord(
                         symbol=sym, side="STOP", price=exec_price, quantity=pos["qty"],
