@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import {
+  buildTickerTopMetric,
   buildTickerChartData,
   computeResizeState,
   getChartDomain,
@@ -80,4 +81,49 @@ const history = [
     snapGrid: 10,
   });
   assert.deepEqual(state, { width: 240, height: 241 });
+}
+
+{
+  const metric = buildTickerTopMetric({
+    currentPrice: 105,
+    priceHistory: history,
+    position: { quantity: 2, unrealized_pnl: 7.25 },
+  });
+  assert.deepEqual(metric, {
+    kind: 'unrealized_pnl',
+    value: 7.25,
+    text: 'UPL +$7.25',
+    tone: 'up',
+    title: 'Unrealized P&L',
+  });
+}
+
+{
+  const metric = buildTickerTopMetric({
+    currentPrice: 102,
+    priceHistory: history,
+  });
+  assert.deepEqual(metric, {
+    kind: 'price_change',
+    value: -2,
+    text: 'CHG -$2.00',
+    tone: 'dn',
+    title: 'Recent price change',
+  });
+}
+
+{
+  const metric = buildTickerTopMetric({
+    currentPrice: 108,
+    priceHistory: [{ time: 1000, price: 100 }],
+  });
+  assert.equal(metric?.text, 'CHG +$8.00');
+}
+
+{
+  const metric = buildTickerTopMetric({
+    currentPrice: 100,
+    priceHistory: [{ time: 1000, price: 100 }],
+  });
+  assert.equal(metric, null);
 }

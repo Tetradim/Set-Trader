@@ -8,6 +8,19 @@ export type ChartPoint = {
   price: number;
 };
 
+export type TickerTopMetricPosition = {
+  quantity?: number;
+  unrealized_pnl?: number;
+};
+
+export type TickerTopMetric = {
+  kind: 'unrealized_pnl' | 'price_change';
+  value: number;
+  text: string;
+  tone: 'up' | 'dn';
+  title: string;
+};
+
 export type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 export type ResizeInput = {
@@ -93,6 +106,47 @@ export function getChartDomain(chartData: ChartPoint[]): [number, number] {
   return [min - padding, max + padding];
 }
 
+export function buildTickerTopMetric(input: {
+  currentPrice: number;
+  priceHistory: PricePoint[];
+  position?: TickerTopMetricPosition;
+}): TickerTopMetric | null {
+  const quantity = Number(input.position?.quantity ?? 0);
+  const unrealizedPnl = Number(input.position?.unrealized_pnl);
+
+  if (quantity > 0 && Number.isFinite(unrealizedPnl)) {
+    return formatTickerTopMetric('unrealized_pnl', unrealizedPnl, 'UPL', 'Unrealized P&L');
+  }
+
+  const cleanHistory = input.priceHistory
+    .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.price) && point.price > 0)
+    .slice(-2);
+  const currentPrice = Number.isFinite(input.currentPrice) && input.currentPrice > 0 ? input.currentPrice : undefined;
+
+  let latestPrice = currentPrice;
+  let previousPrice: number | undefined;
+
+  if (cleanHistory.length >= 2) {
+    const lastHistoryPrice = cleanHistory[cleanHistory.length - 1].price;
+    const previousHistoryPrice = cleanHistory[cleanHistory.length - 2].price;
+    if (latestPrice === undefined || Math.abs(latestPrice - lastHistoryPrice) < 0.0001) {
+      latestPrice = lastHistoryPrice;
+      previousPrice = previousHistoryPrice;
+    } else {
+      previousPrice = lastHistoryPrice;
+    }
+  } else if (cleanHistory.length === 1 && latestPrice !== undefined) {
+    previousPrice = cleanHistory[0].price;
+  }
+
+  if (latestPrice === undefined || previousPrice === undefined) return null;
+
+  const change = latestPrice - previousPrice;
+  if (!Number.isFinite(change) || Math.abs(change) < 0.005) return null;
+
+  return formatTickerTopMetric('price_change', change, 'CHG', 'Recent price change');
+}
+
 export function computeResizeState(input: ResizeInput): ResizeState {
   const changesWidth = input.direction.includes('w') || input.direction.includes('e');
   const changesHeight = input.direction.includes('n') || input.direction.includes('s');
@@ -105,6 +159,21 @@ export function computeResizeState(input: ResizeInput): ResizeState {
   return {
     width: input.snap && changesWidth ? snapToGrid(rawWidth, input.snapGrid, input.minWidth) : rawWidth,
     height: input.snap && changesHeight ? snapToGrid(rawHeight, input.snapGrid, input.minHeight) : rawHeight,
+  };
+}
+
+function formatTickerTopMetric(
+  kind: TickerTopMetric['kind'],
+  value: number,
+  prefix: string,
+  title: string,
+): TickerTopMetric {
+  return {
+    kind,
+    value,
+    text: `${prefix} ${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`,
+    tone: value >= 0 ? 'up' : 'dn',
+    title,
   };
 }
 

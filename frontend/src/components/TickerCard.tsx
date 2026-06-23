@@ -6,6 +6,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { getMarketMeta, formatPrice } from '@/lib/market-utils';
 import { TunnelSVG } from './TunnelSVG';
 import {
+  buildTickerTopMetric,
   computeResizeState,
   ResizeDirection,
   TICKER_CARD_MIN_HEIGHT,
@@ -32,6 +33,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
   }
   const price              = useStore((s) => s.prices[ticker.symbol] ?? 0);
   const pnl                = useStore((s) => s.profits[ticker.symbol] ?? 0);
+  const position           = useStore((s) => s.positions[ticker.symbol]);
   const priceHistory       = useStore((s) => s.priceHistory[ticker.symbol] ?? []);
   const currencyDisplay    = useStore((s) => s.currencyDisplay);
   const fxRates            = useStore((s) => s.fxRates);
@@ -112,6 +114,7 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
   const isPositive = pnl >= 0;
   const marketMeta = getMarketMeta(ticker);
   const primaryPrice = formatPrice(price, ticker, currencyDisplay, fxRates);
+  const topMetric = buildTickerTopMetric({ currentPrice: price, priceHistory, position });
 
   // Card active class
   const cardClass = [
@@ -187,9 +190,13 @@ export const TickerCard = memo(function TickerCard({ ticker, onConfigOpen, tunne
         {/* Price */}
         <div className="sp-price-row">
           <div className="sp-price">{primaryPrice}</div>
-          {pnl !== 0 && (
-            <div className={`sp-price-chg ${pnl >= 0 ? 'up' : 'dn'}`}>
-              {pnl >= 0 ? '+' : ''}${Math.abs(pnl).toFixed(2)}
+          {topMetric && (
+            <div
+              className={`sp-price-chg ${topMetric.tone}`}
+              title={topMetric.title}
+              aria-label={`${topMetric.title}: ${topMetric.text}`}
+            >
+              {topMetric.text}
             </div>
           )}
         </div>
