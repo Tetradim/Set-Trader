@@ -17,6 +17,7 @@ class PreflightStaticTest(unittest.TestCase):
         self.assertIn("account_balance", text)
         self.assertIn("edge_api_key", text)
         self.assertIn("ALERT_WEBHOOK_SECRET", text)
+        self.assertIn("SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET", text)
         self.assertIn("global_daily_drawdown", text)
         self.assertIn("ready_to_trade", text)
 
@@ -59,6 +60,56 @@ class PreflightStaticTest(unittest.TestCase):
         self.assertIn("'preflight'", tabs)
         self.assertIn("/api/preflight", preflight)
         self.assertIn("ready_to_trade", preflight)
+
+    def test_live_trading_readiness_runbook_exists(self):
+        runbook = self.read("docs/runbooks/live-trading-readiness.md")
+
+        required_terms = [
+            "ENABLE LIVE TRADING",
+            "dry-run",
+            "Simulate 24/7",
+            "/api/preflight",
+            "/api/audit-logs",
+            "panic stop",
+            "kill switch",
+            "broker reconciliation",
+            "SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET",
+            "rollback",
+            "Do not place live orders",
+        ]
+        for term in required_terms:
+            self.assertIn(term, runbook)
+
+    def test_ci_runs_live_trading_readiness_checks_before_packaging(self):
+        workflow = self.read(".github/workflows/build.yml")
+
+        required_terms = [
+            "pull_request:",
+            "docs/runbooks/**",
+            "actions/setup-python@v5",
+            "actions/setup-node@v4",
+            "cache-dependency-path: backend/requirements.txt",
+            "cache-dependency-path: frontend/package-lock.json",
+            "pip install -r backend/requirements.txt",
+            "python -m pytest",
+            "backend/tests/test_release_security_static.py",
+            "backend/tests/test_preflight_static.py",
+            "backend/tests/test_settings_live_confirmation.py",
+            "backend/tests/test_order_mode_routing.py",
+            "backend/tests/test_engine_state_persistence.py",
+            "backend/tests/test_engine_stress_simulation.py",
+            "backend/tests/test_audit_service.py",
+            "npm ci",
+            "npm audit --audit-level=high",
+            "npm run test:unit",
+            "npm run build",
+        ]
+        for term in required_terms:
+            self.assertIn(term, workflow)
+
+        self.assertRegex(workflow, r"(?m)^permissions:\n\s+contents:\s+read")
+        self.assertRegex(workflow, r"(?s)\n  readiness-checks:\n.*runs-on:\s+ubuntu-latest")
+        self.assertRegex(workflow, r"(?s)\n  build:\n.*needs:\s+readiness-checks")
 
 
 if __name__ == "__main__":

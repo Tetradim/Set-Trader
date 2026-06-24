@@ -5,13 +5,31 @@ import base64
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Set
-from brokers import BrokerAdapter, BrokerOrder, get_broker_adapter, get_broker_info, BROKER_REGISTRY
+from brokers import (
+    BROKER_REGISTRY,
+    BrokerAdapter,
+    BrokerOrder,
+    broker_connection_enabled,
+    broker_unavailable_message,
+    get_broker_adapter,
+    get_broker_info,
+)
+from brokers.base import OrderSide, OrderType
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from runtime_secrets import get_or_create_secret
 
 logger = logging.getLogger("SentinelPulse")
+BROKER_ORDER_FAILURE_STATUSES = {
+    "cancelled",
+    "canceled",
+    "duplicate",
+    "error",
+    "expired",
+    "failed",
+    "rejected",
+}
 
 # Generate a secure key from the environment or create a new one
 def _get_encryption_key() -> bytes:
@@ -91,12 +109,20 @@ class BrokerConnectionManager:
         key_data = f"{symbol}:{side}:{quantity}:{order_type}:{datetime.now(timezone.utc).isoformat()[:19]}"
         return f"sp_{uuid.uuid5(uuid.NAMESPACE_DNS, key_data)}"
 
+    def _order_side(self, side) -> OrderSide:
+        value = getattr(side, "value", side)
+        return OrderSide(str(value).upper())
+
+    def _order_type(self, order_type) -> OrderType:
+        value = getattr(order_type, "value", order_type)
+        return OrderType(str(value).upper())
+
     async def _check_duplicate_order(self, idempotency_key: str) -> Optional[dict]:
         """Check if an order with this idempotency key was already submitted."""
         if idempotency_key in self._submitted_orders:
             existing = self._submitted_orders[idempotency_key]
             # Check if order is still pending or was filled recently
-            if existing.get("status") in ("pending", "submitted", "filled"):
+            if existing.get("status") in ("pending", "submitted", "partially_filled", "filled"):
                 logger.warning(f"Duplicate order detected: {idempotency_key}")
                 return existing
         return None
@@ -109,6 +135,8 @@ class BrokerConnectionManager:
             "quantity": order_info.get("quantity"),
             "status": order_info.get("status", "submitted"),
             "broker_order_id": order_info.get("broker_order_id", ""),
+            "filled_price": order_info.get("filled_price", 0.0),
+            "filled_quantity": order_info.get("filled_quantity", 0.0),
             "submitted_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -156,6 +184,14 @@ class BrokerConnectionManager:
 
     async def connect_broker(self, broker_id: str, credentials: dict = None) -> bool:
         """Connect to a broker. Saves credentials on success."""
+        info = get_broker_info(broker_id)
+        if not info:
+            self._failed[broker_id] = "Broker not found"
+            return False
+        if not broker_connection_enabled(info):
+            self._failed[broker_id] = broker_unavailable_message(info)
+            return False
+
         if not credentials:
             credentials = await self.load_credentials(broker_id)
         if not credentials:
@@ -269,8 +305,8 @@ class BrokerConnectionManager:
             price = max(order_template.get("price", 1), 0.01)
             order = BrokerOrder(
                 symbol=order_template["symbol"],
-                side=order_template["side"],
-                order_type=order_template["order_type"],
+                side=self._order_side(order_template["side"]),
+                order_type=self._order_type(order_template["order_type"]),
                 quantity=order_template.get("quantity", 0) or round(alloc / price, 4),
                 limit_price=order_template.get("limit_price"),
                 stop_price=order_template.get("stop_price"),
@@ -325,10 +361,13 @@ class BrokerConnectionManager:
         duplicate = await self._check_duplicate_order(order.idempotency_key)
         if duplicate:
             logger.info(f"Duplicate order blocked: {order.idempotency_key}")
+            broker_order_id = duplicate.get("broker_order_id", "")
             return {
                 "status": "duplicate",
-                "order_id": duplicate.get("broker_order_id", ""),
-                "filled_price": 0.0,
+                "broker_order_id": broker_order_id,
+                "order_id": broker_order_id,
+                "filled_price": duplicate.get("filled_price", 0.0),
+                "filled_quantity": duplicate.get("filled_quantity", 0.0),
                 "error": "Duplicate order prevented",
                 "idempotency_key": order.idempotency_key,
             }
@@ -361,6 +400,37 @@ class BrokerConnectionManager:
         try:
             result = await adapter.place_order(order)
             elapsed_ms = (time.time() - start_time) * 1000
+            result_status = str(result.status or "").lower()
+            result_error = str(result.error or "").strip()
+
+            if result_error or result_status in BROKER_ORDER_FAILURE_STATUSES:
+                failure_message = result_error or f"Broker returned order status: {result.status}"
+                await broker_resilience.record_failure(broker_id, Exception(failure_message))
+                await audit_service.log_broker_api(
+                    broker_id, "place_order", "POST",
+                    success=False, response_time_ms=elapsed_ms, error_message=failure_message,
+                    request_data={"symbol": symbol, "side": order.side, "qty": order.quantity, "idempotency_key": order.idempotency_key},
+                )
+                await self._track_submitted_order(order.idempotency_key, {
+                    "symbol": symbol,
+                    "side": order.side.value,
+                    "quantity": order.quantity,
+                    "status": result.status,
+                    "broker_order_id": result.broker_order_id,
+                    "filled_price": result.filled_price,
+                    "filled_quantity": result.filled_quantity,
+                })
+                broker_order_id = result.broker_order_id
+                return {
+                    "status": result.status,
+                    "broker_order_id": broker_order_id,
+                    "order_id": broker_order_id,
+                    "filled_price": result.filled_price,
+                    "filled_quantity": result.filled_quantity,
+                    "error": result.error or failure_message,
+                    "idempotency_key": order.idempotency_key,
+                }
+
             await broker_resilience.record_success(broker_id)
             await audit_service.log_broker_api(
                 broker_id, "place_order", "POST",
@@ -375,12 +445,17 @@ class BrokerConnectionManager:
                 "quantity": order.quantity,
                 "status": result.status,
                 "broker_order_id": result.broker_order_id,
+                "filled_price": result.filled_price,
+                "filled_quantity": result.filled_quantity,
             })
             
+            broker_order_id = result.broker_order_id
             return {
                 "status": result.status,
-                "order_id": result.broker_order_id,
+                "broker_order_id": broker_order_id,
+                "order_id": broker_order_id,
                 "filled_price": result.filled_price,
+                "filled_quantity": result.filled_quantity,
                 "error": result.error,
                 "idempotency_key": order.idempotency_key,
             }

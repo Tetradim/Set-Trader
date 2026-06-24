@@ -20,6 +20,11 @@ import {
 import { apiFetch } from '@/lib/api';
 import { applyBotSnapshot } from '@/lib/botSnapshot';
 import { uiLog } from '@/lib/clientLogger';
+import {
+  isCandidateLiveTradingMode,
+  isLiveTradingMode,
+  requestLiveTradingPayload,
+} from '@/lib/liveTradingConfirmation';
 import { toast } from 'sonner';
 
 // ── Tunnel SVG backgrounds per card state ────────────────────────────────────
@@ -175,31 +180,57 @@ export function WatchlistTab() {
   }, [refreshBotSnapshot]);
 
   const setPaperMode = useCallback(async (checked: boolean) => {
-    const previous = useStore.getState().simulate247;
+    const state = useStore.getState();
+    const currentMode = {
+      simulate247: state.simulate247,
+      liveDuringMarketHours: state.liveDuringMarketHours,
+    };
+    const payload = requestLiveTradingPayload(currentMode, { simulate_24_7: checked });
+    if (!payload) {
+      toast.error('Live trading confirmation cancelled. Mode was not changed.');
+      return;
+    }
+    const previous = currentMode.simulate247;
+    const previousLiveMode = isLiveTradingMode(currentMode);
+    const nextLiveMode = isCandidateLiveTradingMode(currentMode, payload);
     useStore.getState().setSimulate247(checked);
-    useStore.getState().setTradingMode(checked ? 'paper' : 'live');
+    useStore.getState().setTradingMode(nextLiveMode ? 'live' : 'paper');
     try {
       await apiFetch('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({ simulate_24_7: checked }),
+        body: JSON.stringify(payload),
       });
     } catch (error: any) {
       useStore.getState().setSimulate247(previous);
-      useStore.getState().setTradingMode(previous ? 'paper' : 'live');
+      useStore.getState().setTradingMode(previousLiveMode ? 'live' : 'paper');
       toast.error(error.message || 'Failed to update trading mode');
     }
   }, []);
 
   const setLiveMarketHours = useCallback(async (checked: boolean) => {
-    const previous = useStore.getState().liveDuringMarketHours;
+    const state = useStore.getState();
+    const currentMode = {
+      simulate247: state.simulate247,
+      liveDuringMarketHours: state.liveDuringMarketHours,
+    };
+    const payload = requestLiveTradingPayload(currentMode, { live_during_market_hours: checked });
+    if (!payload) {
+      toast.error('Live trading confirmation cancelled. Market-hours mode was not changed.');
+      return;
+    }
+    const previous = currentMode.liveDuringMarketHours;
+    const previousLiveMode = isLiveTradingMode(currentMode);
+    const nextLiveMode = isCandidateLiveTradingMode(currentMode, payload);
     useStore.getState().setLiveDuringMarketHours(checked);
+    useStore.getState().setTradingMode(nextLiveMode ? 'live' : 'paper');
     try {
       await apiFetch('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({ live_during_market_hours: checked }),
+        body: JSON.stringify(payload),
       });
     } catch (error: any) {
       useStore.getState().setLiveDuringMarketHours(previous);
+      useStore.getState().setTradingMode(previousLiveMode ? 'live' : 'paper');
       toast.error(error.message || 'Failed to update live market-hours mode');
     }
   }, []);

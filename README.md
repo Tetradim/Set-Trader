@@ -17,6 +17,8 @@ Sentinel Pulse is the execution worker in the Sentinel suite.
 
 Pulse remains the only Sentinel component that should talk to broker APIs. Edge, Tandem, and Simulation workflows must treat Pulse activity as paper/simulation unless the operator has explicitly configured and validated live broker mode, account permissions, risk limits, and emergency controls.
 
+Before any real-money cutover, follow the operator checklist in [docs/runbooks/live-trading-readiness.md](docs/runbooks/live-trading-readiness.md).
+
 ---
 
 ## Recent Updates
@@ -775,15 +777,17 @@ Pulse inserts commands to the `commands` collection in MongoDB:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/edge/tickers` | GET | List all configured tickers |
-| `/api/edge/tickers/{symbol}/decision` | POST | Submit buy/sell/stop decision |
+| `/api/edge/tickers/{symbol}/decision` | POST | Submit legacy buy/sell/stop decision; execution-shaped legacy decisions are rejected while Pulse is live. |
 | `/api/edge/tickers/{symbol}/trailing` | POST | Enable trailing stop |
 | `/api/edge/positions/{symbol}` | GET | Get position with P&L & drawdown |
 | `/api/edge/account/status` | GET | Account balance and positions |
 | `/api/edge/signals/evaluate` | POST | Signal strength scoring |
 | `/api/edge/status` | GET | Edge API key and Mongo command-channel health |
+| `/api/bus/events` | GET/POST | Cross-bot event journal for configured bot peers |
+| `/api/bus/edge-actions` | POST | Cross-bot event bus wrapper for Edge handoff actions |
 | `/api/health` | GET | Pulse health status |
 
-Edge REST calls require the configured `edge_api_key` and can send it as either `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+Edge REST calls and `/api/bus/*` endpoints require the configured `edge_api_key` and can send it as either `X-API-Key: <key>` or `Authorization: Bearer <key>`. Structured handoffs are rejected when the requested handoff mode does not match Pulse's current paper/live trading mode. Legacy buy/sell/stop decisions are rejected while Pulse is live; live execution must use `/api/edge/handoff`.
 
 ### Signal Evaluation Endpoint
 
@@ -837,7 +841,7 @@ Pulse exposes the Edge-facing endpoints that Tandem reads from the server side:
 | `/api/edge/account/status` | Broker-backed account and position state. |
 | `/api/edge/tickers` | Configured tickers and protection state. |
 | `/api/edge/positions/{symbol}` | Per-symbol position detail. |
-| `/api/edge/tickers/{symbol}/decision` | Legacy Edge-to-Pulse decision bridge. |
+| `/api/edge/tickers/{symbol}/decision` | Legacy Edge-to-Pulse decision bridge; live buy/sell/stop execution is blocked in favor of structured handoff. |
 | `/api/edge/tickers/{symbol}/trailing` | Legacy trailing-stop bridge. |
 | `/api/edge/signals/evaluate` | Lightweight Edge-style signal scoring. |
 
@@ -1392,6 +1396,8 @@ details      object   — event-specific payload
 | `PULSE_API_URL` | No | Sentinel Edge URL for OTel auto-discovery |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector URL (e.g. Jaeger, Grafana Tempo) |
 | `OTEL_CONSOLE_EXPORT` | No | Set `true` to print spans to console |
+| `SENTINEL_PULSE_ENABLE_EXPERIMENTAL_BROKERS` | No | Default `false`; set `true` only when the operator explicitly accepts unofficial high-risk broker adapters |
+| `SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET` | Yes for live trading | Shared operator secret required, in addition to the confirmation phrase, before Pulse will transition from paper to live broker routing |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | No | Optional default credentials for Alpaca replay imports |
 | `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY` | No | Alpaca-compatible alternate env names for replay imports |
 
@@ -1404,7 +1410,7 @@ details      object   — event-specific payload
 
 ## Broker Catalogue
 
-Brokers are ordered LOW → HIGH risk in the UI and API.
+Brokers are ordered LOW → HIGH risk in the UI and API. A broker with `supported=false` is unavailable for credential testing, connection, and live order routing until it is re-certified. Experimental unofficial brokers are also hidden from connection/routing unless `SENTINEL_PULSE_ENABLE_EXPERIMENTAL_BROKERS=true`.
 
 | ID | Name | Risk | Auth Fields | Notes |
 |----|------|------|-------------|-------|
@@ -1412,11 +1418,11 @@ Brokers are ordered LOW → HIGH risk in the UI and API.
 | `ibkr` | Interactive Brokers | LOW | `gateway_url`, `account_id` | Requires TWS/Gateway running locally |
 | `tradier` | Tradier | LOW | `access_token`, `account_id` | Clean developer API |
 | `tradestation` | TradeStation | LOW | `ts_client_id`, `ts_client_secret`, `ts_refresh_token` | OAuth2 |
-| `td_ameritrade` | TD Ameritrade (Schwab) | MEDIUM | `client_id`, `refresh_token` | Migrated to Schwab API |
-| `thinkorswim` | Thinkorswim (Schwab) | MEDIUM | `tos_consumer_key`, `tos_refresh_token`, `tos_account_id` | Same API as TDA |
-| `robinhood` | Robinhood | HIGH | `username`, `password`, `mfa_code` | Session auth — ban risk |
-| `webull` | Webull | HIGH | `username`, `password`, `device_id`, `trade_token` | Unofficial API — ban risk |
-| `wealthsimple` | Wealthsimple Trade | HIGH | `ws_email`, `ws_password`, `ws_otp_code` | Canadian broker — unofficial |
+| `td_ameritrade` | TD Ameritrade (Schwab) | MEDIUM | `client_id`, `refresh_token` | Disabled until Schwab live account/order flow is re-certified |
+| `thinkorswim` | Thinkorswim (Schwab) | MEDIUM | `tos_consumer_key`, `tos_refresh_token`, `tos_account_id` | Disabled until Thinkorswim/Schwab account mapping is re-certified |
+| `robinhood` | Robinhood | HIGH | `username`, `password`, `mfa_code` | Experimental; requires explicit unofficial-broker opt-in |
+| `webull` | Webull | HIGH | `username`, `password`, `device_id`, `trade_token` | Experimental; requires explicit unofficial-broker opt-in |
+| `wealthsimple` | Wealthsimple Trade | HIGH | `ws_email`, `ws_password`, `ws_otp_code` | Experimental; requires explicit unofficial-broker opt-in |
 
 **Rate Limiting Defaults (Token Bucket + Circuit Breaker):**
 
@@ -1545,6 +1551,26 @@ Useful local-source flags:
 | `-InstallDeps` | Install backend/frontend dependencies before launch. |
 
 This local lifecycle is now aligned with Sentinel Edge, Tandem Suite, and Simulation Engine: closing the bot UI closes the local process stack, and closing the launcher closes the bot UI.
+
+---
+
+## Live-Money Readiness Status - 2026-06-24
+
+Current status: paper-ready for continued burn-in, not approved for live-money cutover.
+
+Latest local verification:
+- Backend tests: `python -m pytest backend\tests -q` -> 235 passed, 45 subtests passed.
+- Alpaca paper drills: invalid-symbol rejection, stale-limit cancel, market buy/sell flatten, adapter reconciliation, broker client order IDs, and service-auth disconnect/reconnect passed.
+- Cross-bot drill: Edge structured handoff created VPG, rejected a duplicate buy while open, enabled a 1.25% trailing stop, sold back to flat, and Tandem saw the updated Pulse state.
+
+Open gates before live-money use:
+- Multi-session paper burn-in across real market sessions.
+- Production-stack partial-fill tracking through normal bot operation, not only raw broker websocket drills.
+- Active-order reconnect catch-up and reconciliation evidence.
+- Market close, overnight, and next-open transition evidence.
+- Monitoring retention, alert workflow review, controlled operator access review, and final operator signoff.
+
+Refactor plan: `docs/superpowers/plans/2026-06-24-live-readiness-refactor.md`.
 
 ---
 

@@ -9,6 +9,8 @@ from resilience import broker_resilience, BrokerResilienceConfig
 
 router = APIRouter(tags=["System"])
 
+LIVE_TRADING_OPERATOR_SECRET_ENV = "SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET"
+
 
 def _preflight_item(check_id: str, label: str, status: str, detail: str, action: str = "") -> dict:
     return {
@@ -109,6 +111,15 @@ async def get_release_preflight():
         "pass" if os.getenv("ALERT_WEBHOOK_SECRET") else "warn",
         "Configured" if os.getenv("ALERT_WEBHOOK_SECRET") else "Not configured",
         "Set ALERT_WEBHOOK_SECRET before connecting Alertmanager.",
+    ))
+
+    live_operator_secret_configured = bool(os.getenv(LIVE_TRADING_OPERATOR_SECRET_ENV, "").strip())
+    checks.append(_preflight_item(
+        "live_trading_operator_secret",
+        "Live trading operator secret",
+        "pass" if live_operator_secret_configured else "warn",
+        "Configured" if live_operator_secret_configured else "Not configured; live mode promotion is disabled",
+        f"Set {LIVE_TRADING_OPERATOR_SECRET_ENV} before any real-money cutover.",
     ))
 
     checks.append(_preflight_item(

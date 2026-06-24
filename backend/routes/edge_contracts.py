@@ -1,4 +1,5 @@
 """Edge route request/response contracts and security helpers."""
+import math
 import secrets
 from enum import Enum
 from typing import Any, Dict, Literal, Optional
@@ -12,6 +13,17 @@ import deps
 _RATE_WINDOW = 60  # seconds
 _RATE_LIMIT = 60  # requests per minute
 _rate_limits: dict = {}  # ip -> [(timestamp, count), ...]
+
+
+def _validate_finite_positive_trailing_percent(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    percent = float(value)
+    if not math.isfinite(percent):
+        raise ValueError("trailing_percent must be finite")
+    if percent <= 0:
+        raise ValueError("trailing_percent must be greater than 0")
+    return percent
 
 
 class SignalRequest(BaseModel):
@@ -116,6 +128,11 @@ class PulseHandoffRequest(BaseModel):
     def _strip_text(cls, value: Any) -> str:
         return str(value or "").strip()
 
+    @field_validator("trailing_percent")
+    @classmethod
+    def _validate_trailing_percent(cls, value: Optional[float]) -> Optional[float]:
+        return _validate_finite_positive_trailing_percent(value)
+
     @model_validator(mode="after")
     def _validate_action_context(self) -> "PulseHandoffRequest":
         required_stop_types = {
@@ -210,9 +227,19 @@ class DecisionRequest(BaseModel):
     trailing_percent: Optional[float] = None
     confidence: float = 1.0
 
+    @field_validator("trailing_percent")
+    @classmethod
+    def _validate_trailing_percent(cls, value: Optional[float]) -> Optional[float]:
+        return _validate_finite_positive_trailing_percent(value)
+
 class TrailingRequest(BaseModel):
     """Request for /api/tickers/{symbol}/trailing endpoint."""
     trailing_percent: float
+
+    @field_validator("trailing_percent")
+    @classmethod
+    def _validate_trailing_percent(cls, value: float) -> float:
+        return float(_validate_finite_positive_trailing_percent(value))
 
 class SignalEvalRequest(BaseModel):
     """Request for signal evaluation."""

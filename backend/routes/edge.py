@@ -9,13 +9,19 @@ Edge calls these endpoints to:
 - GET /api/edge/tickers - Get all tickers
 - GET /api/edge/account/status - Get account and open positions
 """
+import math
+import statistics
+from collections import defaultdict
 from datetime import datetime, timezone
+from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import PlainTextResponse
 
 import deps
+from bot_snapshot import build_bot_snapshot
 from markets import detect_market_from_symbol
+from risk_controls import risk_controls as _fallback_risk_controls
 from routes.runtime_state import reset_trailing_state_if_needed
 from schemas import TickerConfig
 from shared import (
@@ -38,8 +44,10 @@ from routes.edge_contracts import (
     _current_position,
     validate_api_key,
 )
+from routes.bot import BotControlRequest, start_bot as _start_bot, stop_bot as _stop_bot
 
 router = APIRouter(prefix="/edge")
+_LEGACY_LIVE_EXECUTION_DECISIONS = {"buy", "sell", "stop"}
 
 # In-memory signal cache (reset on restart)
 # Key = symbol, Value = latest signal dict
@@ -108,18 +116,133 @@ def _handoff_response(
     return response
 
 
+def _pulse_trading_mode() -> str:
+    mode_getter = getattr(deps.engine, "get_trading_mode", None)
+    if callable(mode_getter):
+        return str(mode_getter()).strip().lower()
+
+    if bool(getattr(deps.engine, "simulate_24_7", False)) or not bool(getattr(deps.engine, "live_during_market_hours", False)):
+        return "paper"
+    return "live"
+
+
+def _handoff_mode_mismatch(body: PulseHandoffRequest) -> dict | None:
+    pulse_mode = _pulse_trading_mode()
+    handoff_mode = body.mode.value
+    if handoff_mode == pulse_mode:
+        return None
+
+    return _handoff_response(
+        body,
+        accepted=False,
+        status="rejected",
+        reason="mode_mismatch",
+        message=f"Handoff requested {handoff_mode} mode but Pulse is currently {pulse_mode}.",
+    )
+
+
+def _legacy_live_decision_rejection(symbol: str, decision: str) -> dict | None:
+    if decision not in _LEGACY_LIVE_EXECUTION_DECISIONS or _pulse_trading_mode() != "live":
+        return None
+
+    return {
+        "status": "error",
+        "symbol": symbol,
+        "decision": decision,
+        "reason": "legacy_live_handoff_blocked",
+        "message": "Live Pulse execution requires the structured /api/edge/handoff contract.",
+    }
+
+
+def _finite_positive_price(value) -> float | None:
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return price if math.isfinite(price) and price > 0 else None
+
+
+def _risk_controls():
+    controls = getattr(getattr(deps, "engine", None), "risk_controls", None)
+    return controls or _fallback_risk_controls
+
+
+def _pending_sells() -> dict:
+    pending = getattr(deps.engine, "_pending_sells", {}) or {}
+    return pending if hasattr(pending, "items") else {}
+
+
+def _position_qty(position: dict) -> float:
+    try:
+        return float(position.get("qty", position.get("quantity", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _position_entry(position: dict) -> float:
+    try:
+        return float(position.get("avg_entry", position.get("entry_price", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _position_rows() -> list[dict]:
+    rows = []
+    prices = getattr(deps.engine, "_prices", {}) or {}
+    for sym, pos in getattr(deps.engine, "_positions", {}).items():
+        qty = _position_qty(pos)
+        if qty <= 0:
+            continue
+        avg_entry = _position_entry(pos)
+        current_price = _finite_positive_price(prices.get(sym)) or _finite_positive_price(pos.get("current_price"))
+        if current_price is None:
+            current_price = _finite_positive_price(await deps.price_service.get_price(sym)) or avg_entry
+        market_value = round(qty * current_price, 2)
+        rows.append(
+            {
+                "symbol": sym,
+                "quantity": qty,
+                "avg_entry": avg_entry,
+                "current_price": current_price,
+                "market_value": market_value,
+                "unrealized_pnl": round((current_price - avg_entry) * qty, 2),
+            }
+        )
+    return rows
+
+
+def _order_query(status_value: str | None = None, symbol: str | None = None) -> dict:
+    query = {}
+    if status_value:
+        query["status"] = status_value
+    if symbol:
+        query["symbol"] = symbol.upper()
+    return query
+
+
+def _as_plain_payload(value):
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, list):
+        return [_as_plain_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _as_plain_payload(item) for key, item in value.items()}
+    return value
+
+
 async def _handoff_price(symbol: str, body: PulseHandoffRequest) -> float:
     metadata = body.metadata if isinstance(body.metadata, dict) else {}
+    metadata_price_seen = False
     for key in ("price", "current_price", "last_price"):
         value = metadata.get(key)
         if value is not None:
-            try:
-                price = float(value)
-            except (TypeError, ValueError):
-                continue
-            if price > 0:
+            metadata_price_seen = True
+            price = _finite_positive_price(value)
+            if price is not None:
                 return price
-    return float(await deps.price_service.get_price(symbol))
+    if metadata_price_seen:
+        return 0.0
+    return _finite_positive_price(await deps.price_service.get_price(symbol)) or 0.0
 
 
 async def _set_trailing(symbol: str, trailing_percent: float, *, opening_bell: bool = False) -> None:
@@ -266,9 +389,364 @@ async def get_edge_status():
     }
 
 
+@router.post("/bot/start", dependencies=[Depends(validate_api_key)])
+async def edge_start_bot(body: BotControlRequest | None = None):
+    """Start Pulse through the Edge service-to-service API key boundary."""
+    return await _start_bot(body)
+
+
+@router.post("/bot/stop", dependencies=[Depends(validate_api_key)])
+async def edge_stop_bot(body: BotControlRequest | None = None):
+    """Stop Pulse through the Edge service-to-service API key boundary."""
+    return await _stop_bot(body)
+
+
+@router.get("/brokers/status", dependencies=[Depends(validate_api_key)])
+async def edge_broker_status():
+    """Return broker connection status through the Edge service-to-service API key boundary."""
+    return deps.broker_mgr.get_status()
+
+
+@router.post("/brokers/reconnect", dependencies=[Depends(validate_api_key)])
+async def edge_reconnect_brokers():
+    """Reconnect configured brokers through the Edge service-to-service API key boundary."""
+    results = await deps.broker_mgr.reconnect_all()
+    return {"results": results}
+
+
+@router.post("/brokers/{broker_id}/disconnect", dependencies=[Depends(validate_api_key)])
+async def edge_disconnect_broker(broker_id: str):
+    """Disconnect one broker through the Edge service-to-service API key boundary."""
+    await deps.broker_mgr.disconnect_broker(broker_id)
+    return {"status": "disconnected", "broker_id": broker_id}
+
+
+@router.get("/bot/status", dependencies=[Depends(validate_api_key)])
+async def edge_bot_status():
+    """Return bot runtime status through the Edge service-to-service API key boundary."""
+    positions = await _position_rows()
+    return {
+        "running": bool(deps.engine.running),
+        "paused": bool(deps.engine.paused),
+        "market_open": bool(deps.engine.is_market_open()),
+        "trading_mode": _pulse_trading_mode(),
+        "simulate_24_7": bool(deps.engine.simulate_24_7),
+        "live_during_market_hours": bool(deps.engine.live_during_market_hours),
+        "paper_after_hours": bool(getattr(deps.engine, "paper_after_hours", False)),
+        "open_positions": len(positions),
+        "pending_sells": len(_pending_sells()),
+    }
+
+
+@router.get("/bot/snapshot", dependencies=[Depends(validate_api_key)])
+async def edge_bot_snapshot():
+    """Return the Pulse dashboard snapshot through the Edge service-to-service API key boundary."""
+    tickers = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
+    trades = await deps.db.trades.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    profits_collection = getattr(deps.db, "profits", None)
+    profits = await profits_collection.find({}, {"_id": 0}).to_list(100) if profits_collection is not None else []
+    positions = await _position_rows()
+    balance_doc = await deps.db.settings.find_one({"key": "account_balance"}, {"_id": 0})
+    cash_doc = await deps.db.settings.find_one({"key": "cash_reserve"}, {"_id": 0})
+    account_balance = round(balance_doc.get("value", 0), 2) if balance_doc else 0
+    cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
+    allocated = round(sum(ticker.get("base_power", 0) for ticker in tickers), 2)
+    prices = getattr(deps.engine, "_prices", {}) or {}
+    return {
+        "tickers": tickers,
+        "prices": prices,
+        "price_sources": getattr(deps.engine, "_price_sources", {}),
+        "price_errors": getattr(deps.engine, "_price_errors", {}),
+        "positions": positions,
+        "pending_sells": await edge_get_pending_sells(),
+        "profits": profits,
+        "trades": trades,
+        "cash_reserve": cash_reserve,
+        "account_balance": account_balance,
+        "allocated": allocated,
+        "available": round(account_balance - allocated, 2),
+        "paused": deps.engine.paused,
+        "running": deps.engine.running,
+        "market_open": deps.engine.is_market_open(),
+        "trading_mode": _pulse_trading_mode(),
+        "simulate_24_7": deps.engine.simulate_24_7,
+        "market_hours_only": bool(getattr(deps.engine, "market_hours_only", False)),
+        "live_during_market_hours": deps.engine.live_during_market_hours,
+        "paper_after_hours": bool(getattr(deps.engine, "paper_after_hours", False)),
+        "replay": getattr(deps.engine, "replay_status", {}),
+    }
+
+
+@router.get("/trades", dependencies=[Depends(validate_api_key)])
+async def edge_get_trades(limit: int = Query(50, ge=1, le=200)):
+    """Return recent trade records through the Edge service-to-service API key boundary."""
+    return await deps.db.trades.find({}, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+
+
+@router.get("/positions", dependencies=[Depends(validate_api_key)])
+async def edge_get_positions():
+    """Return open Pulse positions through the Edge service-to-service API key boundary."""
+    return await _position_rows()
+
+
+@router.get("/positions/pending-sells", dependencies=[Depends(validate_api_key)])
+async def edge_get_pending_sells():
+    """Return pending limit sells through the Edge service-to-service API key boundary."""
+    return {
+        sym: {"limit_price": order["limit_price"], "quantity": order["qty"], "entry": order["entry"]}
+        for sym, order in _pending_sells().items()
+    }
+
+
+@router.get("/risk/status", dependencies=[Depends(validate_api_key)])
+async def edge_risk_status():
+    """Return trading permission status through the Edge service-to-service API key boundary."""
+    is_allowed, restriction, message = _risk_controls().isTradingAllowed()
+    return {
+        "trading_allowed": is_allowed,
+        "restriction": restriction.value if restriction else "none",
+        "message": message,
+        "limits": _risk_controls().get_all_limits(),
+        "kill_switches": _risk_controls().get_all_kill_switches(),
+    }
+
+
+@router.get("/risk/limits", dependencies=[Depends(validate_api_key)])
+async def edge_risk_limits():
+    """Return configured risk limits through the Edge service-to-service API key boundary."""
+    return {"limits": _risk_controls().get_all_limits()}
+
+
+@router.get("/orders", dependencies=[Depends(validate_api_key)])
+async def edge_get_orders(
+    limit: int = Query(100, ge=1, le=1000),
+    status_value: str | None = Query(None, alias="status"),
+    symbol: str | None = None,
+):
+    """Return broker order records through the Edge service-to-service API key boundary."""
+    return await deps.db.orders.find(_order_query(status_value, symbol), {"_id": 0}).sort("created_at", -1).to_list(limit)
+
+
+@router.get("/orders/stats", dependencies=[Depends(validate_api_key)])
+async def edge_get_order_stats():
+    """Return broker order statistics through the Edge service-to-service API key boundary."""
+    orders = await deps.db.orders.find({}, {"_id": 0}).to_list(5000)
+    total = len(orders)
+    filled = sum(1 for order in orders if order.get("status") == "filled")
+    rejected = sum(1 for order in orders if order.get("status") == "rejected")
+    pending = sum(1 for order in orders if order.get("status") == "pending")
+    slippage_values = [float(order.get("slippage_bps", 0)) for order in orders if order.get("slippage_bps") is not None]
+    lag_values = [float(order.get("execution_lag_ms", 0)) for order in orders if order.get("execution_lag_ms") is not None]
+    fill_rate = (filled / total * 100) if total else 0
+    return {
+        "total_orders": total,
+        "filled_orders": filled,
+        "rejected_orders": rejected,
+        "pending_orders": pending,
+        "avg_slippage": round(sum(slippage_values) / len(slippage_values), 2) if slippage_values else 0,
+        "avg_execution_lag_ms": round(sum(lag_values) / len(lag_values), 0) if lag_values else 0,
+        "fill_rate": round(fill_rate, 1),
+    }
+
+
+@router.get("/portfolio/stats", dependencies=[Depends(validate_api_key)])
+async def edge_portfolio_stats(period: str = Query("month", pattern="^(today|week|month|all)$")):
+    """Return portfolio performance statistics through the Edge service-to-service API key boundary."""
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        start_date = now - timedelta(days=7)
+    elif period == "month":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+    trades = await deps.db.trades.find({"timestamp": {"$gte": start_date.isoformat()}}, {"_id": 0}).to_list(10000)
+    wins = [trade for trade in trades if trade.get("pnl", 0) > 0]
+    losses = [trade for trade in trades if trade.get("pnl", 0) < 0]
+    total_wins = sum(trade.get("pnl", 0) for trade in wins)
+    total_losses = sum(trade.get("pnl", 0) for trade in losses)
+    win_rate = len(wins) / len(trades) * 100 if trades else 0
+    avg_win = total_wins / len(wins) if wins else 0
+    avg_loss = total_losses / len(losses) if losses else 0
+    profit_factor = abs(total_wins / total_losses) if total_losses != 0 else 0
+
+    account_balance = 100000
+    settings = await deps.db.settings.find_one({"key": "account_balance"})
+    if settings and settings.get("value"):
+        account_balance = settings.get("value", account_balance)
+
+    total_pnl = sum(trade.get("pnl", 0) for trade in trades)
+    total_pnl_pct = (total_pnl / account_balance * 100) if account_balance > 0 else 0
+    daily_pnl = defaultdict(float)
+    for trade in trades:
+        ts = str(trade.get("timestamp", ""))
+        if ts:
+            daily_pnl[ts.split("T")[0]] += trade.get("pnl", 0)
+
+    daily_returns = [(pnl / account_balance) if account_balance > 0 else 0 for pnl in daily_pnl.values()]
+    sharpe_ratio = 0
+    if len(daily_returns) > 1 and statistics.pstdev(daily_returns) > 0:
+        sharpe_ratio = (statistics.mean(daily_returns) / statistics.pstdev(daily_returns)) * math.sqrt(252)
+
+    equity = account_balance
+    peak = account_balance
+    max_drawdown = 0.0
+    for date in sorted(daily_pnl):
+        equity += daily_pnl[date]
+        peak = max(peak, equity)
+        if peak > 0:
+            max_drawdown = min(max_drawdown, ((equity - peak) / peak) * 100)
+
+    return {
+        "stats": {
+            "totalValue": 0,
+            "totalPnl": total_pnl,
+            "totalPnLPct": total_pnl_pct,
+            "winRate": win_rate,
+            "avgWin": avg_win,
+            "avgLoss": avg_loss,
+            "profitFactor": profit_factor,
+            "maxDrawdown": round(max_drawdown, 2),
+            "sharpeRatio": round(sharpe_ratio, 2),
+        }
+    }
+
+
+@router.get("/strategies/registry", dependencies=[Depends(validate_api_key)])
+async def edge_strategy_registry():
+    """Return strategy registry data through the Edge service-to-service API key boundary."""
+    from routes.strategies import list_strategy_registry
+
+    return await list_strategy_registry()
+
+
+@router.get("/strategies/presets", dependencies=[Depends(validate_api_key)])
+async def edge_strategy_presets():
+    """Return strategy presets through the Edge service-to-service API key boundary."""
+    from routes.strategies import list_presets
+
+    return await list_presets()
+
+
+@router.get("/markets", dependencies=[Depends(validate_api_key)])
+async def edge_markets():
+    """Return Pulse market metadata through the Edge service-to-service API key boundary."""
+    from routes.markets import list_markets
+
+    return await list_markets()
+
+
+@router.get("/fx-rates", dependencies=[Depends(validate_api_key)])
+async def edge_fx_rates():
+    """Return FX rates through the Edge service-to-service API key boundary."""
+    from routes.markets import get_fx_rates
+
+    return await get_fx_rates()
+
+
+@router.get("/replay/status", dependencies=[Depends(validate_api_key)])
+async def edge_replay_status():
+    """Return replay status through the Edge service-to-service API key boundary."""
+    from routes.replay import get_replay_status
+
+    return await get_replay_status()
+
+
+@router.get("/replay/sessions", dependencies=[Depends(validate_api_key)])
+async def edge_replay_sessions(
+    limit: int = Query(50, ge=1, le=250),
+    include_empty: bool = False,
+):
+    """Return replay sessions through the Edge service-to-service API key boundary."""
+    from routes.replay import list_replay_sessions
+
+    return await list_replay_sessions(limit=limit, include_empty=include_empty)
+
+
+@router.get("/rate-limits", dependencies=[Depends(validate_api_key)])
+async def edge_rate_limits():
+    """Return broker resilience status through the Edge service-to-service API key boundary."""
+    from routes.system import get_rate_limit_status
+
+    return await get_rate_limit_status()
+
+
+@router.get("/audit-logs", dependencies=[Depends(validate_api_key)])
+async def edge_audit_logs(
+    event_type: list[str] | None = Query(None, description="Filter by one or more event types"),
+    symbol: str | None = Query(None, description="Filter by symbol"),
+    broker_id: str | None = Query(None, description="Filter by broker"),
+    success: bool | None = Query(None, description="Filter by success status"),
+    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0),
+):
+    """Return audit logs through the Edge service-to-service API key boundary."""
+    from routes.system import get_audit_logs
+
+    return await get_audit_logs(
+        event_type=event_type,
+        symbol=symbol,
+        broker_id=broker_id,
+        success=success,
+        limit=limit,
+        skip=skip,
+    )
+
+
+@router.get("/settings", dependencies=[Depends(validate_api_key)])
+async def edge_settings():
+    """Return runtime settings through Edge auth, with stored notification secrets redacted."""
+    from routes.settings import get_settings
+
+    settings = await get_settings()
+    telegram = dict(settings.get("telegram") or {})
+    bot_token = telegram.pop("bot_token", "") or ""
+    telegram["bot_token_configured"] = bool(bot_token)
+    settings["telegram"] = telegram
+    return settings
+
+
+@router.get("/reconciliation/summary", dependencies=[Depends(validate_api_key)])
+async def edge_reconciliation_summary():
+    """Return reconciliation summary through the Edge service-to-service API key boundary."""
+    from routes.reconciliation import get_summary
+
+    return _as_plain_payload(await get_summary())
+
+
+@router.get("/analytics/portfolio", dependencies=[Depends(validate_api_key)])
+async def edge_analytics_portfolio(timeframe: str = Query("1d")):
+    """Return portfolio analytics through the Edge service-to-service API key boundary."""
+    from routes.analytics import get_portfolio_metrics
+
+    return _as_plain_payload(await get_portfolio_metrics(timeframe=timeframe))
+
+
+@router.get("/ops/services", dependencies=[Depends(validate_api_key)])
+async def edge_ops_services():
+    """Return service health through the Edge service-to-service API key boundary."""
+    from routes.ops import get_services
+
+    return _as_plain_payload(await get_services())
+
+
+@router.get("/slo/summary", dependencies=[Depends(validate_api_key)])
+async def edge_slo_summary():
+    """Return SLO summary through the Edge service-to-service API key boundary."""
+    from routes.slo import get_slo_summary
+
+    return await get_slo_summary()
+
+
 @router.post("/handoff", dependencies=[Depends(validate_api_key)])
 async def post_handoff(body: PulseHandoffRequest):
     """Process a structured autonomous handoff from Sentinel Edge."""
+    mode_rejection = _handoff_mode_mismatch(body)
+    if mode_rejection is not None:
+        return mode_rejection
+
     sym = body.symbol
     action = body.action
     if sym == "GLOBAL":
@@ -322,8 +800,10 @@ async def post_handoff(body: PulseHandoffRequest):
                     status="rejected",
                     reason="no_position",
                     message=f"{sym} has no open position",
-                )
+            )
             price = await _handoff_price(sym, body)
+            if price <= 0:
+                return _handoff_response(body, accepted=False, status="rejected", reason="price_unavailable")
             await deps.engine.execute_sell(sym, price)
 
         elif action == PulseHandoffAction.STOP_BUYING:
@@ -389,6 +869,9 @@ async def post_decision(symbol: str, body: DecisionRequest):
     """
     sym = symbol.upper()
     decision = body.decision.lower()
+    legacy_live_rejection = _legacy_live_decision_rejection(sym, decision)
+    if legacy_live_rejection is not None:
+        return legacy_live_rejection
     
     # Get ticker config
     ticker = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})

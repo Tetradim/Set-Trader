@@ -1,27 +1,178 @@
 """Global runtime settings endpoints."""
+import os
+import secrets
+
 from fastapi import APIRouter, HTTPException
 
 import deps
+from audit_service import AuditEventType, audit_service
 from schemas import SettingsUpdate
 from shared import edge_client
 
 router = APIRouter()
 
+LIVE_TRADING_CONFIRMATION = "ENABLE LIVE TRADING"
+LIVE_TRADING_OPERATOR_SECRET_ENV = "SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET"
+
+
+def _engine_is_dry_run() -> bool:
+    is_dry_run = getattr(deps.engine, "is_dry_run", None)
+    if callable(is_dry_run):
+        return bool(is_dry_run())
+    return bool(getattr(deps.engine, "_dry_run_mode", False))
+
+
+def _candidate_live_mode(body: SettingsUpdate) -> bool:
+    simulate_24_7 = (
+        body.simulate_24_7
+        if body.simulate_24_7 is not None
+        else deps.engine.simulate_24_7
+    )
+    live_during_market_hours = (
+        body.live_during_market_hours
+        if body.live_during_market_hours is not None
+        else deps.engine.live_during_market_hours
+    )
+    return not _engine_is_dry_run() and not simulate_24_7 and bool(live_during_market_hours)
+
+
+def _current_live_mode() -> bool:
+    is_live_trading = getattr(deps.engine, "is_live_trading", None)
+    if callable(is_live_trading):
+        return bool(is_live_trading())
+    return not _engine_is_dry_run() and not deps.engine.simulate_24_7 and bool(deps.engine.live_during_market_hours)
+
+
+def _mode_label(is_live: bool) -> str:
+    return "live" if is_live else "paper"
+
+
+def _requested_mode_fields(body: SettingsUpdate) -> list[str]:
+    return [
+        field
+        for field, value in (
+            ("simulate_24_7", body.simulate_24_7),
+            ("market_hours_only", body.market_hours_only),
+            ("live_during_market_hours", body.live_during_market_hours),
+            ("paper_after_hours", body.paper_after_hours),
+        )
+        if value is not None
+    ]
+
+
+def _configured_live_trading_operator_secret() -> str:
+    return os.getenv(LIVE_TRADING_OPERATOR_SECRET_ENV, "").strip()
+
+
+def _live_trading_operator_secret_matches(body: SettingsUpdate) -> bool:
+    expected = _configured_live_trading_operator_secret()
+    provided = (body.live_trading_operator_secret or "").strip()
+    if not expected or not provided:
+        return False
+    return secrets.compare_digest(expected, provided)
+
+
+async def _audit_mode_setting_attempt(
+    body: SettingsUpdate,
+    old_mode: str,
+    new_mode: str,
+    *,
+    success: bool,
+    error_message: str | None = None,
+):
+    await audit_service.log(
+        AuditEventType.SETTING_CHANGED,
+        {
+            "setting": "trading_mode",
+            "old_value": old_mode,
+            "new_value": new_mode,
+            "source": "settings_api",
+            "requested_fields": _requested_mode_fields(body),
+            "dry_run_enabled": _engine_is_dry_run(),
+        },
+        success=success,
+        error_message=error_message,
+    )
+
 
 @router.post("/settings")
 async def update_settings(body: SettingsUpdate):
-    if body.simulate_24_7 is not None:
-        deps.engine.simulate_24_7 = body.simulate_24_7
+    mode_fields_requested = any(
+        value is not None
+        for value in (
+            body.simulate_24_7,
+            body.market_hours_only,
+            body.live_during_market_hours,
+            body.paper_after_hours,
+        )
+    )
+    current_live_mode = _current_live_mode()
+    candidate_live_mode = _candidate_live_mode(body) if mode_fields_requested else current_live_mode
+    current_mode_label = _mode_label(current_live_mode)
+    candidate_mode_label = _mode_label(candidate_live_mode)
+
+    if mode_fields_requested and not current_live_mode and candidate_live_mode:
+        if body.live_trading_confirmation != LIVE_TRADING_CONFIRMATION:
+            await _audit_mode_setting_attempt(
+                body,
+                current_mode_label,
+                candidate_mode_label,
+                success=False,
+                error_message="live_trading_confirmation_required",
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "live_trading_confirmation_required",
+                    "required_confirmation": LIVE_TRADING_CONFIRMATION,
+                },
+            )
+        if not _configured_live_trading_operator_secret():
+            await _audit_mode_setting_attempt(
+                body,
+                current_mode_label,
+                candidate_mode_label,
+                success=False,
+                error_message="live_trading_operator_secret_unconfigured",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "live_trading_operator_secret_unconfigured",
+                    "required_env": LIVE_TRADING_OPERATOR_SECRET_ENV,
+                },
+            )
+        if not _live_trading_operator_secret_matches(body):
+            await _audit_mode_setting_attempt(
+                body,
+                current_mode_label,
+                candidate_mode_label,
+                success=False,
+                error_message="live_trading_operator_secret_required",
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "live_trading_operator_secret_required",
+                },
+            )
+
+    if mode_fields_requested:
+        if body.simulate_24_7 is not None:
+            deps.engine.simulate_24_7 = body.simulate_24_7
+        if body.market_hours_only is not None:
+            deps.engine.market_hours_only = body.market_hours_only
+        if body.live_during_market_hours is not None:
+            deps.engine.live_during_market_hours = body.live_during_market_hours
+        if body.paper_after_hours is not None:
+            deps.engine.paper_after_hours = body.paper_after_hours
         await deps.engine.save_state()
-    if body.market_hours_only is not None:
-        deps.engine.market_hours_only = body.market_hours_only
-        await deps.engine.save_state()
-    if body.live_during_market_hours is not None:
-        deps.engine.live_during_market_hours = body.live_during_market_hours
-        await deps.engine.save_state()
-    if body.paper_after_hours is not None:
-        deps.engine.paper_after_hours = body.paper_after_hours
-        await deps.engine.save_state()
+        await _audit_mode_setting_attempt(
+            body,
+            current_mode_label,
+            candidate_mode_label,
+            success=True,
+        )
 
     if body.pattern_detection_enabled is not None:
         await deps.db.settings.update_one(

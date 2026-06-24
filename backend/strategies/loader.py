@@ -12,8 +12,12 @@ import threading
 from pathlib import Path
 from typing import Dict, Optional
 
-import watchdog.events
-import watchdog.observers
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+except ModuleNotFoundError:
+    FileSystemEventHandler = object
+    Observer = None
 
 from .base import BaseStrategy
 
@@ -25,7 +29,7 @@ STRATEGY_REGISTRY: Dict[str, BaseStrategy] = {}
 CUSTOM_DIR   = Path(__file__).parent / "custom"
 PRESETS_DIR  = Path(__file__).parent / "presets"
 
-_observer: Optional[watchdog.observers.Observer] = None
+_observer: Optional[object] = None
 
 
 # ---------------------------------------------------------------------------
@@ -106,13 +110,14 @@ async def _load_from_dir(directory: Path, namespace: str) -> None:
 # Watchdog hot-reload (non-blocking, thread-safe async dispatch)
 # ---------------------------------------------------------------------------
 
-class _ReloadHandler(watchdog.events.FileSystemEventHandler):
+class _ReloadHandler(FileSystemEventHandler):
     def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
-    def on_modified(self, event: watchdog.events.FileSystemEvent) -> None:
-        if not event.is_directory and str(event.src_path).endswith(".py"):
-            logger.info(f"Strategy file changed: {event.src_path} — scheduling reload")
+    def on_modified(self, event: object) -> None:
+        src_path = str(getattr(event, "src_path", ""))
+        if not bool(getattr(event, "is_directory", False)) and src_path.endswith(".py"):
+            logger.info(f"Strategy file changed: {src_path} — scheduling reload")
             asyncio.run_coroutine_threadsafe(reload_strategies(), self._loop)
 
     on_created = on_modified   # also reload on new files
@@ -123,12 +128,15 @@ def start_strategy_watcher() -> None:
     global _observer
     if _observer is not None:
         return  # already running
+    if Observer is None:
+        logger.info("Strategy hot-reload watcher disabled because watchdog is not installed")
+        return
 
     try:
         loop = asyncio.get_event_loop()
         CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
 
-        _observer = watchdog.observers.Observer()
+        _observer = Observer()
         _observer.schedule(_ReloadHandler(loop), str(CUSTOM_DIR), recursive=False)
         _observer.daemon = True
         _observer.start()

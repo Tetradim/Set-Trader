@@ -31,14 +31,31 @@ class OrderLifecycleMixin:
         if remaining > 0:
             raise ValueError(f"{sym} re-entry cooldown active for {remaining:.0f}s")
 
-        effective_power = float(ticker_doc.get("base_power", 0) or 0)
-        qty = round(effective_power / exec_price, 4) if exec_price > 0 else 0
-        if qty <= 0:
-            raise ValueError(f"No buying power configured for {sym}")
-
         broker_ids = ticker_doc.get("broker_ids", []) or []
         broker_allocs = ticker_doc.get("broker_allocations", {}) or {}
         is_paper = self.is_paper_trading()
+        should_place_broker_order = self._should_place_broker_orders(broker_ids)
+        effective_power = float(ticker_doc.get("base_power", 0) or 0)
+        order_power = effective_power
+        if should_place_broker_order:
+            active_allocations = [
+                max(0.0, float((broker_allocs or {}).get(broker_id, 0) or 0))
+                for broker_id in broker_ids
+            ]
+            live_power = round(sum(active_allocations), 8)
+            if live_power <= 0:
+                raise ValueError(f"No live broker buying power configured for {sym}")
+            if live_power > effective_power:
+                raise ValueError(
+                    f"Live broker allocations for {sym} exceed ticker buy power "
+                    f"(${live_power:.2f} > ${effective_power:.2f})"
+                )
+            order_power = live_power
+
+        qty = round(order_power / exec_price, 4) if exec_price > 0 else 0
+        if qty <= 0:
+            raise ValueError(f"No buying power configured for {sym}")
+
         broker_results = []
 
         try:
@@ -58,6 +75,12 @@ class OrderLifecycleMixin:
             deps.logger.warning(str(exc))
             raise RuntimeError(str(exc)) from exc
 
+        if broker_results:
+            broker_filled_qty = self._broker_results_filled_quantity(broker_results)
+            if broker_filled_qty > 0:
+                qty = round(broker_filled_qty, 4)
+                order_power = round(exec_price * qty, 2)
+
         self._prices[sym] = exec_price
         self._positions[sym] = {"qty": qty, "avg_entry": exec_price, "high": exec_price}
         trade = TradeRecord(
@@ -70,7 +93,7 @@ class OrderLifecycleMixin:
             rule_mode="EDGE",
             target_price=exec_price,
             total_value=round(exec_price * qty, 2),
-            buy_power=effective_power,
+            buy_power=order_power,
             trading_mode="paper" if is_paper or not broker_ids else "live",
             broker_results=broker_results,
         )
@@ -175,7 +198,6 @@ class OrderLifecycleMixin:
 
     async def _execute_sell(self, sym: str, price: float, qty: float, entry: float, order_type: str, reason: str) -> dict:
         """Shared sell execution logic for both manual and engine-driven sells."""
-        pnl = round((price - entry) * qty, 2)
         is_paper = self.is_paper_trading()
         ticker_doc = await deps.db.tickers.find_one({"symbol": sym}, {"_id": 0})
         broker_ids = ticker_doc.get("broker_ids", []) if ticker_doc else []
@@ -197,19 +219,35 @@ class OrderLifecycleMixin:
             deps.logger.warning(str(exc))
             raise RuntimeError(str(exc)) from exc
 
+        executed_qty = qty
+        if broker_results:
+            broker_filled_qty = self._broker_results_filled_quantity(broker_results)
+            if broker_filled_qty > 0:
+                executed_qty = min(qty, round(broker_filled_qty, 4))
+        pnl = round((price - entry) * executed_qty, 2)
+
         trade = TradeRecord(
-            symbol=sym, side="SELL", price=price, quantity=qty,
+            symbol=sym, side="SELL", price=price, quantity=executed_qty,
             reason=reason, pnl=pnl,
             order_type=order_type,
             entry_price=entry,
-            total_value=round(price * qty, 2),
+            total_value=round(price * executed_qty, 2),
             buy_power=ticker_doc.get("base_power", 0) if ticker_doc else 0,
             trading_mode="paper" if is_paper or not broker_ids else "live",
             broker_results=broker_results,
         )
         await self._record_trade(trade)
-        self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
-        self._trailing_highs.pop(sym, None)
+        remaining_qty = round(max(0.0, qty - executed_qty), 4)
+        if remaining_qty > 0:
+            current_pos = self._positions.get(sym, {})
+            self._positions[sym] = {
+                "qty": remaining_qty,
+                "avg_entry": entry,
+                "high": current_pos.get("high", price),
+            }
+        else:
+            self._positions[sym] = {"qty": 0, "avg_entry": 0, "high": 0}
+            self._trailing_highs.pop(sym, None)
         compound = ticker_doc.get("compound_profits", True) if ticker_doc else True
         await self._update_profit(sym, pnl, compound)
 
@@ -218,8 +256,8 @@ class OrderLifecycleMixin:
             "symbol": sym,
             "order_type": order_type.lower(),
             "price": price,
-            "quantity": qty,
+            "quantity": executed_qty,
             "pnl": pnl,
-            "total_value": round(price * qty, 2),
+            "total_value": round(price * executed_qty, 2),
             "trading_mode": trade.trading_mode,
         }

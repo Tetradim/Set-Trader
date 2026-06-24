@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -88,6 +89,85 @@ class ChromeDiscordBridgeTests(unittest.TestCase):
         self.assertTrue(health["healthy"])
         self.assertEqual(events[0]["event_type"], "bridge.health")
         self.assertEqual(events[0]["payload"]["bridge_target_id"], "sentinel-pulse")
+
+    def test_remote_bridge_requires_configured_secret(self):
+        from routes import chrome_bridge
+
+        app = FastAPI()
+        app.include_router(chrome_bridge.router, prefix="/api")
+        client = TestClient(app)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"CHROME_BRIDGE_ALLOW_REMOTE": "1", "CHROME_BRIDGE_REMOTE_SECRET": ""},
+                clear=False,
+            ),
+            patch.object(chrome_bridge, "LOCAL_CLIENT_HOSTS", set()),
+        ):
+            response = client.post(
+                "/api/discord/chrome-bridge/message",
+                json={"event_id": "remote-1", "content": "$SPY alert"},
+            )
+
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("Chrome bridge remote secret is not configured", response.json()["detail"])
+
+    def test_remote_bridge_rejects_missing_secret_header(self):
+        from routes import chrome_bridge
+
+        app = FastAPI()
+        app.include_router(chrome_bridge.router, prefix="/api")
+        client = TestClient(app)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CHROME_BRIDGE_ALLOW_REMOTE": "1",
+                    "CHROME_BRIDGE_REMOTE_SECRET": "remote-test-secret",
+                },
+                clear=False,
+            ),
+            patch.object(chrome_bridge, "LOCAL_CLIENT_HOSTS", set()),
+        ):
+            response = client.post(
+                "/api/discord/chrome-bridge/message",
+                json={"event_id": "remote-2", "content": "$SPY alert"},
+            )
+
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("Invalid chrome bridge secret", response.json()["detail"])
+
+    def test_remote_bridge_accepts_matching_secret_header(self):
+        from routes import chrome_bridge
+        from bot_event_bus import EventBusStore
+
+        app = FastAPI()
+        app.include_router(chrome_bridge.router, prefix="/api")
+        client = TestClient(app)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "CHROME_BRIDGE_ALLOW_REMOTE": "1",
+                    "CHROME_BRIDGE_REMOTE_SECRET": "remote-test-secret",
+                },
+                clear=False,
+            ),
+            patch.object(chrome_bridge, "LOCAL_CLIENT_HOSTS", set()),
+        ):
+            response = client.post(
+                "/api/discord/chrome-bridge/message",
+                headers={"X-Chrome-Bridge-Secret": "remote-test-secret"},
+                json={"event_id": "remote-3", "content": "$SPY alert"},
+            )
+
+        events = EventBusStore().list_events(limit=10)
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual("accepted", response.json()["status"])
+        self.assertEqual("signal.observed", events[0]["event_type"])
 
 
 if __name__ == "__main__":

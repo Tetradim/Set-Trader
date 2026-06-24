@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+import deps
 from auth import get_current_user, TokenData, require_roles, Role
 from advanced_risk import (
     AdvancedRiskLimits,
@@ -17,12 +18,17 @@ from advanced_risk import (
     advanced_risk_manager,
 )
 from risk_controls import (
-    risk_controls, ExposureLimit, KillSwitchLevel, 
+    risk_controls as _fallback_risk_controls, ExposureLimit, KillSwitchLevel,
     OrderRestriction
 )
 
 
 router = APIRouter(prefix="/risk", tags=["risk"])
+
+
+def _risk_controls():
+    engine = getattr(deps, "engine", None)
+    return getattr(engine, "risk_controls", None) or _fallback_risk_controls
 
 
 # Request/Response models
@@ -152,7 +158,7 @@ async def get_exposure_limits(
     current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
 ):
     """Get all exposure limits."""
-    return {"limits": risk_controls.get_all_limits()}
+    return {"limits": _risk_controls().get_all_limits()}
 
 
 @router.post("/limits")
@@ -172,7 +178,7 @@ async def create_exposure_limit(
         soft_limit=limit.soft_limit,
         is_enabled=limit.is_enabled
     )
-    risk_controls.add_exposure_limit(exposure_limit)
+    _risk_controls().add_exposure_limit(exposure_limit)
     return {"status": "ok", "limit_id": limit.limit_id}
 
 
@@ -181,7 +187,7 @@ async def get_kill_switches(
     current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
 ):
     """Get all kill switches."""
-    return {"kill_switches": risk_controls.get_all_kill_switches()}
+    return {"kill_switches": _risk_controls().get_all_kill_switches()}
 
 
 @router.post("/kill-switches")
@@ -198,7 +204,7 @@ async def create_kill_switch(
             detail=f"Invalid level: {request.level}"
         )
     
-    risk_controls.add_kill_switch(level, request.target_id)
+    _risk_controls().add_kill_switch(level, request.target_id)
     switch_id = f"{request.level}:{request.target_id}"
     return {"status": "ok", "switch_id": switch_id}
 
@@ -227,7 +233,14 @@ async def toggle_kill_switch(
         )
     
     # Activate the kill switch
-    risk_controls.activate_kill_switch(level, target_id, current_user.username, request.reason)
+    activated = _risk_controls().activate_kill_switch(
+        level, target_id, current_user.username, request.reason
+    )
+    if not activated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Kill switch not found: {switch_id}"
+        )
     
     return {"status": "ok", "switch_id": switch_id, "is_active": True}
 
@@ -254,7 +267,12 @@ async def deactivate_kill_switch(
             detail=f"Invalid level: {level_str}"
         )
     
-    risk_controls.deactivate_kill_switch(level, target_id)
+    deactivated = _risk_controls().deactivate_kill_switch(level, target_id)
+    if not deactivated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Kill switch not found: {switch_id}"
+        )
     
     return {"status": "ok", "switch_id": switch_id, "is_active": False}
 
@@ -264,9 +282,10 @@ async def get_restrictions(
     current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
 ):
     """Get all symbol restrictions."""
+    controls = _risk_controls()
     return {
-        "restricted_symbols": list(risk_controls._symbol_restrictions),
-        "order_restrictions": {k: v.value for k, v in risk_controls._order_restrictions.items()}
+        "restricted_symbols": list(controls._symbol_restrictions),
+        "order_restrictions": {k: v.value for k, v in controls._order_restrictions.items()}
     }
 
 
@@ -276,7 +295,7 @@ async def add_restricted_symbol(
     current_user: TokenData = Depends(require_roles([Role.ADMIN]))
 ):
     """Add a restricted symbol."""
-    risk_controls.add_restricted_symbol(request.symbol)
+    _risk_controls().add_restricted_symbol(request.symbol)
     return {"status": "ok", "symbol": request.symbol}
 
 
@@ -286,7 +305,7 @@ async def remove_restricted_symbol(
     current_user: TokenData = Depends(require_roles([Role.ADMIN]))
 ):
     """Remove a restricted symbol."""
-    risk_controls.remove_restricted_symbol(symbol)
+    _risk_controls().remove_restricted_symbol(symbol)
     return {"status": "ok", "symbol": symbol}
 
 
@@ -296,7 +315,7 @@ async def set_fat_finger_limit(
     current_user: TokenData = Depends(require_roles([Role.ADMIN, Role.RISK_OFFICER]))
 ):
     """Set a fat-finger limit for a symbol."""
-    risk_controls.set_fat_finger_limit(request.symbol, request.max_order_value)
+    _risk_controls().set_fat_finger_limit(request.symbol, request.max_order_value)
     return {"status": "ok", "symbol": request.symbol, "max_order_value": request.max_order_value}
 
 
@@ -306,7 +325,7 @@ async def check_order_risk(
     current_user: TokenData = Depends(get_current_user)
 ):
     """Check if an order passes risk controls."""
-    result = risk_controls.check_order(
+    result = _risk_controls().check_order(
         symbol=request.symbol,
         order_value=request.order_value,
         account=request.account,
@@ -408,7 +427,7 @@ async def get_risk_status(
     current_user: TokenData = Depends(get_current_user)
 ):
     """Get current trading status from risk controls."""
-    is_allowed, restriction, message = risk_controls.isTradingAllowed()
+    is_allowed, restriction, message = _risk_controls().isTradingAllowed()
     return {
         "trading_allowed": is_allowed,
         "restriction": restriction.value if restriction else "none",

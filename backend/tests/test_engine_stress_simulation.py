@@ -430,6 +430,38 @@ def test_live_buy_with_empty_broker_results_does_not_create_internal_position(en
     assert env.engine._positions.get("LIVEBUY", {}).get("qty", 0) == 0
 
 
+def test_live_buy_with_submitted_broker_result_does_not_create_internal_position(engine_env):
+    env = engine_env
+    ticker = {
+        "symbol": "LIVESUB",
+        "enabled": True,
+        "strategy": "custom",
+        "base_power": 1_000.0,
+        "avg_days": 1,
+        "buy_percent": False,
+        "buy_offset": 100.0,
+        "buy_order_type": "limit",
+        "sell_percent": False,
+        "sell_offset": 110.0,
+        "stop_percent": False,
+        "stop_offset": 90.0,
+        "trailing_enabled": False,
+        "broker_ids": ["b1"],
+        "broker_allocations": {"b1": 1_000.0},
+        "compound_profits": False,
+    }
+    env.db.tickers.docs.append(deepcopy(ticker))
+    env.price_service.prices_by_symbol["LIVESUB"] = [99.0]
+    deps.broker_mgr = _BrokerMgr([{"broker_id": "b1", "status": "submitted", "order_id": "abc-123"}])
+    env.engine.simulate_24_7 = False
+    env.engine.live_during_market_hours = True
+
+    asyncio.run(env.engine.evaluate_ticker(ticker))
+
+    assert [trade for trade in env.db.trades.docs if trade["symbol"] == "LIVESUB"] == []
+    assert env.engine._positions.get("LIVESUB", {}).get("qty", 0) == 0
+
+
 @pytest.mark.parametrize(
     ("symbol", "price", "ticker_updates", "trailing_high"),
     [

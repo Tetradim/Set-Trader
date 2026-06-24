@@ -7,7 +7,7 @@ from collections import deque
 import deps
 from schemas import TradeRecord
 from resilience import CircuitOpenError
-from risk_controls import RiskControls, RiskCheckResult, OrderRestriction, KillSwitchLevel
+from risk_controls import ExposureLimit, RiskControls, RiskCheckResult, OrderRestriction, KillSwitchLevel
 from trading.idempotency import OrderIdempotencyMixin
 from trading.engine_state import EngineStateMixin
 from trading.broker_execution import BrokerExecutionMixin
@@ -119,6 +119,140 @@ class TradingEngine(
     def check_symbol_risk(self, symbol: str) -> RiskCheckResult:
         """Check symbol-specific risk limits."""
         return self.risk_controls.check_exposure_limit("symbol", symbol)
+
+    def ensure_symbol_exposure_limit(self, symbol: str) -> ExposureLimit:
+        """Ensure each traded symbol has its own exposure bucket."""
+        symbol = str(symbol or "").upper()
+        existing = self.risk_controls.get_exposure_limit("symbol", symbol)
+        if existing:
+            return existing
+
+        default = self.risk_controls.get_exposure_limit("symbol", "default")
+        limit = ExposureLimit(
+            limit_id=f"symbol_{symbol}",
+            level="symbol",
+            level_id=symbol,
+            max_notional=default.max_notional if default else 0.0,
+            max_daily_loss=default.max_daily_loss if default else 0.0,
+            max_position_size=default.max_position_size if default else 0.0,
+            max_orders_per_minute=default.max_orders_per_minute if default else 0,
+            soft_limit=default.soft_limit if default else 0.0,
+            is_enabled=default.is_enabled if default else True,
+        )
+        self.risk_controls.add_exposure_limit(limit)
+        return limit
+
+    def check_projected_global_risk(self, side: str, quantity: float, price: float) -> RiskCheckResult:
+        """Check portfolio risk using the proposed order's projected exposure."""
+        limit = self.risk_controls.get_exposure_limit("portfolio", "global")
+        if not limit or not limit.is_enabled:
+            return RiskCheckResult(is_allowed=True)
+
+        side = str(side or "").upper()
+        try:
+            order_notional = max(0.0, float(quantity or 0) * float(price or 0))
+        except (TypeError, ValueError):
+            order_notional = 0.0
+
+        notional_delta = order_notional if side == "BUY" else -order_notional
+        projected_notional = max(0.0, float(limit.current_notional or 0) + notional_delta)
+        if side == "BUY" and limit.max_notional > 0 and projected_notional > limit.max_notional:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=(
+                    f"Projected notional limit exceeded: ${projected_notional} "
+                    f"> ${limit.max_notional}"
+                ),
+                rejected_fields={"notional": projected_notional},
+            )
+
+        position_delta = float(quantity or 0) if side == "BUY" else -float(quantity or 0)
+        projected_position = float(limit.current_position or 0) + position_delta
+        if side == "BUY" and limit.max_position_size > 0 and abs(projected_position) > limit.max_position_size:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=(
+                    f"Projected position size exceeded: {projected_position} "
+                    f"> {limit.max_position_size}"
+                ),
+                rejected_fields={"position": projected_position},
+            )
+
+        if limit.max_daily_loss > 0 and limit.daily_pnl < -limit.max_daily_loss:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=f"Daily loss limit exceeded: ${limit.daily_pnl} < -${limit.max_daily_loss}",
+                rejected_fields={"daily_pnl": limit.daily_pnl},
+            )
+
+        if limit.max_orders_per_minute > 0 and limit.orders_count >= limit.max_orders_per_minute:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.CANCEL_ALL,
+                message=f"Order rate limit exceeded: {limit.orders_count} >= {limit.max_orders_per_minute}/min",
+                rejected_fields={"orders_count": limit.orders_count},
+            )
+
+        return RiskCheckResult(is_allowed=True)
+
+    def check_projected_symbol_risk(self, symbol: str, side: str, quantity: float, price: float) -> RiskCheckResult:
+        """Check symbol risk using the proposed order's projected exposure."""
+        limit = self.ensure_symbol_exposure_limit(symbol)
+        if not limit or not limit.is_enabled:
+            return RiskCheckResult(is_allowed=True)
+
+        side = str(side or "").upper()
+        try:
+            order_notional = max(0.0, float(quantity or 0) * float(price or 0))
+        except (TypeError, ValueError):
+            order_notional = 0.0
+
+        notional_delta = order_notional if side == "BUY" else -order_notional
+        projected_notional = max(0.0, float(limit.current_notional or 0) + notional_delta)
+        if side == "BUY" and limit.max_notional > 0 and projected_notional > limit.max_notional:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=(
+                    f"Projected symbol notional limit exceeded: ${projected_notional} "
+                    f"> ${limit.max_notional}"
+                ),
+                rejected_fields={"symbol": symbol, "notional": projected_notional},
+            )
+
+        position_delta = float(quantity or 0) if side == "BUY" else -float(quantity or 0)
+        projected_position = float(limit.current_position or 0) + position_delta
+        if side == "BUY" and limit.max_position_size > 0 and abs(projected_position) > limit.max_position_size:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=(
+                    f"Projected symbol position size exceeded: {projected_position} "
+                    f"> {limit.max_position_size}"
+                ),
+                rejected_fields={"symbol": symbol, "position": projected_position},
+            )
+
+        if limit.max_daily_loss > 0 and limit.daily_pnl < -limit.max_daily_loss:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.HARD_BLOCK,
+                message=f"Symbol daily loss limit exceeded: ${limit.daily_pnl} < -${limit.max_daily_loss}",
+                rejected_fields={"symbol": symbol, "daily_pnl": limit.daily_pnl},
+            )
+
+        if limit.max_orders_per_minute > 0 and limit.orders_count >= limit.max_orders_per_minute:
+            return RiskCheckResult(
+                is_allowed=False,
+                restriction=OrderRestriction.CANCEL_ALL,
+                message=f"Symbol order rate limit exceeded: {limit.orders_count} >= {limit.max_orders_per_minute}/min",
+                rejected_fields={"symbol": symbol, "orders_count": limit.orders_count},
+            )
+
+        return RiskCheckResult(is_allowed=True)
     
     def is_dry_run(self) -> bool:
         """Check if running in dry-run (no real orders) mode."""
@@ -175,12 +309,12 @@ class TradingEngine(
             return False, f"SYMBOL {symbol} BLOCKED: {symbol_switch.reason}"
         
         # Check global portfolio risk
-        risk_result = self.check_global_risk()
+        risk_result = self.check_projected_global_risk(side, quantity, price)
         if not risk_result.is_allowed:
             return False, f"RISK REJECTED: {risk_result.message}"
         
         # Check symbol-specific risk
-        symbol_risk = self.check_symbol_risk(symbol)
+        symbol_risk = self.check_projected_symbol_risk(symbol, side, quantity, price)
         if not symbol_risk.is_allowed:
             return False, f"RISK REJECTED: {symbol_risk.message}"
         
@@ -197,7 +331,9 @@ class TradingEngine(
     def update_exposure_from_trade(self, symbol: str, side: str, quantity: float, 
                                    price: float, pnl: float = 0):
         """Update exposure tracking after a trade."""
+        symbol = str(symbol or "").upper()
         notional = quantity * price
+        self.ensure_symbol_exposure_limit(symbol)
         
         if side == "BUY":
             self.risk_controls.update_exposure(
@@ -207,6 +343,7 @@ class TradingEngine(
             )
             self.risk_controls.update_exposure(
                 "symbol", symbol,
+                notional_delta=notional,
                 position_delta=quantity
             )
         else:  # SELL
@@ -218,6 +355,7 @@ class TradingEngine(
             )
             self.risk_controls.update_exposure(
                 "symbol", symbol,
+                notional_delta=-notional,
                 position_delta=-quantity,
                 pnl_delta=pnl
             )

@@ -78,6 +78,7 @@ class EngineStateMixin:
                 "market_hours_only": self.market_hours_only,
                 "live_during_market_hours": self.live_during_market_hours,
                 "paper_after_hours": self.paper_after_hours,
+                "dry_run_mode": getattr(self, "_dry_run_mode", False),
                 "positions": self._positions,
                 "prices": self._prices,
                 "trailing_highs": self._trailing_highs,
@@ -101,6 +102,7 @@ class EngineStateMixin:
             self.market_hours_only = v.get("market_hours_only", True)
             self.live_during_market_hours = v.get("live_during_market_hours", False)
             self.paper_after_hours = v.get("paper_after_hours", False)
+            self._dry_run_mode = bool(v.get("dry_run_mode", False))
             self._positions = v.get("positions", {}) or {}
             self._prices = v.get("prices", {}) or {}
             self._trailing_highs = v.get("trailing_highs", {}) or {}
@@ -110,7 +112,7 @@ class EngineStateMixin:
             self._last_rebracket_ts.update(self._restore_timestamps(v.get("last_rebracket_ts", {}) or {}))
             self._opening_bell_highs = v.get("opening_bell_highs", {}) or {}
             self._opening_bell_rebracket_done = v.get("opening_bell_rebracket_done", {}) or {}
-            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}")
+            deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}, dry_run={self._dry_run_mode}")
 
     async def reset_trailing_runtime_state(self, symbols: list[str] | None = None):
         """Clear cached trailing highs when trailing configuration changes."""
@@ -263,7 +265,7 @@ class EngineStateMixin:
 
     def is_paper_trading(self) -> bool:
         """Check if we're currently in paper trading mode."""
-        return self.simulate_24_7 or not self.live_during_market_hours
+        return bool(getattr(self, "_dry_run_mode", False)) or self.simulate_24_7 or not self.live_during_market_hours
 
     async def _validate_order_mode(self, broker_ids: list, ticker_doc: dict) -> tuple[bool, str]:
         """Validate that order mode is appropriate for the configuration.

@@ -14,10 +14,20 @@ Architecture:
      ├── WealthsimpleAdapter  (unofficial)
 """
 from .base import BrokerAdapter, BrokerOrder, BrokerPosition, BrokerAccountInfo, BrokerRiskWarning, BrokerInfo
-from .registry import BROKER_REGISTRY, get_broker_adapter, get_broker_info
+from .registry import (
+    BROKER_REGISTRY,
+    EXPERIMENTAL_BROKER_OPT_IN_ENV,
+    broker_connection_enabled,
+    broker_unavailable_message,
+    experimental_brokers_enabled,
+    get_broker_adapter,
+    get_broker_info,
+)
 
 __all__ = [
     "BrokerAdapter", "BrokerOrder", "BrokerPosition", "BrokerAccountInfo",
     "BrokerRiskWarning", "BrokerInfo",
-    "BROKER_REGISTRY", "get_broker_adapter", "get_broker_info",
+    "BROKER_REGISTRY", "EXPERIMENTAL_BROKER_OPT_IN_ENV",
+    "broker_connection_enabled", "broker_unavailable_message",
+    "experimental_brokers_enabled", "get_broker_adapter", "get_broker_info",
 ]

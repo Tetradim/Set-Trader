@@ -210,7 +210,7 @@ class RiskControls:
         Returns (is_allowed, restriction, message)
         """
         # Check global kill switch
-        if "global" in self._kill_switches:
+        if "global:global" in self._kill_switches:
             ks = self._kill_switches["global:global"]
             if ks.is_active:
                 return (False, OrderRestriction.HARD_BLOCK, 

@@ -46,8 +46,14 @@ assert.match(
 
 assert.match(
   watchlistSource,
-  /body:\s*JSON\.stringify\(\{\s*simulate_24_7:\s*checked\s*\}\)/s,
-  'Paper/Live controls and Simulate 24/7 toggle should persist through /api/settings',
+  /requestLiveTradingPayload\(currentMode,\s*\{\s*simulate_24_7:\s*checked\s*\}\)/s,
+  'Paper/Live controls and Simulate 24/7 toggle should request live confirmation before persisting',
+);
+
+assert.match(
+  watchlistSource,
+  /body:\s*JSON\.stringify\(payload\)/s,
+  'Confirmed Watchlist mode payloads should persist through /api/settings',
 );
 
 assert.doesNotMatch(
@@ -58,8 +64,8 @@ assert.doesNotMatch(
 
 assert.match(
   watchlistSource,
-  /body:\s*JSON\.stringify\(\{\s*live_during_market_hours:\s*checked\s*\}\)/s,
-  'Live During Market Hours should persist through /api/settings',
+  /requestLiveTradingPayload\(currentMode,\s*\{\s*live_during_market_hours:\s*checked\s*\}\)/s,
+  'Live During Market Hours should request live confirmation before persisting',
 );
 
 assert.match(

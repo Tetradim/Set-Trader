@@ -1,8 +1,14 @@
 """Alpaca broker adapter — API-first broker for algorithmic trading."""
+import asyncio
 import logging
+import re
+import uuid
 from .base import BrokerAdapter, BrokerOrder, BrokerPosition, BrokerAccountInfo
 
 logger = logging.getLogger("SentinelPulse")
+_ORDER_TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "expired", "rejected"}
+_CLIENT_ORDER_ID_MAX_LENGTH = 48
+_CLIENT_ORDER_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_-]")
 
 
 class AlpacaAdapter(BrokerAdapter):
@@ -17,6 +23,46 @@ class AlpacaAdapter(BrokerAdapter):
     def _base_url(self):
         is_paper = str(self.config.get("paper", "true")).lower() in ("true", "1", "yes")
         return "https://paper-api.alpaca.markets" if is_paper else "https://api.alpaca.markets"
+
+    def _client_order_id_for(self, order: BrokerOrder) -> str:
+        raw = str(order.client_order_id or order.idempotency_key or "").strip()
+        if not raw:
+            return ""
+
+        safe = _CLIENT_ORDER_ID_UNSAFE_RE.sub("-", raw)
+        if len(safe) <= _CLIENT_ORDER_ID_MAX_LENGTH:
+            return safe
+
+        return f"sp_{uuid.uuid5(uuid.NAMESPACE_DNS, raw)}"
+
+    def _apply_order_payload(self, order: BrokerOrder, data: dict) -> BrokerOrder:
+        order.broker_order_id = data.get("id", order.broker_order_id)
+        order.client_order_id = data.get("client_order_id", order.client_order_id)
+        order.status = data.get("status", order.status)
+        try:
+            order.filled_price = float(data.get("filled_avg_price") or data.get("filled_price") or order.filled_price or 0)
+        except (TypeError, ValueError):
+            order.filled_price = 0.0
+        try:
+            order.filled_quantity = float(data.get("filled_qty") or order.filled_quantity or 0)
+        except (TypeError, ValueError):
+            order.filled_quantity = 0.0
+        return order
+
+    async def _poll_order_until_terminal(self, order: BrokerOrder, *, attempts: int = 6) -> BrokerOrder:
+        if not order.broker_order_id:
+            return order
+
+        session = await self._get_session()
+        for attempt in range(attempts):
+            async with session.get(f"{self._base_url()}/v2/orders/{order.broker_order_id}", headers=self._headers()) as resp:
+                if resp.status == 200:
+                    self._apply_order_payload(order, await resp.json())
+                    if str(order.status or "").lower() in _ORDER_TERMINAL_STATUSES:
+                        break
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.5)
+        return order
 
     async def check_connection(self) -> bool:
         try:
@@ -63,6 +109,10 @@ class AlpacaAdapter(BrokerAdapter):
             "type": order.order_type.value.lower(),
             "time_in_force": "day",
         }
+        client_order_id = self._client_order_id_for(order)
+        if client_order_id:
+            payload["client_order_id"] = client_order_id
+            order.client_order_id = client_order_id
         if order.limit_price and order.order_type in ("LIMIT", "STOP_LIMIT"):
             payload["limit_price"] = str(order.limit_price)
         if order.stop_price and order.order_type in ("STOP", "STOP_LIMIT"):
@@ -71,8 +121,10 @@ class AlpacaAdapter(BrokerAdapter):
         async with session.post(f"{self._base_url()}/v2/orders", headers=self._headers(), json=payload) as resp:
             data = await resp.json()
             if resp.status in (200, 201):
-                order.broker_order_id = data.get("id", "")
-                order.status = data.get("status", "submitted")
+                self._apply_order_payload(order, data)
+                order_type = getattr(order.order_type, "value", order.order_type)
+                if str(order_type).upper() == "MARKET" and str(order.status or "").lower() not in _ORDER_TERMINAL_STATUSES:
+                    await self._poll_order_until_terminal(order)
             else:
                 order.status = "rejected"
                 order.error = data.get("message", f"HTTP {resp.status}")

@@ -1,5 +1,11 @@
 """Broker registry — all supported brokers ordered LOW risk → HIGH risk."""
+import os
+
 from .base import BrokerAdapter, BrokerInfo, BrokerRiskWarning, BrokerRiskLevel
+
+
+EXPERIMENTAL_BROKER_OPT_IN_ENV = "SENTINEL_PULSE_ENABLE_EXPERIMENTAL_BROKERS"
+_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
 
 BROKER_REGISTRY: dict[str, BrokerInfo] = {
     # --- LOW RISK ---
@@ -51,9 +57,9 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
     "td_ameritrade": BrokerInfo(
         id="td_ameritrade", name="TD Ameritrade (Schwab)",
         description="Now part of Charles Schwab. OAuth-based REST API for trading.",
-        supported=True,
-        readiness="beta",
-        readiness_note="Official Schwab API path, but migration requirements vary by account. Expect tester setup friction.",
+        supported=False,
+        readiness="unavailable",
+        readiness_note="Disabled until the Schwab account/order flow is re-certified against current live API requirements.",
         auth_fields=["client_id", "refresh_token"],
         risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
             "Schwab permits algorithmic trading through their official API but requires app registration. High-frequency patterns may trigger review."),
@@ -62,9 +68,9 @@ BROKER_REGISTRY: dict[str, BrokerInfo] = {
     "thinkorswim": BrokerInfo(
         id="thinkorswim", name="Thinkorswim (Schwab)",
         description="Professional trading platform by Charles Schwab. Same API as TD Ameritrade.",
-        supported=True,
-        readiness="beta",
-        readiness_note="Uses the Schwab API path. Treat as beta until refresh-token setup and account mapping are verified.",
+        supported=False,
+        readiness="unavailable",
+        readiness_note="Disabled until the Thinkorswim/Schwab account mapping and order flow are re-certified for live use.",
         auth_fields=["tos_consumer_key", "tos_refresh_token", "tos_account_id"],
         risk_warning=BrokerRiskWarning(BrokerRiskLevel.MEDIUM,
             "Thinkorswim uses the Schwab API. App registration required. Moderate risk for high-frequency patterns."),
@@ -111,8 +117,33 @@ def get_broker_info(broker_id: str) -> BrokerInfo | None:
     return BROKER_REGISTRY.get(broker_id)
 
 
+def experimental_brokers_enabled() -> bool:
+    return os.environ.get(EXPERIMENTAL_BROKER_OPT_IN_ENV, "").strip().lower() in _TRUTHY_ENV_VALUES
+
+
+def broker_connection_enabled(info: BrokerInfo | None) -> bool:
+    if not info or not info.supported:
+        return False
+    if info.readiness == "experimental":
+        return experimental_brokers_enabled()
+    return True
+
+
+def broker_unavailable_message(info: BrokerInfo) -> str:
+    if info.readiness == "experimental" and not experimental_brokers_enabled():
+        return (
+            f"{info.name} is an experimental unofficial adapter and is disabled until "
+            f"{EXPERIMENTAL_BROKER_OPT_IN_ENV}=true is set by the operator."
+        )
+    return f"{info.name} is disabled for live broker connectivity until certification is complete."
+
+
 def get_broker_adapter(broker_id: str, credentials: dict) -> BrokerAdapter | None:
     """Factory: instantiate the correct adapter for a given broker."""
+    info = get_broker_info(broker_id)
+    if not broker_connection_enabled(info):
+        return None
+
     if broker_id == "alpaca":
         from .alpaca_adapter import AlpacaAdapter
         return AlpacaAdapter(credentials)

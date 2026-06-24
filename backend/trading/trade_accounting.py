@@ -61,6 +61,13 @@ class TradeAccountingMixin:
         }) as span:
             doc = trade.model_dump()
             await deps.db.trades.insert_one(doc)
+            self.update_exposure_from_trade(
+                trade.symbol,
+                trade.side,
+                trade.quantity,
+                trade.price,
+                trade.pnl,
+            )
             now = datetime.now(timezone.utc)
             self._last_trade_ts[trade.symbol] = now
             if trade.side != "BUY":
@@ -83,6 +90,27 @@ class TradeAccountingMixin:
                 f" | value=${trade.total_value:.2f} | power=${trade.buy_power:.2f}{pnl_str}"
             )
             clean = {k: v for k, v in doc.items() if k != "_id"}
+            try:
+                from bot_event_bus import publish_event
+                publish_event(
+                    "pulse.trade.recorded",
+                    {
+                        "trade_id": clean.get("id"),
+                        "symbol": clean.get("symbol"),
+                        "side": clean.get("side"),
+                        "order_type": clean.get("order_type"),
+                        "price": clean.get("price"),
+                        "quantity": clean.get("quantity"),
+                        "total_value": clean.get("total_value"),
+                        "pnl": clean.get("pnl"),
+                        "trading_mode": clean.get("trading_mode"),
+                        "timestamp": clean.get("timestamp"),
+                        "reason": clean.get("reason"),
+                    },
+                    source="sentinel-pulse",
+                )
+            except Exception as exc:
+                deps.logger.warning("Failed to publish Pulse trade bus event for %s: %s", trade.symbol, exc)
             await deps.ws_manager.broadcast({"type": "TRADE", "trade": clean})
             if trade.pnl < 0:
                 span.set_attribute("trade.loss", True)

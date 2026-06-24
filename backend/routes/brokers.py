@@ -3,9 +3,26 @@ from fastapi import APIRouter, HTTPException
 
 import deps
 from schemas import BrokerTestRequest
-from brokers import BROKER_REGISTRY, get_broker_info, get_broker_adapter
+from brokers import (
+    BROKER_REGISTRY,
+    broker_connection_enabled,
+    broker_unavailable_message,
+    get_broker_info,
+    get_broker_adapter,
+)
 
 router = APIRouter()
+
+
+def _raise_unsupported_broker(info):
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "error": "unsupported_broker",
+            "broker_id": info.id,
+            "message": broker_unavailable_message(info),
+        },
+    )
 
 
 @router.get("/brokers")
@@ -14,7 +31,7 @@ async def list_brokers():
     for broker_id, info in BROKER_REGISTRY.items():
         entry = {
             "id": info.id, "name": info.name, "description": info.description,
-            "supported": info.supported, "auth_fields": info.auth_fields,
+            "supported": broker_connection_enabled(info), "auth_fields": info.auth_fields,
             "readiness": info.readiness, "readiness_note": info.readiness_note,
             "docs_url": info.docs_url, "color": info.color, "risk_warning": None,
         }
@@ -42,7 +59,7 @@ async def get_broker(broker_id: str):
         raise HTTPException(404, f"Broker '{broker_id}' not found.")
     entry = {
         "id": info.id, "name": info.name, "description": info.description,
-        "supported": info.supported, "auth_fields": info.auth_fields,
+        "supported": broker_connection_enabled(info), "auth_fields": info.auth_fields,
         "readiness": info.readiness, "readiness_note": info.readiness_note,
         "docs_url": info.docs_url, "color": info.color, "risk_warning": None,
     }
@@ -56,6 +73,8 @@ async def test_broker_connection(broker_id: str, body: BrokerTestRequest):
     info = get_broker_info(broker_id)
     if not info:
         raise HTTPException(404, f"Broker '{broker_id}' not found.")
+    if not broker_connection_enabled(info):
+        _raise_unsupported_broker(info)
 
     results = {"broker_id": broker_id, "broker_name": info.name, "checks": [], "overall": "fail"}
 
@@ -148,6 +167,8 @@ async def connect_broker(broker_id: str, body: BrokerTestRequest):
     info = get_broker_info(broker_id)
     if not info:
         raise HTTPException(404, f"Broker '{broker_id}' not found.")
+    if not broker_connection_enabled(info):
+        _raise_unsupported_broker(info)
     ok = await deps.broker_mgr.connect_broker(broker_id, body.credentials)
     if ok:
         return {"status": "connected", "broker_id": broker_id}

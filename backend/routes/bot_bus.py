@@ -6,15 +6,19 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field, ValidationError
 
 from bot_event_bus import EventBusStore, publish_event
 from routes.edge import post_handoff
-from routes.edge_contracts import PulseHandoffRequest
+from routes.edge_contracts import PulseHandoffRequest, validate_api_key
 
 
-router = APIRouter(prefix="/bus", tags=["cross-bot-event-bus"])
+router = APIRouter(
+    prefix="/bus",
+    tags=["cross-bot-event-bus"],
+    dependencies=[Depends(validate_api_key)],
+)
 
 ACTION_ALIASES = {
     "downtrend_warning": "stop_buying",
@@ -85,7 +89,34 @@ async def create_event(request: EventRequest) -> dict[str, Any]:
 @router.post("/edge-actions")
 async def apply_edge_action(request: EdgeActionRequest) -> dict[str, Any]:
     received = publish_event("edge.action.received", request.payload, source=request.source, target=request.target)
-    handoff = _normalise_edge_action(request.payload)
+    try:
+        handoff = _normalise_edge_action(request.payload)
+    except ValidationError as exc:
+        reason = "invalid_handoff"
+        for error in exc.errors():
+            if error.get("loc") == ("mode",):
+                reason = "unsupported_mode"
+                break
+        response = {
+            "accepted": False,
+            "sent": False,
+            "status": "rejected",
+            "reason": reason,
+            "symbol": str(request.payload.get("symbol") or request.payload.get("ticker") or "GLOBAL").upper(),
+            "action": str(request.payload.get("action") or request.payload.get("type") or "stop_buying").lower(),
+            "handoff_id": str(request.payload.get("idempotency_key") or ""),
+            "message": str(exc),
+        }
+        rejected = publish_event(
+            "edge.action.rejected",
+            {
+                "received_event_id": received["event_id"],
+                "response": response,
+            },
+            source="sentinel-pulse",
+            target=request.source,
+        )
+        return {"received": received, "rejected": rejected, "response": response}
     response = await post_handoff(handoff)
     applied = publish_event(
         "edge.action.applied",

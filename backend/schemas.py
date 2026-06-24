@@ -181,6 +181,8 @@ class GlobalDailyDrawdownConfig(BaseModel):
 class SettingsUpdate(BaseModel):
     telegram: Optional[TelegramConfig] = None
     simulate_24_7: Optional[bool] = None
+    live_trading_confirmation: Optional[str] = Field(None, max_length=64)
+    live_trading_operator_secret: Optional[str] = Field(None, max_length=512)
     increment_step: Optional[float] = None
     decrement_step: Optional[float] = None
     account_balance: Optional[float] = None

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 import os
+import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -111,11 +112,20 @@ def get_bridge_health() -> dict[str, Any]:
 
 
 def _ensure_local_request(request: Request) -> None:
-    if os.environ.get("CHROME_BRIDGE_ALLOW_REMOTE", "").lower() in {"1", "true", "yes"}:
-        return
     host = request.client.host if request.client else ""
-    if host not in LOCAL_CLIENT_HOSTS:
+    if host in LOCAL_CLIENT_HOSTS:
+        return
+
+    if os.environ.get("CHROME_BRIDGE_ALLOW_REMOTE", "").lower() not in {"1", "true", "yes"}:
         raise HTTPException(status_code=403, detail="chrome bridge endpoint only accepts local requests")
+
+    expected_secret = os.environ.get("CHROME_BRIDGE_REMOTE_SECRET", "").strip()
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Chrome bridge remote secret is not configured")
+
+    provided_secret = request.headers.get("X-Chrome-Bridge-Secret", "").strip()
+    if not provided_secret or not secrets.compare_digest(provided_secret, expected_secret):
+        raise HTTPException(status_code=401, detail="Invalid chrome bridge secret")
 
 
 def _message_payload(payload: ChromeBridgeMessage, raw_text: str) -> dict[str, Any]:

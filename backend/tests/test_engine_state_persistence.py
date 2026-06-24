@@ -50,6 +50,7 @@ def test_engine_state_persists_runtime_positions(monkeypatch):
     engine.running = True
     engine.paused = False
     engine.simulate_24_7 = True
+    engine.set_dry_run(True)
     engine._positions = {
         "AAPL": {"qty": 3.4349, "avg_entry": 291.13, "high": 291.13},
         "NASA": {"qty": 33.6098, "avg_entry": 31.93, "buy_legs_filled": [0, 1, 2]},
@@ -72,6 +73,7 @@ def test_engine_state_persists_runtime_positions(monkeypatch):
     assert restored.running is True
     assert restored.paused is False
     assert restored.simulate_24_7 is True
+    assert restored.is_dry_run() is True
     assert restored._positions == engine._positions
     assert restored._trailing_highs == engine._trailing_highs
     assert restored._pending_sells == engine._pending_sells

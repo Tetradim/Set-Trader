@@ -16,12 +16,12 @@ class BrokerReadinessStaticTest(unittest.TestCase):
         self.assertIn("readiness: str", text)
         self.assertIn("readiness_note: str", text)
 
-    def test_registry_classifies_official_beta_and_experimental_brokers(self):
+    def test_registry_classifies_production_experimental_and_unavailable_brokers(self):
         text = self.read("backend/brokers/registry.py")
 
         self.assertIn('readiness="production"', text)
-        self.assertIn('readiness="beta"', text)
         self.assertIn('readiness="experimental"', text)
+        self.assertIn('readiness="unavailable"', text)
         self.assertIn("Official API", text)
         self.assertIn("Unofficial", text)
 

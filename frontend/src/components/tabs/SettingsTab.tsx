@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
+import { requestLiveTradingPayload } from '@/lib/liveTradingConfirmation';
 import { useStore } from '@/stores/useStore';
 import { AccountBalanceSection } from '@/components/settings/AccountBalanceSection';
 import { BrokerAllocationsSection } from '@/components/settings/BrokerAllocationsSection';
@@ -114,21 +115,34 @@ export function SettingsTab() {
     setSaving(true);
     try {
       const balanceToSave = balanceValue ?? parseFloat(balanceText) ?? 0;
+      const store = useStore.getState();
+      const settingsPayload = {
+        telegram: { bot_token: token, chat_ids: chatIds },
+        simulate_24_7: store.simulate247,
+        increment_step: incStep,
+        decrement_step: decStep,
+        account_balance: balanceToSave,
+        global_daily_drawdown: {
+          enabled: drawdownEnabled,
+          limit: drawdownLimitValue,
+          type: drawdownType,
+        },
+        edge_retry_max_attempts: edgeRetryAttempts,
+      };
+      const confirmedPayload = requestLiveTradingPayload(
+        {
+          simulate247: store.simulate247,
+          liveDuringMarketHours: store.liveDuringMarketHours,
+        },
+        settingsPayload,
+      );
+      if (!confirmedPayload) {
+        toast.error('Live trading confirmation cancelled. Settings were not saved.');
+        return;
+      }
       const res = await apiFetch('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({
-          telegram: { bot_token: token, chat_ids: chatIds },
-          simulate_24_7: useStore.getState().simulate247,
-          increment_step: incStep,
-          decrement_step: decStep,
-          account_balance: balanceToSave,
-          global_daily_drawdown: {
-            enabled: drawdownEnabled,
-            limit: drawdownLimitValue,
-            type: drawdownType,
-          },
-          edge_retry_max_attempts: edgeRetryAttempts,
-        }),
+        body: JSON.stringify(confirmedPayload),
       });
       setBalanceValue(balanceToSave);
       setBalanceText(String(balanceToSave));
