@@ -134,11 +134,15 @@ pwsh Launch-Sentinel-Pulse.ps1
 ```
 
 The launcher will:
-1. Check MongoDB is installed
-2. Create data/logs directories if needed
-3. Start MongoDB (if not already running)
-4. Start Sentinel Pulse API server
-5. Open the dashboard in your browser
+1. Check Microsoft Visual C++ Runtime and MongoDB
+2. Download missing runtime dependencies on first launch
+3. Cache dependencies under `%LOCALAPPDATA%\Sentinel Pulse\dependencies`
+4. Create data/logs directories if needed
+5. Start MongoDB when it is not already running
+6. Start Sentinel Pulse
+7. Open the dashboard in a dedicated browser window
+
+The installed Windows beta launcher downloads missing runtime dependencies on first launch and reuses them later.
 
 **That's it!**
 
@@ -204,6 +208,7 @@ Dashboard: `http://localhost:8001`
 ### Runtime Requirements
 
 - **MongoDB is required** for startup and persistence.
+- For the Windows beta installer path, MongoDB is downloaded and started by the launcher when it is missing. Source/development runs still require developer tooling and may require manual MongoDB setup.
 - **Default tickers** are seeded automatically for fresh databases.
 - **Broker feeds or yfinance** are required for new market prices; cached prices are used only after a real quote has been stored.
 - **Market replay imports** require yfinance or Alpaca market-data credentials, depending on the selected source. Imported bars are stored locally in MongoDB before playback.

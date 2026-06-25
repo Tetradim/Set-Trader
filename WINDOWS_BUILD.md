@@ -2,12 +2,16 @@
 
 ## Overview
 
-Sentinel Pulse can be packaged into a standalone Windows executable that bundles:
-- The Python/FastAPI backend
-- The React frontend (pre-built static files)
-- All dependencies
+Sentinel Pulse can be packaged into a Windows installer that bundles the app and installs a first-run launcher. Beta testers install one `SentinelPulse-Setup-<version>.exe`, then launch Sentinel Pulse from the Desktop or Start Menu.
 
-Recipients only need **MongoDB** (local install or Atlas cloud URI) — no Python, Node.js, or developer tools.
+The installed launcher:
+- Starts the packaged Python/FastAPI backend
+- Serves the pre-built React frontend
+- First run downloads missing runtime dependencies
+- Caches downloaded dependencies under `%LOCALAPPDATA%\Sentinel Pulse\dependencies`
+- Starts MongoDB automatically when it is not already running
+
+Recipients do not need Python, Node.js, Git, MongoDB setup steps, or developer tools.
 
 ---
 
@@ -81,25 +85,25 @@ backend/dist/
 
 ### What to Send
 
-Zip the entire `backend/dist/` folder and share the `.zip` file.
+Share the generated installer:
+
+```text
+dist/SentinelPulse-Setup-<version>.exe
+```
 
 ### What Recipients Need
 
-1. **MongoDB** — Either:
-   - Install [MongoDB Community Edition](https://www.mongodb.com/try/download/community) and run `mongod`
-   - OR use a [MongoDB Atlas](https://cloud.mongodb.com) cloud cluster (free tier available)
-
-2. **That's it.** No Python, Node.js, or any other developer tools needed.
+- Windows 10/11
+- Internet access on first launch if MongoDB or the Microsoft Visual C++ Runtime is missing
 
 ### Setup for Recipients
 
-1. Unzip `Sentinel Pulse-Windows.zip`
-2. **If using Atlas:** Edit `Sentinel Pulse\.env` and set:
-   ```
-   MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/sentinel_pulse
-   ```
-3. Double-click `Start Sentinel Pulse.bat`
-4. Browser opens to `http://localhost:8001`
+1. Run `SentinelPulse-Setup-<version>.exe`
+2. Leave "Launch Sentinel Pulse after install" checked, or double-click the Desktop shortcut later
+3. Wait while first run downloads missing runtime dependencies
+4. The dashboard opens automatically
+
+Downloaded dependencies are reused on future launches.
 
 ---
 
@@ -151,7 +155,8 @@ When running as a standalone executable:
 
 | Problem | Solution |
 |---------|----------|
-| App won't start | Make sure MongoDB is running (`mongod`) |
+| First launch says a dependency download failed | Check internet access, then send `Sentinel-Pulse.log` and `Sentinel-Pulse-Transcript.log` from the Desktop to support |
+| MongoDB does not start | Re-run the Sentinel Pulse shortcut; the launcher reuses or repairs the cached MongoDB runtime |
 | Port 8001 in use | Close whatever's using port 8001, or edit server.py's port |
 | "Module not found" errors | Re-build with `.\build-windows.ps1 -Clean` |
 | Frontend shows blank page | Make sure `static/` folder exists inside `Sentinel Pulse/` |
