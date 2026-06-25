@@ -111,46 +111,42 @@ if (-not $SkipBackend) {
     Write-Host "[5/6] Skipping backend build (--SkipBackend)" -ForegroundColor DarkGray
 }
 
-# --- CREATE LAUNCHER ---
-Write-Host "[6/6] Creating launcher..." -ForegroundColor Yellow
-$launcher = @"
-@echo off
-title Sentinel Pulse Terminal
-echo.
-echo  ========================================
-echo    Sentinel Pulse Terminal
-echo  ========================================
-echo.
-echo  Starting Sentinel Pulse...
-echo  Browser will open at http://localhost:8002
-echo.
-echo  Prerequisites:
-echo    - MongoDB running locally (mongod)
-echo    - OR edit Sentinel Pulse\.env with your Atlas URI
-echo.
-echo  Press Ctrl+C to stop.
-echo.
-timeout /t 2 /nobreak > nul
-start http://localhost:8002
-cd /d "%~dp0Sentinel Pulse"
-Sentinel Pulse.exe
-"@
-$launcher | Out-File -Encoding ASCII (Join-Path $DIST "Start Sentinel Pulse.bat")
+# --- PACKAGE LAUNCHERS ---
+Write-Host "[6/6] Packaging first-run launcher..." -ForegroundColor Yellow
+$PACKAGE = Join-Path $DIST "SentinelPulse"
+if (-not (Test-Path $PACKAGE)) {
+    throw "Expected PyInstaller output at $PACKAGE"
+}
 
-# --- ALSO COPY .ENV TO DIST ---
-Copy-Item (Join-Path $BACKEND ".env") (Join-Path $DIST "Sentinel Pulse\.env") -Force
+$launcherFiles = @(
+    "Launch-Sentinel-Pulse.bat",
+    "Launch-Sentinel-Pulse.ps1",
+    "Setup-And-Launch.bat"
+)
+foreach ($file in $launcherFiles) {
+    Copy-Item -Path (Join-Path $ROOT $file) -Destination (Join-Path $PACKAGE $file) -Force
+}
+
+$compatLauncher = @"
+@echo off
+call "%~dp0Launch-Sentinel-Pulse.bat"
+"@
+$compatLauncher | Out-File -Encoding ASCII (Join-Path $PACKAGE "Start Sentinel Pulse.bat")
+
+# --- ALSO COPY .ENV TO PACKAGE ---
+Copy-Item (Join-Path $BACKEND ".env") (Join-Path $PACKAGE ".env") -Force
 
 Write-Host ""
 Write-Host "  ========================================" -ForegroundColor Green
 Write-Host "    BUILD COMPLETE!" -ForegroundColor Green
 Write-Host "  ========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Output: backend\dist\" -ForegroundColor Cyan
-Write-Host "    - Start Sentinel Pulse.bat  (double-click to launch)" -ForegroundColor White
-Write-Host "    - Sentinel Pulse\           (executable + static files)" -ForegroundColor White
+Write-Host "  Output: backend\dist\SentinelPulse\" -ForegroundColor Cyan
+Write-Host "    - Launch-Sentinel-Pulse.bat  (double-click to launch and repair dependencies)" -ForegroundColor White
+Write-Host "    - SentinelPulse.exe          (packaged backend/frontend app)" -ForegroundColor White
 Write-Host ""
 Write-Host "  To distribute:" -ForegroundColor Yellow
-Write-Host "    1. Zip the entire 'dist' folder" -ForegroundColor White
-Write-Host "    2. Share the zip file" -ForegroundColor White
-Write-Host "    3. Recipients need MongoDB installed (or set Atlas URI in .env)" -ForegroundColor White
+Write-Host "    1. Build the installer with setup.iss or zip backend\dist\SentinelPulse" -ForegroundColor White
+Write-Host "    2. Share SentinelPulse-Setup-<version>.exe with beta testers" -ForegroundColor White
+Write-Host "    3. First launch downloads missing runtime dependencies automatically" -ForegroundColor White
 Write-Host ""
