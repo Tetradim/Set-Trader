@@ -42,9 +42,9 @@ Name: "launchapp"; Description: "Launch Sentinel Pulse after install"; GroupDesc
 
 [Files]
 Source: "backend\dist\SentinelPulse\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "setup-and-launch.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "launch-sentinel-pulse.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "launch-sentinel-pulse.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Setup-And-Launch.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Launch-Sentinel-Pulse.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Launch-Sentinel-Pulse.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "start-mongodb.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "start-mongodb.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "start-sentinel.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -64,9 +64,6 @@ Root: HKA; Subkey: "Software\Classes\{#MyAppAssocName}\shell\open\command"; Valu
 Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 
 [Run]
-; Install VC++ Redistributable silently
-Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Runtime..."; Flags: waituntilterminated; OnlyBelowVersion: 6.1
-
 ; Launch Sentinel Pulse if task selected
 Filename: "{app}\Setup-And-Launch.bat"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec; Tasks: launchapp; WorkingDir: "{app}"
 
