@@ -24,6 +24,7 @@ $ErrorActionPreference = "Stop"
 $ROOT = $PSScriptRoot
 $BACKEND = Join-Path $ROOT "backend"
 $DIST = Join-Path $BACKEND "dist"
+$PACKAGE = Join-Path $DIST "SentinelPulse"
 
 Write-Host ""
 Write-Host "  ===========================================" -ForegroundColor Cyan
@@ -41,12 +42,12 @@ if (-not $sevenZip) {
 $step = 1
 
 # 1. Build the application (if not exists)
-if (-not (Test-Path "$DIST\Sentinel Pulse.exe")) {
+if (-not (Test-Path (Join-Path $PACKAGE "SentinelPulse.exe"))) {
     Write-Host "[$step/4] Building Sentinel Pulse..." -ForegroundColor Green
     & "$ROOT\build-windows.ps1" -SkipFrontend
     $step++
 } else {
-    Write-Host "[SKIP] Sentinel Pulse.exe already exists." -ForegroundColor Gray
+    Write-Host "[SKIP] SentinelPulse.exe already exists." -ForegroundColor Gray
 }
 
 # 2. Create installer package
@@ -56,7 +57,7 @@ if ($Clean -and (Test-Path $STAGING)) { Remove-Item -Recurse -Force $STAGING }
 New-Item -ItemType Directory -Force -Path $STAGING | Out-Null
 
 # Copy files
-Copy-Item -Path "$DIST\*" -Destination $STAGING -Recurse -Force
+Copy-Item -Path "$PACKAGE\*" -Destination $STAGING -Recurse -Force
 
 # Create uninstaller script (silent, no prompt)
 $uninstallScriptSilent = @"
@@ -112,7 +113,7 @@ New-Item -ItemType Directory -Force -Path $startMenuFolder | Out-Null
 # Main app shortcut
 $appShortcut = @"
 [InternetShortcut]
-URL=file:///$InstallDir/Sentinel Pulse.exe
+URL=file:///$InstallDir/Launch-Sentinel-Pulse.bat
 "@
 $appShortcut | Out-File -FilePath "$startMenuFolder\Run Sentinel Pulse.url" -Encoding ASCII
 
@@ -141,7 +142,7 @@ $desktopUninstallShortcut | Out-File -FilePath "$env:PUBLIC\Desktop\Uninstall Se
 if ($CreateDesktopShortcut -or (-not $NoDesktopShortcut)) {
     $desktopShortcut = @"
 [InternetShortcut]
-URL=file:///$InstallDir/Sentinel Pulse.exe
+URL=file:///$InstallDir/Launch-Sentinel-Pulse.bat
 "@
     $desktopShortcut | Out-File -FilePath "$env:PUBLIC\Desktop\Sentinel Pulse.url" -Encoding ASCII
 }
@@ -167,11 +168,11 @@ echo.
 echo Creating Start Menu shortcuts...
 powershell -Command "New-Item -ItemType Directory -Force -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse' | Out-Null"
 powershell -Command "Set-Content -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse\Run Sentinel Pulse.url' -Value '[InternetShortcut]'" -Append
-powershell -Command "Add-Content -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse\Run Sentinel Pulse.url' -Value 'URL=file:///$InstallDir/Sentinel Pulse.exe'"
+powershell -Command "Add-Content -Path '$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Sentinel Pulse\Run Sentinel Pulse.url' -Value 'URL=file:///$InstallDir/Launch-Sentinel-Pulse.bat'"
 if (-not $NoDesktopShortcut) (
     echo Creating Desktop shortcuts...
     powershell -Command "Set-Content -Path '$env:PUBLIC\Desktop\Sentinel Pulse.url' -Value '[InternetShortcut]'" -Append
-    powershell -Command "Add-Content -Path '$env:PUBLIC\Desktop\Sentinel Pulse.url' -Value 'URL=file:///$InstallDir\Sentinel Pulse.exe'"
+    powershell -Command "Add-Content -Path '$env:PUBLIC\Desktop\Sentinel Pulse.url' -Value 'URL=file:///$InstallDir/Launch-Sentinel-Pulse.bat'"
     powershell -Command "Set-Content -Path '$env:PUBLIC\Desktop\Uninstall Sentinel Pulse.url' -Value '[InternetShortcut]'" -Append
     powershell -Command "Add-Content -Path '$env:PUBLIC\Desktop\Uninstall Sentinel Pulse.url' -Value 'URL=file:///$InstallDir/Uninstall.bat'"
 )
@@ -186,7 +187,7 @@ echo   Configure: Start Menu > Sentinel Pulse > Configure
 echo.
 echo   Press any key to launch Sentinel Pulse, or close window.
 pause >nul
-start "" "$InstallDir\Sentinel Pulse.exe"
+start "" "$InstallDir\Launch-Sentinel-Pulse.bat"
 exit
 "@
 
