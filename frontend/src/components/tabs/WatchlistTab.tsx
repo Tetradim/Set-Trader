@@ -25,6 +25,7 @@ import {
   isLiveTradingMode,
   requestLiveTradingPayload,
 } from '@/lib/liveTradingConfirmation';
+import { getUsEquitySession } from '@/lib/market-session';
 import { toast } from 'sonner';
 
 // ── Tunnel SVG backgrounds per card state ────────────────────────────────────
@@ -80,7 +81,7 @@ export function TunnelSVG({ color }: { color: 'gold' | 'red' | 'amber' | 'blue' 
 // ── Market color state ────────────────────────────────────────────────────────
 const SWATCH_COLORS = ['#dca828','#2dd4a0','#4d82dc','#e03040','#c84afa','#f97316'];
 const DEFAULT_MKT_COLORS: Record<string, string> = {
-  NYSE: '#dca828', NASDAQ: '#2dd4a0', LSE: '#4d82dc', Crypto: '#c84afa',
+  NYSE: '#dca828', NASDAQ: '#2dd4a0', LSE: '#4d82dc',
 };
 
 // ── WatchlistTab ─────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export function WatchlistTab() {
   const paperAfterHours       = useStore((s) => s.paperAfterHours);
   const trades                = useStore((s) => s.trades);
   const running               = useStore((s) => s.running);
+  const marketOpen            = useStore((s) => s.marketOpen);
 
   const totalPnl = Object.values(profits).reduce((a, b) => a + b, 0);
   const localAllocated = Object.values(tickers).reduce((s, t) => s + (t.base_power ?? 0), 0);
@@ -268,11 +270,15 @@ export function WatchlistTab() {
     return `sp-sheen-${color === 'amber' ? 'amber' : color === 'red' ? 'red' : color === 'blue' ? 'blue' : 'gold'}`;
   }
 
+  const usSession = getUsEquitySession();
+  const sessionIsOpen = marketOpen || usSession.status === 'open';
+  const sessionStatus = sessionIsOpen ? 'open' : usSession.status;
+  const sessionLabel = sessionIsOpen ? 'Market Open' : usSession.label;
+
   const marketItems = [
     { key: 'NYSE',   status: 'open',   label: 'Open' },
     { key: 'NASDAQ', status: 'open',   label: 'Open' },
     { key: 'LSE',    status: 'closed', label: 'Closed' },
-    { key: 'Crypto', status: 'open',   label: '24/7' },
   ];
 
   return (
@@ -315,7 +321,7 @@ export function WatchlistTab() {
           ))}
           <div className="sp-mkt-item">
             <div className="sp-mkt-name">Session</div>
-            <div className="sp-mkt-status pre">Pre-Market</div>
+            <div className={`sp-mkt-status ${sessionStatus}`}>{sessionLabel}</div>
           </div>
           <div className="sp-mkt-item" style={{ cursor: 'default' }}>
             <div className="sp-mkt-time" id="watchlist-clock">--:--:-- ET</div>

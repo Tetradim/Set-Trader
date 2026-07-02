@@ -5,6 +5,7 @@ import { FeedbackDialog } from './FeedbackDialog';
 import { Play, Square } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import { getUsEquitySession } from '@/lib/market-session';
 
 export function Header() {
   const running        = useStore((s) => s.running);
@@ -15,6 +16,9 @@ export function Header() {
   const accentColor    = useStore((s) => s.accentColor);
   const setThemeMode   = useStore((s) => s.setThemeMode);
   const setAccentColor = useStore((s) => s.setAccentColor);
+  const usSession = getUsEquitySession();
+  const marketIsOpen = marketOpen || usSession.status === 'open';
+  const marketStatusLabel = marketIsOpen ? 'Market Open' : usSession.label;
 
   // Keep accent class on <html> in sync
   useEffect(() => {
@@ -71,10 +75,10 @@ export function Header() {
       </span>
 
       <span
-        className={`sp-pill ${marketOpen ? 'sp-pill-green' : 'sp-pill-gold'}`}
+        className={`sp-pill ${marketIsOpen ? 'sp-pill-green' : 'sp-pill-gold'}`}
         data-testid="market-status"
       >
-        {marketOpen ? 'Market Open' : 'Pre-Market'}
+        {marketStatusLabel}
       </span>
 
       <span
