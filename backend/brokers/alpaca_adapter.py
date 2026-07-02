@@ -3,7 +3,7 @@ import asyncio
 import logging
 import re
 import uuid
-from .base import BrokerAdapter, BrokerOrder, BrokerPosition, BrokerAccountInfo
+from .base import BrokerAdapter, BrokerOpenOrder, BrokerOrder, BrokerPosition, BrokerAccountInfo, OrderSide, OrderType
 
 logger = logging.getLogger("SentinelPulse")
 _ORDER_TERMINAL_STATUSES = {"filled", "canceled", "cancelled", "expired", "rejected"}
@@ -99,6 +99,35 @@ class AlpacaAdapter(BrokerAdapter):
                 )
                 for p in data
             ]
+
+    async def get_open_orders(self) -> list[BrokerOpenOrder]:
+        session = await self._get_session()
+        async with session.get(f"{self._base_url()}/v2/orders?status=open&limit=100", headers=self._headers()) as resp:
+            data = await resp.json()
+            orders = data if isinstance(data, list) else []
+            parsed = []
+            for item in orders:
+                try:
+                    side = OrderSide(str(item.get("side", "")).upper())
+                    order_type = OrderType(str(item.get("type", "")).upper())
+                except ValueError:
+                    continue
+                try:
+                    quantity = float(item.get("qty") or 0)
+                except (TypeError, ValueError):
+                    quantity = 0.0
+                parsed.append(
+                    BrokerOpenOrder(
+                        symbol=str(item.get("symbol", "")).upper(),
+                        side=side,
+                        order_type=order_type,
+                        quantity=quantity,
+                        status=str(item.get("status") or ""),
+                        broker_order_id=str(item.get("id") or ""),
+                        client_order_id=str(item.get("client_order_id") or ""),
+                    )
+                )
+            return parsed
 
     async def place_order(self, order: BrokerOrder) -> BrokerOrder:
         session = await self._get_session()

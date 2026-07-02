@@ -44,7 +44,7 @@ from routes.edge_contracts import (
     _current_position,
     validate_api_key,
 )
-from routes.bot import BotControlRequest, start_bot as _start_bot, stop_bot as _stop_bot
+from routes.bot import BotControlRequest, reload_bot_state as _reload_bot_state, start_bot as _start_bot, stop_bot as _stop_bot
 
 router = APIRouter(prefix="/edge")
 _LEGACY_LIVE_EXECUTION_DECISIONS = {"buy", "sell", "stop"}
@@ -401,6 +401,12 @@ async def edge_stop_bot(body: BotControlRequest | None = None):
     return await _stop_bot(body)
 
 
+@router.post("/bot/reload-state", dependencies=[Depends(validate_api_key)])
+async def edge_reload_bot_state():
+    """Reload Pulse runtime state through the Edge service-to-service API key boundary."""
+    return await _reload_bot_state()
+
+
 @router.get("/brokers/status", dependencies=[Depends(validate_api_key)])
 async def edge_broker_status():
     """Return broker connection status through the Edge service-to-service API key boundary."""
@@ -419,6 +425,18 @@ async def edge_disconnect_broker(broker_id: str):
     """Disconnect one broker through the Edge service-to-service API key boundary."""
     await deps.broker_mgr.disconnect_broker(broker_id)
     return {"status": "disconnected", "broker_id": broker_id}
+
+
+@router.get("/brokers/{broker_id}/positions", dependencies=[Depends(validate_api_key)])
+async def edge_get_broker_positions(broker_id: str):
+    """Return broker-held positions through the Edge service-to-service API key boundary."""
+    return await deps.broker_mgr.reconcile_positions(broker_id)
+
+
+@router.post("/brokers/{broker_id}/sync-positions", dependencies=[Depends(validate_api_key)])
+async def edge_sync_broker_positions(broker_id: str):
+    """Sync Pulse runtime positions from broker-held positions."""
+    return await deps.engine.sync_positions_from_broker(broker_id)
 
 
 @router.get("/bot/status", dependencies=[Depends(validate_api_key)])

@@ -55,6 +55,17 @@ class BrokerPosition:
 
 
 @dataclass
+class BrokerOpenOrder:
+    symbol: str
+    side: OrderSide
+    order_type: OrderType
+    quantity: float
+    status: str
+    broker_order_id: str = ""
+    client_order_id: str = ""
+
+
+@dataclass
 class BrokerAccountInfo:
     balance: float
     buying_power: float

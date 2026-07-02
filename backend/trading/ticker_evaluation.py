@@ -192,10 +192,12 @@ class TickerEvaluationMixin:
                                 broker_ids=broker_ids,
                                 broker_allocs=broker_allocs,
                                 action_label="OPENING_BELL_TRAILING_STOP",
-                                order_template={
-                                    "symbol": sym, "side": "SELL", "order_type": "STOP",
-                                    "price": exec_price, "quantity": pos["qty"], "stop_price": ob_trail_stop,
-                                },
+                                order_template=self._triggered_exit_order_template(
+                                    symbol=sym,
+                                    order_type=trail_otype,
+                                    price=exec_price,
+                                    quantity=pos["qty"],
+                                ),
                             )
                         except LiveOrderExecutionError as exc:
                             deps.logger.warning(str(exc))
@@ -273,10 +275,12 @@ class TickerEvaluationMixin:
                                 broker_ids=broker_ids,
                                 broker_allocs=broker_allocs,
                                 action_label="TRAILING_STOP",
-                                order_template={
-                                    "symbol": sym, "side": "SELL", "order_type": "STOP",
-                                    "price": exec_price, "quantity": pos["qty"], "stop_price": trail_stop,
-                                },
+                                order_template=self._triggered_exit_order_template(
+                                    symbol=sym,
+                                    order_type=trail_otype,
+                                    price=exec_price,
+                                    quantity=pos["qty"],
+                                ),
                             )
                         except LiveOrderExecutionError as exc:
                             deps.logger.warning(str(exc))
@@ -362,10 +366,12 @@ class TickerEvaluationMixin:
                             broker_ids=broker_ids,
                             broker_allocs=broker_allocs,
                             action_label="STOP",
-                            order_template={
-                                "symbol": sym, "side": "SELL", "order_type": "STOP",
-                                "price": exec_price, "quantity": pos["qty"], "stop_price": effective_stop,
-                            },
+                            order_template=self._triggered_exit_order_template(
+                                symbol=sym,
+                                order_type=stop_otype,
+                                price=exec_price,
+                                quantity=pos["qty"],
+                            ),
                         )
                     except LiveOrderExecutionError as exc:
                         deps.logger.warning(str(exc))

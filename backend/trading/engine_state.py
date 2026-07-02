@@ -114,6 +114,112 @@ class EngineStateMixin:
             self._opening_bell_rebracket_done = v.get("opening_bell_rebracket_done", {}) or {}
             deps.logger.info(f"Engine state restored: running={self.running}, paused={self.paused}, sim247={self.simulate_24_7}, mkt_hrs={self.market_hours_only}, live_mkt={self.live_during_market_hours}, paper_ah={self.paper_after_hours}, dry_run={self._dry_run_mode}")
 
+    async def sync_positions_from_broker(self, broker_id: str) -> dict:
+        broker_positions = await deps.broker_mgr.reconcile_positions(broker_id)
+        if not broker_positions:
+            return {
+                "broker_id": broker_id,
+                "synced": 0,
+                "added": [],
+                "updated": [],
+                "removed": [],
+                "skipped_external": [],
+            }
+
+        allowed_symbols = set()
+        try:
+            ticker_docs = await deps.db.tickers.find({}, {"_id": 0, "symbol": 1}).to_list(1000)
+            allowed_symbols = {str(doc.get("symbol", "")).upper() for doc in ticker_docs if doc.get("symbol")}
+        except Exception as exc:
+            deps.logger.warning("Could not load ticker symbols before broker sync: %s", exc)
+
+        previous = self._positions or {}
+        synced_positions = {}
+        added = []
+        updated = []
+        skipped_external = []
+
+        for symbol, broker_position in broker_positions.items():
+            sym = str(symbol).upper()
+            if allowed_symbols and sym not in allowed_symbols:
+                skipped_external.append(sym)
+                continue
+            try:
+                quantity = float(broker_position.get("quantity", 0) or 0)
+            except (TypeError, ValueError):
+                quantity = 0.0
+            if quantity <= 0:
+                continue
+
+            try:
+                avg_entry = float(broker_position.get("avg_entry", 0) or 0)
+            except (TypeError, ValueError):
+                avg_entry = 0.0
+            try:
+                current_price = float(broker_position.get("current_price", 0) or 0)
+            except (TypeError, ValueError):
+                current_price = 0.0
+
+            old = previous.get(sym, {}) or {}
+            try:
+                old_quantity = float(old.get("qty", 0) or 0)
+            except (TypeError, ValueError):
+                old_quantity = 0.0
+            try:
+                old_high = float(old.get("high", 0) or 0)
+            except (TypeError, ValueError):
+                old_high = 0.0
+
+            high = max(old_high, current_price, avg_entry)
+            synced_positions[sym] = {
+                "qty": round(quantity, 8),
+                "avg_entry": avg_entry,
+                "high": high,
+            }
+            if current_price > 0:
+                self._prices[sym] = current_price
+
+            if old_quantity <= 0:
+                added.append(sym)
+            elif abs(old_quantity - quantity) > 1e-8:
+                updated.append(sym)
+
+        removed = [
+            symbol
+            for symbol, position in previous.items()
+            if float((position or {}).get("qty", 0) or 0) > 0 and symbol not in synced_positions
+        ]
+
+        self._positions = synced_positions
+        now = datetime.now(timezone.utc)
+        for symbol in removed:
+            self._trailing_highs.pop(symbol, None)
+            self._opening_bell_highs.pop(symbol, None)
+            self._last_exit_ts[symbol] = now
+        for symbol, position in synced_positions.items():
+            self._trailing_highs[symbol] = max(
+                float(self._trailing_highs.get(symbol, 0) or 0),
+                float(position.get("high", 0) or 0),
+            )
+
+        await self.save_state()
+        deps.logger.info(
+            "Synced %s broker positions from %s (added=%s, updated=%s, removed=%s)",
+            len(synced_positions),
+            broker_id,
+            added,
+            updated,
+            removed,
+        )
+        return {
+            "broker_id": broker_id,
+            "synced": len(synced_positions),
+            "added": added,
+            "updated": updated,
+            "removed": removed,
+            "skipped_external": skipped_external,
+        }
+
     async def reset_trailing_runtime_state(self, symbols: list[str] | None = None):
         """Clear cached trailing highs when trailing configuration changes."""
         if symbols is None:

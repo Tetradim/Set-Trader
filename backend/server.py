@@ -15,6 +15,7 @@ import os
 import sys
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Use centralized logging from logging_config.py
@@ -84,10 +85,38 @@ deps.broker_mgr = BrokerConnectionManager(deps.db)
 # --- Background tasks ---
 import random
 
+_last_broker_position_sync: datetime | None = None
+_BROKER_POSITION_SYNC_SECONDS = 60
+
 def add_jitter(base_seconds: float, jitter_pct: float = 0.2) -> float:
     """Add random jitter to prevent thundering herd on restart."""
     jitter = base_seconds * jitter_pct
     return base_seconds + random.uniform(-jitter, jitter)
+
+
+async def maybe_sync_live_broker_positions():
+    global _last_broker_position_sync
+    if deps.engine.get_trading_mode() != "live":
+        return
+
+    now = datetime.now(timezone.utc)
+    if (
+        _last_broker_position_sync is not None
+        and now - _last_broker_position_sync < timedelta(seconds=_BROKER_POSITION_SYNC_SECONDS)
+    ):
+        return
+
+    _last_broker_position_sync = now
+    status = deps.broker_mgr.get_status()
+    for broker_id, broker_status in status.items():
+        if not broker_status.get("connected"):
+            continue
+        try:
+            result = await deps.engine.sync_positions_from_broker(broker_id)
+            if result.get("added") or result.get("updated") or result.get("removed"):
+                deps.logger.info("Live broker position sync applied for %s: %s", broker_id, result)
+        except Exception as exc:
+            deps.logger.warning("Live broker position sync failed for %s: %s", broker_id, exc)
 
 
 async def price_broadcast_loop():
@@ -140,6 +169,7 @@ async def trading_loop():
                 })
             
             if deps.engine.running and not deps.engine.paused:
+                await maybe_sync_live_broker_positions()
                 # Market hours checked per-ticker inside evaluate_ticker
                 # to support multiple international exchanges simultaneously
                 tickers = await deps.db.tickers.find({"enabled": True}, {"_id": 0}).to_list(100)
