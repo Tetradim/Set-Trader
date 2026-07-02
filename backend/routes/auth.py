@@ -14,7 +14,9 @@ from auth import (
     User,
     create_access_token,
     create_api_key,
+    get_auth_disabled_user,
     get_current_user,
+    is_auth_disabled,
     require_roles,
     revoke_api_key,
     _api_keys,
@@ -150,8 +152,11 @@ async def _create_user_doc(
 @router.get("/bootstrap-status")
 async def bootstrap_status():
     """Return whether the first admin account needs to be created."""
+    if is_auth_disabled():
+        return {"needs_bootstrap": False, "auth_disabled": True}
+
     user_count = await deps.db.users.count_documents({})
-    return {"needs_bootstrap": user_count == 0}
+    return {"needs_bootstrap": user_count == 0, "auth_disabled": False}
 
 
 @router.post("/bootstrap", response_model=LoginResponse)
@@ -209,6 +214,17 @@ async def login(request: LoginRequest):
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: TokenData = Depends(get_current_user)):
     """Get the current authenticated user's database record."""
+    if is_auth_disabled():
+        local_user = get_auth_disabled_user()
+        return UserResponse(
+            id=local_user.sub,
+            username=local_user.username,
+            email="local@sentinel.local",
+            roles=local_user.roles,
+            broker_access=local_user.broker_access,
+            is_active=True,
+        )
+
     user_doc = await deps.db.users.find_one({"id": current_user.sub}, {"_id": 0, "password_hash": 0, "salt": 0})
     if not user_doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")

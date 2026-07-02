@@ -884,6 +884,7 @@ try {
     Write-Status "Launcher transcript: $TranscriptFile"
     Write-Status "MongoDB data path: $DataPath"
     $env:LOG_FILE = $LogFile
+    $env:SENTINEL_PULSE_AUTH_DISABLED = "1"
     $frontendPackage = Join-Path $ProjectRoot "frontend\package.json"
     if (Test-Path $frontendPackage) {
         $FrontendPort = Resolve-SentinelPulseFrontendPort -RequestedPort $FrontendPort

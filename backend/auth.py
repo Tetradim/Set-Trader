@@ -69,6 +69,26 @@ _api_keys: Dict[str, Dict[str, Any]] = {}
 JWT_SECRET = get_or_create_secret("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+AUTH_DISABLED_ENV = "SENTINEL_PULSE_AUTH_DISABLED"
+_AUTH_DISABLED_VALUES = {"1", "true", "yes", "on"}
+
+
+def is_auth_disabled() -> bool:
+    """Return True when the local desktop launcher disables login prompts."""
+    return os.getenv(AUTH_DISABLED_ENV, "").strip().lower() in _AUTH_DISABLED_VALUES
+
+
+def get_auth_disabled_user() -> TokenData:
+    """Return the built-in local desktop identity used when auth is disabled."""
+    now = datetime.utcnow()
+    return TokenData(
+        sub="local-desktop-admin",
+        username="local-admin",
+        roles=[Role.ADMIN.value, Role.RISK_OFFICER.value, Role.TRADER.value],
+        broker_access=["*"],
+        exp=now + timedelta(hours=24 * 365),
+        iat=now,
+    )
 
 
 def create_access_token(user: User, expires_delta: Optional[timedelta] = None) -> str:
@@ -208,6 +228,9 @@ async def get_current_user(
     request: Request = None
 ) -> TokenData:
     """Get current authenticated user from token or API key."""
+    if is_auth_disabled():
+        return get_auth_disabled_user()
+
     # Check API key first
     api_key = request.headers.get("X-API-Key") if request else None
     if api_key:
@@ -258,6 +281,8 @@ __all__ = [
     "revoke_api_key",
     "require_roles",
     "require_broker_access",
+    "is_auth_disabled",
+    "get_auth_disabled_user",
     "get_current_user",
     "get_current_active_user",
     "oauth2_scheme",

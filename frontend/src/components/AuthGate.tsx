@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
-import { apiFetch, clearAuthToken, getAuthToken, setAuthToken } from '@/lib/api';
+import { apiFetch, clearAuthToken, getAuthToken, setAuthDisabled, setAuthToken } from '@/lib/api';
 import {
   clearRememberedCredentials,
   loadRememberedCredentials,
@@ -27,18 +27,32 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     async function checkAuth() {
       try {
+        const status = await apiFetch('/api/auth/bootstrap-status');
+        if (status.auth_disabled) {
+          setAuthDisabled(true);
+          clearAuthToken();
+          if (!cancelled) setMode('ready');
+          return;
+        }
+        setAuthDisabled(false);
+
         if (getAuthToken()) {
           await apiFetch('/api/auth/me');
           if (!cancelled) setMode('ready');
           return;
         }
-
-        const status = await apiFetch('/api/auth/bootstrap-status');
         if (!cancelled) setMode(status.needs_bootstrap ? 'setup' : 'login');
       } catch {
         clearAuthToken();
+        setAuthDisabled(false);
         try {
           const status = await apiFetch('/api/auth/bootstrap-status');
+          if (status.auth_disabled) {
+            setAuthDisabled(true);
+            clearAuthToken();
+            if (!cancelled) setMode('ready');
+            return;
+          }
           if (!cancelled) setMode(status.needs_bootstrap ? 'setup' : 'login');
         } catch {
           if (!cancelled) {

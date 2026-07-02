@@ -700,6 +700,7 @@ try {
     $frontendUrl = "http://127.0.0.1:$FrontendPort"
     $env:PORT = "$BackendPort"
     $env:SENTINEL_OPEN_BROWSER = "0"
+    $env:SENTINEL_PULSE_AUTH_DISABLED = "1"
     $env:VITE_BACKEND_URL = ""
     $env:REACT_APP_BACKEND_URL = ""
     $env:LOG_FILE = $LogFile

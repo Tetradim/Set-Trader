@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 
 import deps
-from auth import TokenData, verify_token
+from auth import TokenData, get_auth_disabled_user, is_auth_disabled, verify_token
 from bot_snapshot import build_bot_snapshot
 from default_tickers import ensure_default_tickers
 from routes.runtime_state import reset_trailing_state_if_needed
@@ -30,6 +30,9 @@ def extract_websocket_token(websocket: WebSocket, token: Optional[str]) -> str:
 
 async def authenticate_websocket(websocket: WebSocket, token: Optional[str]) -> Optional[TokenData]:
     """Validate a WebSocket before accepting it."""
+    if is_auth_disabled():
+        return get_auth_disabled_user()
+
     provided = extract_websocket_token(websocket, token)
     if not provided:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication required")

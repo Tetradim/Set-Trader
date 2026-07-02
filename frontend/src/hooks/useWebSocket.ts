@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useStore } from '@/stores/useStore';
-import { getAuthToken } from '@/lib/api';
+import { getAuthToken, isAuthDisabled } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
 import { wsLog } from '@/lib/wsLogger';
 
@@ -8,7 +8,8 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 function getWsUrl(): string {
   const token = getAuthToken();
-  if (!token) return '';
+  const authDisabled = isAuthDisabled();
+  if (!token && !authDisabled) return '';
 
   const url = BACKEND_URL
     ? new URL(BACKEND_URL).host
@@ -17,8 +18,8 @@ function getWsUrl(): string {
     ? (new URL(BACKEND_URL).protocol === 'https:' ? 'wss:' : 'ws:')
     : (window.location.protocol === 'https:' ? 'wss:' : 'ws:');
   const wsUrl = new URL(`${proto}//${url}/api/ws`);
-  wsUrl.searchParams.set('token', token);
-  uiLog.ws('url_created', { host: wsUrl.host, path: wsUrl.pathname });
+  if (token) wsUrl.searchParams.set('token', token);
+  uiLog.ws('url_created', { host: wsUrl.host, path: wsUrl.pathname, auth_disabled: authDisabled });
   return wsUrl.toString();
 }
 

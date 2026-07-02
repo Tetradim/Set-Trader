@@ -3,6 +3,7 @@ import { uiLog } from './clientLogger';
 
 const BACKEND_URL = import.meta.env?.VITE_BACKEND_URL || import.meta.env?.REACT_APP_BACKEND_URL || '';
 const AUTH_TOKEN_KEY = 'sentinel_auth_token';
+let authDisabled = false;
 
 export function formatApiErrorDetail(detail: unknown, fallback: string): string {
   if (typeof detail === 'string' && detail.trim()) return detail;
@@ -39,7 +40,17 @@ export function formatApiErrorDetail(detail: unknown, fallback: string): string 
 }
 
 export function getAuthToken(): string | null {
+  if (authDisabled) return null;
   return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function isAuthDisabled(): boolean {
+  return authDisabled;
+}
+
+export function setAuthDisabled(disabled: boolean): void {
+  authDisabled = disabled;
+  if (disabled) clearAuthToken();
 }
 
 export function setAuthToken(token: string): void {
@@ -79,7 +90,7 @@ export async function apiFetch(path: string, options?: RequestInit & { rawText?:
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       const message = formatApiErrorDetail(err.detail, res.statusText);
       uiLog.api('error', { path, method, status: res.status, duration_ms, message });
-      if (res.status === 401 || res.status === 403) {
+      if ((res.status === 401 || res.status === 403) && !isAuthDisabled()) {
         clearAuthToken();
         window.dispatchEvent(new Event('sentinel-auth-required'));
       }
