@@ -6,7 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class BranchConsolidationStaticTest(unittest.TestCase):
+class BranchSentinelEchoStaticTest(unittest.TestCase):
     def read(self, relative_path: str) -> str:
         return (ROOT / relative_path).read_text(encoding="utf-8")
 

@@ -153,7 +153,7 @@ This audit is a hard cleanup pass for beta release readiness. It focuses on dead
 | File | Current role | Cleanup note | Priority |
 | --- | --- | --- | --- |
 | `frontend/src/components/Dashboard.tsx` | Dashboard layout | Keep. Ensure group/tab state is single source of truth. | Medium |
-| `frontend/src/components/DashboardNavigation.tsx` | Group/tab navigation | Keep. Good consolidation target for keyboard/a11y tests. | Medium |
+| `frontend/src/components/DashboardNavigation.tsx` | Group/tab navigation | Keep. Good sentinel-echo target for keyboard/a11y tests. | Medium |
 | `frontend/src/components/DashboardTabContent.tsx` | Lazy tab loading | Keep. | Low |
 | `frontend/src/components/dashboardConfig.tsx` | Tab labels/icons | Keep; consider merging with `dashboard-tabs.ts` to reduce duplicated tab metadata. | Medium |
 | `frontend/src/components/Header.tsx` | Header/status controls | Keep. | Low |

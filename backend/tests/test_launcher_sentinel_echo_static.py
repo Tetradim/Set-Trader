@@ -1,11 +1,11 @@
-import unittest
+﻿import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class LauncherConsolidationStaticTests(unittest.TestCase):
+class LauncherSentinelEchoStaticTests(unittest.TestCase):
     def test_only_current_windows_launchers_are_shipped(self):
         launchers = sorted(path.name for path in ROOT.glob("Launch-Sentinel-Pulse*"))
         self.assertEqual(

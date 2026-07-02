@@ -2,7 +2,7 @@
 
 This runbook is the operator checklist for moving Sentinel Pulse from paper testing toward real-money broker routing. Do not place live orders during readiness checks. A live cutover is allowed only after the preflight, broker, risk, audit, and rollback checks below are complete.
 
-Sentinel Pulse is the only Sentinel component that may talk to broker APIs. Sentinel Edge, Tandem Suite, and Simulation Engine must remain paper/simulation inputs unless Pulse is explicitly confirmed for live broker routing.
+Sentinel Pulse is the only Sentinel component that may talk to broker APIs. Sentinel Edge, Sentinel Core, and Sentinel Archive must remain paper/simulation inputs unless Pulse is explicitly confirmed for live broker routing.
 
 ## Default Stance
 

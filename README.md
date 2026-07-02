@@ -12,10 +12,10 @@ Sentinel Pulse is the execution worker in the Sentinel suite.
 |--------|------|--------------------|
 | Sentinel Pulse | Broker-facing execution service | Owns broker adapters, order placement, account truth, positions, audit logs, replay playback, paper/live mode, and execution safety controls. |
 | Sentinel Edge | Analysis and decision layer | Can read Pulse state and send gated structured handoffs or legacy decision commands. Pulse reports fills, positions, account state, and health back through Edge-compatible contracts. |
-| Tandem Suite | Unified operator console | Reads Pulse and Edge through server-side connectors and displays status, drift, handoff, account, and position state without exposing Pulse keys to browser code. |
-| Simulation Engine | Broker-free contract simulator | Can stand in for Pulse when testing Tandem/Edge workflows without live broker connectivity. |
+| Sentinel Core | Unified operator console | Reads Pulse and Edge through server-side connectors and displays status, drift, handoff, account, and position state without exposing Pulse keys to browser code. |
+| Sentinel Archive | Broker-free contract simulator | Can stand in for Pulse when testing Sentinel Core/Edge workflows without live broker connectivity. |
 
-Pulse remains the only Sentinel component that should talk to broker APIs. Edge, Tandem, and Simulation workflows must treat Pulse activity as paper/simulation unless the operator has explicitly configured and validated live broker mode, account permissions, risk limits, and emergency controls.
+Pulse remains the only Sentinel component that should talk to broker APIs. Edge, Sentinel Core, and Sentinel Archive workflows must treat Pulse activity as paper/simulation unless the operator has explicitly configured and validated live broker mode, account permissions, risk limits, and emergency controls.
 
 Before any real-money cutover, follow the operator checklist in [docs/runbooks/live-trading-readiness.md](docs/runbooks/live-trading-readiness.md).
 
@@ -29,7 +29,7 @@ Before any real-money cutover, follow the operator checklist in [docs/runbooks/l
 - **Browser closes process**: Closing the dedicated browser window shuts down Pulse processes started by the local launcher.
 - **Process closes browser**: Closing the launcher window or pressing Ctrl+C closes the dedicated browser profile and stops owned backend/frontend/MongoDB process trees.
 - **Hidden watchdog**: A background watchdog cleans up the browser profile and owned processes if the launcher process exits unexpectedly.
-- **Suite alignment**: Sentinel Edge, Tandem Suite, and Simulation Engine use the same local lifecycle pattern so local bot tests do not leave stale services running after the operator UI is closed.
+- **Suite alignment**: Sentinel Edge, Sentinel Core, and Sentinel Archive use the same local lifecycle pattern so local bot tests do not leave stale services running after the operator UI is closed.
 
 ### v1.0.4 - Market Replay Foundation
 
@@ -835,9 +835,9 @@ If Sentinel Edge is not running when Pulse starts, Pulse continues normal startu
 
 The Edge retry attempt limit is configurable in Settings and is stored as `edge_retry_max_attempts`. The default is `10`; setting it to `0` stops retries after the first post-connection Edge failure.
 
-### Tandem and Simulation Integration
+### Sentinel Core and Sentinel Archive Integration
 
-Pulse exposes the Edge-facing endpoints that Tandem reads from the server side:
+Pulse exposes the Edge-facing endpoints that Sentinel Core reads from the server side:
 
 | Endpoint | Purpose |
 |----------|---------|
@@ -850,7 +850,7 @@ Pulse exposes the Edge-facing endpoints that Tandem reads from the server side:
 | `/api/edge/tickers/{symbol}/trailing` | Legacy trailing-stop bridge. |
 | `/api/edge/signals/evaluate` | Lightweight Edge-style signal scoring. |
 
-For broker-free testing, Tandem can point `PULSE_API_URL` to Sentinel Simulation Engine. That lets operators test the Tandem dashboard, handoff visibility, drift monitor, account panel, and position rendering without loading a broker-connected Pulse instance.
+For broker-free testing, Sentinel Core can point `PULSE_API_URL` to Sentinel Archive. That lets operators test the Sentinel Core dashboard, handoff visibility, drift monitor, account panel, and position rendering without loading a broker-connected Pulse instance.
 
 ### Files
 
@@ -1519,7 +1519,7 @@ What it does not own:
 
 - Normal personal browser windows and profiles.
 - Broker desktop applications.
-- Edge, Tandem, or Simulation processes started by their own launchers.
+- Edge, Sentinel Core, or Sentinel Archive processes started by their own launchers.
 - Existing MongoDB instances that were already running before Pulse started.
 
 Lifecycle flow:
@@ -1555,7 +1555,7 @@ Useful local-source flags:
 | `-SkipMongo` | Use an already-running MongoDB instance. |
 | `-InstallDeps` | Install backend/frontend dependencies before launch. |
 
-This local lifecycle is now aligned with Sentinel Edge, Tandem Suite, and Simulation Engine: closing the bot UI closes the local process stack, and closing the launcher closes the bot UI.
+This local lifecycle is now aligned with Sentinel Edge, Sentinel Core, and Sentinel Archive: closing the bot UI closes the local process stack, and closing the launcher closes the bot UI.
 
 ---
 
@@ -1566,7 +1566,7 @@ Current status: paper-ready for continued burn-in, not approved for live-money c
 Latest local verification:
 - Backend tests: `python -m pytest backend\tests -q` -> 235 passed, 45 subtests passed.
 - Alpaca paper drills: invalid-symbol rejection, stale-limit cancel, market buy/sell flatten, adapter reconciliation, broker client order IDs, and service-auth disconnect/reconnect passed.
-- Cross-bot drill: Edge structured handoff created VPG, rejected a duplicate buy while open, enabled a 1.25% trailing stop, sold back to flat, and Tandem saw the updated Pulse state.
+- Cross-bot drill: Edge structured handoff created VPG, rejected a duplicate buy while open, enabled a 1.25% trailing stop, sold back to flat, and Sentinel Core saw the updated Pulse state.
 
 Open gates before live-money use:
 - Multi-session paper burn-in across real market sessions.

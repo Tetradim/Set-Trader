@@ -90,7 +90,7 @@ class CrossBotEventBusTests(unittest.IsolatedAsyncioTestCase):
     def test_event_store_publishes_and_filters_for_pulse(self):
         store = EventBusStore(self.tmp_path)
         publish_event("edge.action", {"action": "stop_buying"}, target="sentinel-pulse", store=store)
-        publish_event("edge.action", {"action": "observe"}, target="darkpool-mon", store=store)
+        publish_event("edge.action", {"action": "observe"}, target="sentinel-flare", store=store)
 
         events = store.list_events(limit=10, target="sentinel-pulse")
 

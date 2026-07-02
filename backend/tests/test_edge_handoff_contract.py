@@ -313,7 +313,7 @@ class EdgeHandoffContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(1, broker_mgr.reconnect_calls)
         self.assertEqual(["alpaca"], broker_mgr.disconnected)
 
-    async def test_edge_read_only_routes_expose_operational_state_for_tandem(self):
+    async def test_edge_read_only_routes_expose_operational_state_for_sentinel_core(self):
         db = _Db()
         engine = _Engine()
         engine._positions["AAPL"] = {"qty": 2, "avg_entry": 100.0}

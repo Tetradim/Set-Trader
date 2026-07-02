@@ -120,7 +120,7 @@ def test_record_trade_updates_portfolio_exposure_after_successful_buy(monkeypatc
     assert symbol_limit.current_position == 2.0
 
 
-def test_record_trade_publishes_pulse_trade_event_for_tandem_bus(monkeypatch, tmp_path):
+def test_record_trade_publishes_pulse_trade_event_for_sentinel_core_bus(monkeypatch, tmp_path):
     _install_record_trade_deps(monkeypatch, tmp_path)
     engine = TradingEngine()
     trade = TradeRecord(

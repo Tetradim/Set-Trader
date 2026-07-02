@@ -343,11 +343,11 @@ def detect_flag(df: pd.DataFrame, lookback: int = 20) -> Optional[Dict[str, Any]
     recent = df.tail(lookback)
     closes = recent["close"]
     
-    # Strong move followed by consolidation
+    # Strong move followed by sentinel-echo
     early_move = closes.iloc[:5].diff().abs().mean()
-    late_consolidation = closes.iloc[-5:].diff().abs().mean()
+    late_sentinel_echo = closes.iloc[-5:].diff().abs().mean()
     
-    if early_move > late_consolidation * 2:
+    if early_move > late_sentinel_echo * 2:
         # Check direction
         if closes.iloc[4] > closes.iloc[0]:
             return {"pattern": "flag", "confidence": 0.65, "direction": "bullish"}

@@ -226,7 +226,7 @@ function brokerList() {
     {
       id: 'simulation',
       name: 'Separate Bot Engine',
-      description: 'Separate simulation engine used to compare bot behavior.',
+      description: 'Separate Sentinel Archive used to compare bot behavior.',
       supported: true,
       readiness: 'beta',
       readiness_note: 'Runs without live broker access in this test.',
@@ -456,7 +456,7 @@ async function handleApi(request, response) {
     checks: [
       { id: 'account', label: 'Account', status: 'pass', detail: 'Mock account funded.', action: 'None' },
       { id: 'pulse-engine', label: 'Pulse Engine', status: 'pass', detail: 'Paper engine online.', action: 'None' },
-      { id: 'separate-engine', label: 'Separate Bot Engine', status: 'pass', detail: 'Simulation engine online.', action: 'None' },
+      { id: 'separate-engine', label: 'Sentinel Archive', status: 'pass', detail: 'Sentinel Archive online.', action: 'None' },
       { id: 'tickers', label: '3 Bots', status: 'pass', detail: 'AAPL, MSFT, TSLA enabled.', action: 'None' },
     ],
     context: { trading_mode: state.simulate_24_7 ? 'paper' : 'live', account_balance: 25000, allocated: 3000, available: 22000, enabled_tickers: 3, connected_brokers: 2, running: state.running, paused: state.paused },
@@ -834,7 +834,7 @@ async function runPass(page, passName, issues, actions) {
 
 function recommendations() {
   return [
-    'Add a paper-trading replay preset that runs the same ticker set through Pulse paper mode and the separate simulation engine, then displays order-by-order drift.',
+    'Add a paper-trading replay preset that runs the same ticker set through Pulse paper mode and the separate Sentinel Archive, then displays order-by-order drift.',
     'Add per-bot readiness gates: market data freshness, broker buying power, strategy confidence, max spread, and news/volatility lockouts before any order is allowed.',
     'Expose strategy outcome telemetry beside each bot: signal reason, rejected-signal reason, expected R multiple, realized slippage, and cooldown state.',
     'Add a one-click safe test run that force-enables simulate_24_7, disables live broker adapters, runs a replay session, and exports a trade-quality report.',

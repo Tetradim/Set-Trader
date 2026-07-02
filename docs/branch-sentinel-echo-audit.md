@@ -1,4 +1,4 @@
-# Branch Consolidation Audit
+# Branch Sentinel Echo Audit
 
 Source repository: `Tetradim/Sentinel-Pulse`
 Default source branch reviewed: `main-2`

@@ -18,7 +18,7 @@ const { data, loading, error, refetch } = useFetch<Type[]>('/api/endpoint');
 
 ## Remaining Opportunities
 
-### 1. Import Consolidation (Medium Impact)
+### 1. Import Sentinel Echo (Medium Impact)
 - 17 files import `apiFetch` - could use the new hook
 - 9 files have duplicate `import { useState, useEffect } from 'react'` - inconsistent ordering
 
