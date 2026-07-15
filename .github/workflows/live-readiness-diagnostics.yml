@@ -36,6 +36,7 @@ jobs:
           python -m pytest \
             backend/tests/test_order_mode_routing.py \
             backend/tests/test_live_broker_truth_guards.py \
+            backend/tests/test_live_execution_quality.py \
             backend/tests/test_order_lifecycle_state_machine.py \
             backend/tests/test_edge_execution_intent_v2.py \
             backend/tests/test_edge_handoff_idempotency.py \
