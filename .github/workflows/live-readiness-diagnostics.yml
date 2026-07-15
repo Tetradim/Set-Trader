@@ -39,6 +39,7 @@ jobs:
             backend/tests/test_order_lifecycle_state_machine.py \
             backend/tests/test_edge_execution_intent_v2.py \
             backend/tests/test_live_position_publication.py \
+            backend/tests/test_live_publication_resilience.py \
             -q --tb=short 2>&1 | tee pulse-live-readiness-tests.txt
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"
