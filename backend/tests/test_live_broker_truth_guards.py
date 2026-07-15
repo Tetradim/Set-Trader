@@ -155,7 +155,7 @@ def test_partial_fill_is_persisted_but_not_promoted_to_trade(monkeypatch):
     manager = _BrokerManager(partial=True)
     engine = _engine(monkeypatch, manager)
 
-    with pytest.raises(RuntimeError, match="not fully filled"):
+    with pytest.raises(RuntimeError, match="pending fill/reconciliation"):
         asyncio.run(
             engine._place_live_order_or_raise(
                 sym="SPY",
