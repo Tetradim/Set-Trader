@@ -11,3 +11,4 @@ from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E4
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
 from trading import live_position_publication_patch as _live_position_publication_patch  # noqa: F401,E402
+from trading import live_publication_resilience_patch as _live_publication_resilience_patch  # noqa: F401,E402
