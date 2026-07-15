@@ -9,6 +9,7 @@ from trading import live_order_reconciliation_patch as _live_order_reconciliatio
 from trading import live_broker_scope_patch as _live_broker_scope_patch  # noqa: F401,E402
 from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E402
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
+from trading import live_execution_quality_patch as _live_execution_quality_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
 # Idempotency must be installed after the execution-intent wrapper so it becomes
 # the outermost guard on the final /api/edge/handoff route. Duplicate commands
