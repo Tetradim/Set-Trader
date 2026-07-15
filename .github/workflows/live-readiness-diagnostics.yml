@@ -38,6 +38,8 @@ jobs:
             backend/tests/test_live_broker_truth_guards.py \
             backend/tests/test_order_lifecycle_state_machine.py \
             backend/tests/test_edge_execution_intent_v2.py \
+            backend/tests/test_edge_handoff_idempotency.py \
+            backend/tests/test_edge_handoff_runtime_wiring.py \
             backend/tests/test_live_position_publication.py \
             backend/tests/test_live_publication_resilience.py \
             -q --tb=short 2>&1 | tee pulse-live-readiness-tests.txt
