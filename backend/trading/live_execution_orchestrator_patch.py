@@ -7,17 +7,34 @@ check through another wrapper.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 import math
-import time
 from typing import Any
 
 import deps
+from brokers.alpaca_adapter import AlpacaAdapter
+from brokers.tradier_adapter import TradierAdapter
 from trading import live_execution_quality_patch as quality
 from trading import live_pretrade_patch as pretrade
 from trading.broker_execution import BrokerExecutionMixin, LiveOrderExecutionError
 
 
 _QUOTE_REQUIRED_BROKERS = {"alpaca", "tradier"}
+_REAL_ADAPTER_TYPES = (AlpacaAdapter, TradierAdapter)
+_original_quantity_increment = quality._quantity_increment
+
+
+def _quantity_increment_for_known_broker(broker_id: str) -> Decimal:
+    """Apply restrictions only to brokers whose contract is known here.
+
+    Generic broker doubles and future adapters preserve eight-decimal quantity
+    precision. Tradier remains whole-share; Alpaca retains its configured
+    fractional increment.
+    """
+    broker = str(broker_id or "").lower()
+    if broker in _QUOTE_REQUIRED_BROKERS:
+        return _original_quantity_increment(broker)
+    return Decimal("0.00000001")
 
 
 def _number(value: Any) -> float:
@@ -90,6 +107,30 @@ async def _risk_check_once(
             raise LiveOrderExecutionError(reason)
 
 
+def _production_quote_adapters(manager: Any, broker_ids: list[str], action_label: str, symbol: str):
+    production_manager = manager.__class__.__name__ == "BrokerConnectionManager"
+    selected: list[tuple[str, Any]] = []
+    for broker_id in broker_ids:
+        broker = str(broker_id or "").lower()
+        if broker not in _QUOTE_REQUIRED_BROKERS:
+            continue
+        adapter = manager.get_adapter(broker_id)
+        if isinstance(adapter, _REAL_ADAPTER_TYPES):
+            selected.append((broker_id, adapter))
+            continue
+        if production_manager:
+            if adapter is None:
+                raise LiveOrderExecutionError(
+                    f"{action_label} for {symbol} blocked: assigned broker {broker_id} is not connected"
+                )
+            raise LiveOrderExecutionError(
+                f"{action_label} for {symbol} blocked: {broker_id} is not using its certified live adapter"
+            )
+        # Unit-test and integration doubles are intentionally not treated as a
+        # certified live market-data adapter merely because their ID is alpaca.
+    return selected
+
+
 async def _place_live_order_composed(
     self,
     *,
@@ -143,12 +184,13 @@ async def _place_live_order_composed(
         )
 
     active = self._live_broker_ids_with_allocations(broker_ids, broker_allocs)
-    quote_brokers = [
-        broker_id
-        for broker_id in active
-        if str(broker_id or "").lower() in _QUOTE_REQUIRED_BROKERS
-    ]
-    if not quote_brokers:
+    quote_adapters = _production_quote_adapters(
+        manager,
+        active,
+        action_label,
+        sym,
+    )
+    if not quote_adapters:
         return await pretrade._place_live_order_risk_first(
             self,
             sym=sym,
@@ -159,12 +201,7 @@ async def _place_live_order_composed(
         )
 
     snapshots: list[dict] = []
-    for broker_id in quote_brokers:
-        adapter = manager.get_adapter(broker_id)
-        if adapter is None:
-            raise LiveOrderExecutionError(
-                f"{action_label} for {sym} blocked: assigned broker {broker_id} is not connected"
-            )
+    for broker_id, adapter in quote_adapters:
         getter = getattr(adapter, "get_quote_snapshot", None)
         if not callable(getter):
             raise LiveOrderExecutionError(
@@ -205,4 +242,5 @@ async def _place_live_order_composed(
     )
 
 
+quality._quantity_increment = _quantity_increment_for_known_broker
 BrokerExecutionMixin._place_live_order_or_raise = _place_live_order_composed
