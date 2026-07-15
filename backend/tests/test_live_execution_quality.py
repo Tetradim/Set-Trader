@@ -7,9 +7,10 @@ from trading.broker_execution import BrokerExecutionMixin, LiveOrderExecutionErr
 import trading.live_execution_quality_patch as quality
 
 
-def test_runtime_installs_execution_quality_wrapper():
-    assert BrokerExecutionMixin._place_live_order_or_raise.__name__ == "_place_with_executable_quotes"
-    assert BrokerExecutionMixin.reconcile_live_orders.__name__ == "_reconcile_with_expiry"
+def test_runtime_installs_composed_execution_quality_wrapper():
+    assert BrokerExecutionMixin._place_live_order_or_raise.__name__ == "_place_live_order_composed"
+    assert hasattr(BrokerExecutionMixin, "refresh_parent_orders")
+    assert BrokerExecutionMixin.reconcile_live_orders.__name__ == "_reconcile_including_terminal_fills"
 
 
 def test_buy_plans_are_normalized_to_broker_quantity_increment(monkeypatch):
