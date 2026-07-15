@@ -22,3 +22,4 @@ from trading import live_execution_quality_patch as _live_execution_quality_patc
 from trading import live_terminal_fill_patch as _live_terminal_fill_patch  # noqa: F401,E402
 from trading import live_execution_orchestrator_patch as _live_execution_orchestrator_patch  # noqa: F401,E402
 from trading import live_cycle_capital_patch as _live_cycle_capital_patch  # noqa: F401,E402
+from trading import live_cycle_accounting_composition_patch as _live_cycle_accounting_composition_patch  # noqa: F401,E402
