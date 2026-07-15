@@ -10,5 +10,9 @@ from trading import live_broker_scope_patch as _live_broker_scope_patch  # noqa:
 from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E402
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
+# Idempotency must be installed after the execution-intent wrapper so it becomes
+# the outermost guard on the final /api/edge/handoff route. Duplicate commands
+# are claimed/replayed before expiry or broker submission logic can run.
+from trading import edge_handoff_idempotency_patch as _edge_handoff_idempotency_patch  # noqa: F401,E402
 from trading import live_position_publication_patch as _live_position_publication_patch  # noqa: F401,E402
 from trading import live_publication_resilience_patch as _live_publication_resilience_patch  # noqa: F401,E402
