@@ -22,6 +22,9 @@ class _BrokerOrders:
     async def update_many(self, query, update):
         self.updated.append((query, update))
 
+    async def update_one(self, query, update):
+        self.updated.append((query, update))
+
 
 class _Db:
     def __init__(self):
