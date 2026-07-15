@@ -60,11 +60,12 @@ async def _place_live_order_risk_first(
 ) -> list[dict]:
     broker_ids = broker_ids or []
     broker_allocs = broker_allocs or {}
+    order_template = order_template or {}
     if not self._should_place_broker_orders(broker_ids):
         return []
 
     side, quantity, price = self._live_pretrade_values(order_template, broker_allocs)
-    order_type = str((order_template or {}).get("order_type") or "").upper()
+    order_type = str(order_template.get("order_type") or "").upper()
     intent_key = f"{sym.upper()}:{side.upper()}:{order_type}"
 
     if side == "BUY" and quantity <= 0 and price > 0:
@@ -78,8 +79,10 @@ async def _place_live_order_risk_first(
             f"{action_label} for {sym} has no positive requested quantity"
         )
 
-    # Risk/kill-switch decisions must not depend on broker connectivity.
-    if hasattr(self, "pre_trade_check"):
+    # Risk/kill-switch decisions must not depend on broker connectivity. A final
+    # quote orchestrator may already have completed this exact check before it
+    # contacted live market-data endpoints; in that case do not count it twice.
+    if not order_template.get("_risk_prechecked") and hasattr(self, "pre_trade_check"):
         allowed, reason = await self.pre_trade_check(sym, side, quantity, price)
         if not allowed:
             raise LiveOrderExecutionError(reason)
@@ -110,7 +113,7 @@ async def _place_live_order_risk_first(
 
     results: list[dict] = []
     for plan in plans:
-        child_template = {**(order_template or {}), "quantity": plan["quantity"]}
+        child_template = {**order_template, "quantity": plan["quantity"]}
         try:
             child = await deps.broker_mgr.place_orders_for_ticker(
                 broker_ids=[plan["broker_id"]],

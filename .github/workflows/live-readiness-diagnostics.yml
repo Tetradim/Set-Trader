@@ -5,6 +5,7 @@ on:
     branches: [Beta-Maximum]
     paths:
       - 'backend/**'
+      - 'frontend/**'
       - '.github/workflows/live-readiness-diagnostics.yml'
   workflow_dispatch:
 
@@ -36,10 +37,16 @@ jobs:
           python -m pytest \
             backend/tests/test_order_mode_routing.py \
             backend/tests/test_live_broker_truth_guards.py \
+            backend/tests/test_live_execution_quality.py \
+            backend/tests/test_live_terminal_fill.py \
+            backend/tests/test_live_cycle_capital.py \
             backend/tests/test_order_lifecycle_state_machine.py \
             backend/tests/test_edge_execution_intent_v2.py \
+            backend/tests/test_edge_handoff_idempotency.py \
+            backend/tests/test_edge_handoff_runtime_wiring.py \
             backend/tests/test_live_position_publication.py \
             backend/tests/test_live_publication_resilience.py \
+            backend/tests/test_frontend_live_ledger_wiring.py \
             -q --tb=short 2>&1 | tee pulse-live-readiness-tests.txt
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"

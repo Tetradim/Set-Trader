@@ -1,30 +1,67 @@
 // Orders & Execution Dashboard Tab.
-// 
-// Displays order state machine, fill timeline, reject reasons, slippage analysis.
+// Displays broker child orders, parent strategy orders, and completed cycle capital.
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
-import { List, Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { List, Clock, CheckCircle, XCircle, AlertCircle, RefreshCw, Link2, Repeat2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 interface Order {
   order_id: string;
+  durable_order_id?: string;
+  parent_order_id?: string;
   symbol: string;
-  side: 'buy' | 'sell';
+  side: string;
   order_type: string;
   quantity: number;
+  requested_quantity?: number;
   price: number;
-  status: 'pending' | 'filled' | 'partial' | 'rejected' | 'cancelled';
+  status: string;
   filled_quantity: number;
+  remaining_quantity?: number;
+  applied_quantity?: number;
+  unapplied_quantity?: number;
   avg_fill_price: number;
   created_at: string;
   updated_at: string;
   reject_reason?: string;
+  error?: string;
   broker?: string;
+  account_id?: string;
   external_id?: string;
   execution_lag_ms?: number;
+  valid_until_epoch?: number | null;
+  cancel_requested_at?: string | null;
+  reconciliation_required?: boolean;
+}
+
+interface ParentOrder {
+  parent_order_id: string;
+  symbol: string;
+  side: string;
+  order_type: string;
+  policy: string;
+  target_quantity: number;
+  filled_quantity: number;
+  remaining_quantity: number;
+  state: string;
+  child_order_ids: string[];
+  valid_until_epoch?: number | null;
+  updated_at?: string;
+}
+
+interface StrategyCycle {
+  symbol?: string;
+  cycle_number?: number;
+  gross_pnl?: number;
+  fees?: number;
+  net_pnl?: number;
+  prior_cycle_capital?: number;
+  cycle_capital?: number;
+  state?: string;
+  completed_at?: string;
 }
 
 interface ExecutionStats {
@@ -32,37 +69,94 @@ interface ExecutionStats {
   filled_orders: number;
   rejected_orders: number;
   pending_orders: number;
+  reconciliation_required?: number;
+  working_parent_orders?: number;
+  partial_parent_orders?: number;
   avg_slippage: number;
   avg_execution_lag_ms: number;
   fill_rate: number;
 }
 
-const STATUS_CONFIG = {
+interface LiveLedgerResponse {
+  orders: Order[];
+  parent_orders: ParentOrder[];
+  strategy_cycles: StrategyCycle[];
+  stats: ExecutionStats;
+  source: string;
+  generated_at: string;
+}
+
+const STATUS_CONFIG: Record<string, { color: string; icon: typeof Clock }> = {
   pending: { color: 'bg-yellow-500', icon: Clock },
+  submitted: { color: 'bg-yellow-500', icon: Clock },
+  working: { color: 'bg-yellow-500', icon: Clock },
+  working_unconfirmed: { color: 'bg-orange-500', icon: AlertCircle },
   filled: { color: 'bg-green-500', icon: CheckCircle },
   partial: { color: 'bg-blue-500', icon: List },
+  partially_filled: { color: 'bg-blue-500', icon: List },
   rejected: { color: 'bg-red-500', icon: XCircle },
-  cancelled: { color: 'bg-gray-500', icon: AlertCircle }
+  error: { color: 'bg-red-500', icon: XCircle },
+  failed: { color: 'bg-red-500', icon: XCircle },
+  canceled: { color: 'bg-gray-500', icon: AlertCircle },
+  cancelled: { color: 'bg-gray-500', icon: AlertCircle },
+  expired: { color: 'bg-gray-500', icon: AlertCircle },
 };
+
+function statusLabel(status: string) {
+  return String(status || 'unknown').replaceAll('_', ' ');
+}
+
+function formatTime(dateStr?: string) {
+  if (!dateStr) return '-';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
+function formatExpiry(epoch?: number | null) {
+  if (!epoch) return '-';
+  const remaining = epoch * 1000 - Date.now();
+  if (remaining <= 0) return 'Expired';
+  if (remaining < 60_000) return `${Math.ceil(remaining / 1000)}s`;
+  return `${Math.ceil(remaining / 60_000)}m`;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2
+  }).format(Number(value || 0));
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0, maximumFractionDigits: 8
+  }).format(Number(value || 0));
+}
 
 export function OrdersExecutionTab() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [parents, setParents] = useState<ParentOrder[]>([]);
+  const [cycles, setCycles] = useState<StrategyCycle[]>([]);
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filter, setFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'created_at' | 'symbol'>('created_at');
 
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const [ordersRes, statsRes] = await Promise.all([
-        apiFetch('/api/orders?limit=100'),
-        apiFetch('/api/orders/stats')
-      ]);
-      setOrders(ordersRes.orders || []);
-      setStats(statsRes);
-    } catch (err) {
+      const response = await apiFetch('/api/orders/live?limit=250') as LiveLedgerResponse;
+      setOrders(Array.isArray(response?.orders) ? response.orders : []);
+      setParents(Array.isArray(response?.parent_orders) ? response.parent_orders : []);
+      setCycles(Array.isArray(response?.strategy_cycles) ? response.strategy_cycles : []);
+      setStats(response?.stats || null);
+      setError('');
+    } catch (err: any) {
       uiLog.error('orders.fetch_failed', err);
+      setError(err?.message || 'Live order ledger could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -70,50 +164,27 @@ export function OrdersExecutionTab() {
 
   useEffect(() => {
     fetchOrders();
-    const interval = setInterval(fetchOrders, 15000);
+    const interval = setInterval(fetchOrders, 10_000);
     return () => clearInterval(interval);
   }, []);
 
-  const filteredOrders = orders.filter(order => {
+  const filteredOrders = orders.filter((order) => {
     if (filter === 'all') return true;
+    if (filter === 'reconciliation') return Boolean(order.reconciliation_required);
     return order.status === filter;
   }).sort((a, b) => {
     if (sortBy === 'symbol') return a.symbol.localeCompare(b.symbol);
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
   });
-
-  const formatTime = (dateStr: string) => {
-    return new Date(dateStr).toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit' 
-    });
-  };
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
-    }).format(value);
-  };
-
-  const formatNumber = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(value);
-  };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <List className="h-8 w-8 text-blue-500" />
           <div>
             <h2 className="text-2xl font-bold">Orders & Execution</h2>
-            <p className="text-muted-foreground">Order state machine and execution quality</p>
+            <p className="text-muted-foreground">Broker child orders, strategy parents, fills, expiry, and cycle capital</p>
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={fetchOrders}>
@@ -122,181 +193,168 @@ export function OrdersExecutionTab() {
         </Button>
       </div>
 
-      {/* Execution Stats */}
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold">{stats.total_orders}</div>
-              <div className="text-sm text-muted-foreground">Total Orders</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-green-500">{stats.filled_orders}</div>
-              <div className="text-sm text-muted-foreground">Filled</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-red-500">{stats.rejected_orders}</div>
-              <div className="text-sm text-muted-foreground">Rejected</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold text-yellow-500">{stats.pending_orders}</div>
-              <div className="text-sm text-muted-foreground">Pending</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold">{formatNumber(stats.avg_slippage)}</div>
-              <div className="text-sm text-muted-foreground">Avg Slippage (bps)</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-2xl font-bold">{stats.avg_execution_lag_ms}ms</div>
-              <div className="text-sm text-muted-foreground">Avg Latency</div>
-            </CardContent>
-          </Card>
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-300">
+          <AlertCircle className="h-5 w-5" />
+          <span>{error}</span>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Status:</span>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-          >
-            <option value="all">All</option>
-            <option value="pending">Pending</option>
-            <option value="filled">Filled</option>
-            <option value="partial">Partial</option>
-            <option value="rejected">Rejected</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          {[
+            ['Total', stats.total_orders, ''],
+            ['Filled', stats.filled_orders, 'text-green-500'],
+            ['Rejected', stats.rejected_orders, 'text-red-500'],
+            ['Working', stats.pending_orders, 'text-yellow-500'],
+            ['Reconcile', stats.reconciliation_required || 0, 'text-orange-500'],
+            ['Parents', stats.working_parent_orders || 0, 'text-blue-500'],
+            ['Fill Rate', `${stats.fill_rate || 0}%`, ''],
+          ].map(([label, value, color]) => (
+            <Card key={String(label)}>
+              <CardContent className="pt-4">
+                <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                <div className="text-sm text-muted-foreground">{label}</div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Sort:</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
-          >
-            <option value="created_at">Time</option>
-            <option value="symbol">Symbol</option>
-          </select>
-        </div>
-      </div>
+      )}
 
-      {/* Orders Table */}
       <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2"><Link2 className="h-5 w-5" />Parent Strategy Orders</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left text-sm font-medium">Time</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium">Symbol</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium">Side</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium">Qty</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium">Price</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium">Status</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium">Filled</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium">Avg Fill</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium">Lag</th>
-                </tr>
-              </thead>
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left text-sm">Symbol</th>
+                <th className="px-4 py-3 text-left text-sm">Side</th>
+                <th className="px-4 py-3 text-left text-sm">State</th>
+                <th className="px-4 py-3 text-left text-sm">Policy</th>
+                <th className="px-4 py-3 text-right text-sm">Target</th>
+                <th className="px-4 py-3 text-right text-sm">Filled</th>
+                <th className="px-4 py-3 text-right text-sm">Remaining</th>
+                <th className="px-4 py-3 text-right text-sm">Children</th>
+                <th className="px-4 py-3 text-right text-sm">TTL</th>
+              </tr></thead>
               <tbody>
-                {loading && orders.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center">
-                      <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                    </td>
+                {parents.length === 0 ? <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">No parent orders recorded</td></tr> : parents.map((parent) => (
+                  <tr key={parent.parent_order_id} className="border-b hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">{parent.symbol}</td>
+                    <td className="px-4 py-3">{parent.side}</td>
+                    <td className="px-4 py-3"><Badge variant="outline">{statusLabel(parent.state)}</Badge></td>
+                    <td className="px-4 py-3">{parent.policy || '-'}</td>
+                    <td className="px-4 py-3 text-right">{formatNumber(parent.target_quantity)}</td>
+                    <td className="px-4 py-3 text-right">{formatNumber(parent.filled_quantity)}</td>
+                    <td className="px-4 py-3 text-right">{formatNumber(parent.remaining_quantity)}</td>
+                    <td className="px-4 py-3 text-right">{parent.child_order_ids?.length || 0}</td>
+                    <td className="px-4 py-3 text-right">{formatExpiry(parent.valid_until_epoch)}</td>
                   </tr>
-                ) : filteredOrders.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
-                      No orders found
-                    </td>
-                  </tr>
-                ) : (
-                  filteredOrders.map((order) => {
-                    const StatusIcon = STATUS_CONFIG[order.status as keyof typeof STATUS_CONFIG]?.icon || Clock;
-                    const statusConfig = STATUS_CONFIG[order.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.pending;
-                    
-                    return (
-                      <tr key={order.order_id} className="border-b hover:bg-muted/30">
-                        <td className="px-4 py-3 text-sm">{formatTime(order.created_at)}</td>
-                        <td className="px-4 py-3 font-medium">{order.symbol}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant={order.side === 'buy' ? 'default' : 'destructive'}>
-                            {order.side.toUpperCase()}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-right">{order.quantity.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-right">{formatCurrency(order.price)}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <StatusIcon className={`h-4 w-4 ${statusConfig.color.replace('bg-', 'text-')}`} />
-                            <span className="capitalize">{order.status}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {order.filled_quantity.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {order.avg_fill_price > 0 ? formatCurrency(order.avg_fill_price) : '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right text-muted-foreground">
-                          {order.execution_lag_ms ? `${order.execution_lag_ms}ms` : '-'}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                ))}
               </tbody>
             </table>
           </div>
         </CardContent>
       </Card>
 
-      {/* Rejected Orders Details */}
-      {orders.some(o => o.status === 'rejected' && o.reject_reason) && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-500" />
-              Rejection Reasons
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {orders
-                .filter(o => o.status === 'rejected' && o.reject_reason)
-                .slice(0, 5)
-                .map((order) => (
-                  <div
-                    key={order.order_id}
-                    className="flex items-center justify-between p-3 bg-red-500/10 rounded-lg"
-                  >
-                    <div className="flex items-center gap-3">
-                      <XCircle className="h-4 w-4 text-red-500" />
-                      <span className="font-medium">{order.symbol}</span>
-                      <Badge variant="outline">Order: {order.order_id.slice(-8)}</Badge>
-                    </div>
-                    <span className="text-sm text-red-400">{order.reject_reason}</span>
-                  </div>
-                ))}
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Status:</span>
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm">
+            <option value="all">All</option>
+            <option value="submitted">Submitted</option>
+            <option value="working">Working</option>
+            <option value="partially_filled">Partial</option>
+            <option value="filled">Filled</option>
+            <option value="rejected">Rejected</option>
+            <option value="canceled">Canceled</option>
+            <option value="reconciliation">Needs reconciliation</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Sort:</span>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as 'created_at' | 'symbol')} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm">
+            <option value="created_at">Time</option>
+            <option value="symbol">Symbol</option>
+          </select>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-lg">Broker Child Orders</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead><tr className="border-b bg-muted/50">
+                <th className="px-4 py-3 text-left text-sm">Time</th>
+                <th className="px-4 py-3 text-left text-sm">Symbol</th>
+                <th className="px-4 py-3 text-left text-sm">Broker</th>
+                <th className="px-4 py-3 text-left text-sm">Side</th>
+                <th className="px-4 py-3 text-left text-sm">Status</th>
+                <th className="px-4 py-3 text-right text-sm">Requested</th>
+                <th className="px-4 py-3 text-right text-sm">Filled</th>
+                <th className="px-4 py-3 text-right text-sm">Applied</th>
+                <th className="px-4 py-3 text-right text-sm">Avg Fill</th>
+                <th className="px-4 py-3 text-right text-sm">TTL</th>
+              </tr></thead>
+              <tbody>
+                {loading && orders.length === 0 ? <tr><td colSpan={10} className="px-4 py-8 text-center"><RefreshCw className="h-6 w-6 animate-spin mx-auto" /></td></tr> : filteredOrders.length === 0 ? <tr><td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">No live broker orders found</td></tr> : filteredOrders.map((order) => {
+                  const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+                  const StatusIcon = config.icon;
+                  return (
+                    <tr key={`${order.broker}-${order.durable_order_id || order.order_id}`} className={`border-b hover:bg-muted/30 ${order.reconciliation_required ? 'bg-orange-500/5' : ''}`}>
+                      <td className="px-4 py-3 text-sm">{formatTime(order.created_at)}</td>
+                      <td className="px-4 py-3 font-medium">{order.symbol}</td>
+                      <td className="px-4 py-3">{order.broker || '-'}</td>
+                      <td className="px-4 py-3"><Badge variant={order.side.toUpperCase() === 'BUY' ? 'default' : 'destructive'}>{order.side.toUpperCase()}</Badge></td>
+                      <td className="px-4 py-3"><div className="flex items-center gap-2"><StatusIcon className={`h-4 w-4 ${config.color.replace('bg-', 'text-')}`} /><span className="capitalize">{statusLabel(order.status)}</span>{order.reconciliation_required && <Badge variant="outline" className="text-orange-400">reconcile</Badge>}</div></td>
+                      <td className="px-4 py-3 text-right">{formatNumber(order.requested_quantity ?? order.quantity)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(order.filled_quantity)}</td>
+                      <td className="px-4 py-3 text-right">{formatNumber(order.applied_quantity || 0)}</td>
+                      <td className="px-4 py-3 text-right">{order.avg_fill_price > 0 ? formatCurrency(order.avg_fill_price) : '-'}</td>
+                      <td className="px-4 py-3 text-right">{order.cancel_requested_at ? 'Cancel requested' : formatExpiry(order.valid_until_epoch)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {orders.some((order) => order.reject_reason || order.error) && (
+        <Card><CardHeader><CardTitle className="text-lg flex items-center gap-2"><AlertCircle className="h-5 w-5 text-red-500" />Order Errors</CardTitle></CardHeader><CardContent className="space-y-2">
+          {orders.filter((order) => order.reject_reason || order.error).slice(0, 10).map((order) => (
+            <div key={`error-${order.broker}-${order.order_id}`} className="flex items-center justify-between gap-4 p-3 bg-red-500/10 rounded-lg">
+              <span className="font-medium">{order.symbol} · {order.broker || 'broker'} · {order.order_id || order.durable_order_id}</span>
+              <span className="text-sm text-red-300">{order.reject_reason || order.error}</span>
             </div>
-          </CardContent>
-        </Card>
+          ))}
+        </CardContent></Card>
       )}
+
+      <Card>
+        <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Repeat2 className="h-5 w-5" />Completed Strategy Cycles</CardTitle></CardHeader>
+        <CardContent>
+          {cycles.length === 0 ? <p className="text-sm text-muted-foreground">No completed cycle-capital records.</p> : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {cycles.slice(0, 12).map((cycle, index) => (
+                <div key={`${cycle.symbol}-${cycle.cycle_number}-${index}`} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between"><strong>{cycle.symbol || 'Unknown'}</strong><Badge variant="outline">Cycle {cycle.cycle_number || '-'}</Badge></div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                    <span className="text-muted-foreground">Gross</span><span className="text-right">{formatCurrency(cycle.gross_pnl || 0)}</span>
+                    <span className="text-muted-foreground">Fees</span><span className="text-right">{formatCurrency(cycle.fees || 0)}</span>
+                    <span className="text-muted-foreground">Net</span><span className={`text-right ${(cycle.net_pnl || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>{formatCurrency(cycle.net_pnl || 0)}</span>
+                    <span className="text-muted-foreground">Next capital</span><span className="text-right">{formatCurrency(cycle.cycle_capital || 0)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
