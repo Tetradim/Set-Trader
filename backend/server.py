@@ -73,6 +73,7 @@ from trading_engine import TradingEngine
 from telegram_service import TelegramService
 from broker_manager import BrokerConnectionManager
 from resilience import CircuitOpenError
+from archive_general_api import GeneralApiConfigStore, GeneralApiDefaults, create_fastapi_router
 
 # --- Instantiate singletons and register in deps ---
 deps.ws_manager = ConnectionManager()
@@ -450,6 +451,16 @@ from routes.logs import router as logs_router
 from routes.replay import router as replay_router
 from auth import get_current_user
 
+general_api_store = GeneralApiConfigStore(
+    Path(__file__).parent / "data" / "general_api.json",
+    GeneralApiDefaults(
+        bot_id="sentinel-pulse",
+        display_name="Sentinel Pulse",
+        roles=("trader",),
+    ),
+)
+general_api_router = create_fastapi_router(general_api_store)
+
 api.include_router(health_router)
 api.include_router(brokers_router, dependencies=[Depends(get_current_user)])
 api.include_router(tickers_router, dependencies=[Depends(get_current_user)])
@@ -476,6 +487,7 @@ api.include_router(notifications_router, dependencies=[Depends(get_current_user)
 api.include_router(portfolio_router, dependencies=[Depends(get_current_user)])
 api.include_router(logs_router, dependencies=[Depends(get_current_user)])
 api.include_router(replay_router, dependencies=[Depends(get_current_user)])
+api.include_router(general_api_router, dependencies=[Depends(get_current_user)])
 
 app.include_router(api)
 

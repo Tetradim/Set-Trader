@@ -86,3 +86,4 @@ chainlit.md
 # Local machine config
 .gitconfig
 launcher-settings.ini
+backend/data/general_api.json

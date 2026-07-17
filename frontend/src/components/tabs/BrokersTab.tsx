@@ -3,6 +3,7 @@ import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
 import { TestConnectionModal } from './BrokersTestConnectionModal';
 import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, DollarSign, Settings2, Gauge, Activity, ChevronDown, ChevronUp, FlaskConical } from 'lucide-react';
+import { GeneralApiSection } from './GeneralApiSection';
 
 interface BrokerRiskWarning {
   level: 'low' | 'medium' | 'high';
@@ -110,6 +111,7 @@ export function BrokersTab() {
       </div>
 
       <div className="grid gap-3">
+        <GeneralApiSection />
         {brokers.map((broker) => (
           <BrokerCard key={broker.id} broker={broker} onTestClick={() => setTestBroker(broker)} accountInfo={connectedInfo[broker.id]} />
         ))}
