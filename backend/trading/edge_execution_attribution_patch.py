@@ -35,9 +35,42 @@ def _runtime(engine: Any, symbol: str) -> Dict[str, Any] | None:
     return entry_runtime._runtime_policies(engine).get(symbol.upper())
 
 
+def _result_fill(result: Dict[str, Any]) -> tuple[float, float]:
+    quantity = 0.0
+    price = 0.0
+    for key in ("filled_quantity", "filled_qty", "cumulative_filled_quantity"):
+        quantity = finite(result.get(key))
+        if quantity > 0:
+            break
+    for key in ("avg_fill_price", "filled_price", "average_fill_price"):
+        price = finite(result.get(key))
+        if price > 0:
+            break
+    return quantity, price
+
+
 async def _persist_results_with_style(self: Any, **kwargs: Any) -> None:
     await _ORIGINAL_PERSIST_RESULTS(self, **kwargs)
     results = list(kwargs.get("results") or [])
+    symbol = str(kwargs.get("symbol") or "").upper()
+    runtime = _runtime(self, symbol)
+    filled_quantity = 0.0
+    filled_notional = 0.0
+    terminal_statuses: list[str] = []
+    for result in results:
+        quantity, price = _result_fill(result)
+        filled_quantity += quantity
+        filled_notional += quantity * price
+        terminal_statuses.append(str(result.get("status") or "unknown").lower())
+    if isinstance(runtime, dict):
+        runtime["broker_outcome"] = {
+            "filled_quantity": round(filled_quantity, 8),
+            "fill_price": round(filled_notional / filled_quantity, 8) if filled_quantity > 0 and filled_notional > 0 else 0.0,
+            "statuses": terminal_statuses,
+            "results": results,
+            "recorded_at": _iso_now(),
+        }
+
     collection = getattr(deps.db, "broker_orders", None)
     if collection is None:
         return
@@ -83,14 +116,25 @@ async def _record_trade_with_execution_attribution(self: Any, trade: Any):
     runtime = _runtime(self, str(getattr(trade, "symbol", ""))) if side == "BUY" else None
     if isinstance(runtime, dict):
         selection = runtime.get("execution_style") if isinstance(runtime.get("execution_style"), dict) else {}
-        attribution = _filled_attribution(runtime, trade)
         trade.execution_style = str(selection.get("style") or "")
-        trade.execution_attribution = attribution
         if selection.get("order_type"):
             trade.order_type = str(selection["order_type"])
-        runtime["attribution"] = attribution
 
+    # The inner broker-truth wrapper normalizes price and quantity before the
+    # base recorder persists the trade. Compute final attribution afterwards.
     result = await _ORIGINAL_RECORD_TRADE(self, trade)
+
+    if isinstance(runtime, dict):
+        attribution = _filled_attribution(runtime, trade)
+        trade.execution_attribution = attribution
+        runtime["attribution"] = attribution
+        try:
+            await deps.db.trades.update_one(
+                {"id": str(getattr(trade, "id", ""))},
+                {"$set": {"execution_style": trade.execution_style, "execution_attribution": attribution, "order_type": trade.order_type}},
+            )
+        except Exception:
+            pass
 
     if isinstance(runtime, dict) and positive(getattr(trade, "price", 0.0)) is not None:
         selection = runtime.get("execution_style") if isinstance(runtime.get("execution_style"), dict) else {}
@@ -200,6 +244,20 @@ async def _evaluate_ticker_with_post_fill_marks(self: TickerEvaluationMixin, tic
     return result
 
 
+def _safe_latest_fill(engine: Any, symbol: str) -> tuple[float, float]:
+    trade = getattr(engine, "_last_broker_truth_trade", None)
+    if (
+        trade is not None
+        and str(getattr(trade, "symbol", "")).upper() == symbol.upper()
+        and str(getattr(trade, "side", "")).upper() == "BUY"
+    ):
+        return finite(getattr(trade, "price", 0.0)), finite(getattr(trade, "quantity", 0.0))
+    runtime = _runtime(engine, symbol) or {}
+    broker = runtime.get("broker_outcome") if isinstance(runtime.get("broker_outcome"), dict) else {}
+    return finite(broker.get("fill_price")), finite(broker.get("filled_quantity"))
+
+
 pretrade._persist_results = _persist_results_with_style
 TradeAccountingMixin._record_trade = _record_trade_with_execution_attribution
 TickerEvaluationMixin.evaluate_ticker = _evaluate_ticker_with_post_fill_marks
+entry_runtime._latest_fill = _safe_latest_fill
