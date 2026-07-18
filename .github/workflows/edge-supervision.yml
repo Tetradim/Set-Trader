@@ -7,11 +7,13 @@ on:
       - 'backend/trading/edge_*.py'
       - 'backend/trading/__init__.py'
       - 'backend/tests/test_edge_*.py'
+      - 'docs/edge-entry-profitability.md'
       - '.github/workflows/edge-supervision.yml'
   pull_request:
     branches: [Beta-Maximum, OC-Iteration]
     paths:
       - 'backend/**'
+      - 'docs/edge-entry-profitability.md'
       - '.github/workflows/edge-supervision.yml'
   workflow_dispatch:
 
