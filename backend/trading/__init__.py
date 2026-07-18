@@ -11,9 +11,11 @@ from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E4
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
 
 # Trade-card authorization remains outside entry profitability validation.
-# Entry profitability then runs before execution-intent v2 mutates ticker capital.
+# Normalize Edge's style policy before the profitability wrapper captures the
+# entry-policy function, then validate price/cost/style before capital mutation.
 # Durable idempotency is installed later and remains the outermost guard.
 from trading import edge_strategy_contract_patch as _edge_strategy_contract_patch  # noqa: F401,E402
+from trading import edge_execution_style_contract_patch as _edge_execution_style_contract_patch  # noqa: F401,E402
 from trading import edge_entry_profitability_patch as _edge_entry_profitability_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
 
@@ -34,5 +36,6 @@ from trading import live_execution_quality_patch as _live_execution_quality_patc
 from trading import edge_live_entry_policy_patch as _edge_live_entry_policy_patch  # noqa: F401,E402
 from trading import live_terminal_fill_patch as _live_terminal_fill_patch  # noqa: F401,E402
 from trading import live_execution_orchestrator_patch as _live_execution_orchestrator_patch  # noqa: F401,E402
+from trading import edge_execution_attribution_patch as _edge_execution_attribution_patch  # noqa: F401,E402
 from trading import live_cycle_capital_patch as _live_cycle_capital_patch  # noqa: F401,E402
 from trading import live_cycle_accounting_composition_patch as _live_cycle_accounting_composition_patch  # noqa: F401,E402
