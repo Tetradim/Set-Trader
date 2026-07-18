@@ -1,6 +1,14 @@
 name: Edge Supervision Contract
 
 on:
+  push:
+    branches: [Beta-Maximum]
+    paths:
+      - 'backend/trading/edge_*contract_patch.py'
+      - 'backend/trading/__init__.py'
+      - 'backend/tests/test_edge_supervision_intent_v3.py'
+      - 'backend/tests/test_edge_strategy_contract.py'
+      - '.github/workflows/edge-supervision.yml'
   pull_request:
     branches: [Beta-Maximum]
     paths:
@@ -26,12 +34,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install -r backend/requirements.txt
+      - name: Compile Edge communication runtime
+        run: |
+          python -m py_compile \
+            backend/trading/edge_strategy_contract_patch.py \
+            backend/trading/edge_handoff_contract_patch.py \
+            backend/trading/__init__.py
       - name: Run supervision and handoff regressions
         env:
           PYTHONPATH: backend
         run: |
           python -m pytest \
             backend/tests/test_edge_supervision_intent_v3.py \
+            backend/tests/test_edge_strategy_contract.py \
             backend/tests/test_edge_handoff_contract.py \
             backend/tests/test_edge_handoff_idempotency.py \
             backend/tests/test_order_mode_routing.py \
