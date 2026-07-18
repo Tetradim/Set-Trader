@@ -33,6 +33,9 @@ class BrokerOrder:
     quantity: float
     limit_price: Optional[float] = None
     stop_price: Optional[float] = None
+    time_in_force: str = "day"
+    timeout_seconds: Optional[int] = None
+    execution_style: str = ""
     broker_order_id: str = ""
     status: str = "pending"
     filled_price: float = 0.0
@@ -107,7 +110,7 @@ TICKER_PATTERN = re.compile(r'^[A-Z]{1,5}$')
 
 
 class BrokerAdapter(ABC):
-    """Abstract base class for all broker adapters with aiohttp session pooling."""
+    """Abstract base class for all broker implementations with aiohttp session pooling."""
 
     broker_id: str = ""
 
@@ -116,7 +119,7 @@ class BrokerAdapter(ABC):
         self.connected = False
         self._session: Optional[aiohttp.ClientSession] = None
 
-    async def _get_session(self) -> aiohttp.ClientSession:
+    async def _get_session(self):
         if self._session is None or self._session.closed:
             connector = aiohttp.TCPConnector(limit=10, limit_per_host=5, keepalive_timeout=30)
             self._session = aiohttp.ClientSession(connector=connector, timeout=DEFAULT_TIMEOUT, raise_for_status=False)
