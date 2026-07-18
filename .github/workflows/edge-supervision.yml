@@ -5,7 +5,12 @@ on:
     branches: [Beta-Maximum, OC-Iteration]
     paths:
       - 'backend/trading/edge_*.py'
+      - 'backend/trading/live_execution_orchestrator_patch.py'
       - 'backend/trading/__init__.py'
+      - 'backend/brokers/base.py'
+      - 'backend/brokers/alpaca_adapter.py'
+      - 'backend/brokers/tradier_adapter.py'
+      - 'backend/schemas.py'
       - 'backend/tests/test_edge_*.py'
       - 'docs/edge-entry-profitability.md'
       - '.github/workflows/edge-supervision.yml'
@@ -31,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"pending\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse Edge contract checks are running\",\"target_url\":\"${target_url}\"}"
+          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"pending\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse execution-style checks are running\",\"target_url\":\"${target_url}\"}"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -42,16 +47,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip wheel
           pip install -r backend/requirements.txt
-      - name: Compile Edge communication runtime
+      - name: Compile Edge communication and execution runtime
         run: |
           python -m py_compile \
             backend/trading/edge_strategy_contract_patch.py \
             backend/trading/edge_entry_policy.py \
+            backend/trading/edge_execution_style.py \
+            backend/trading/edge_execution_style_contract_patch.py \
+            backend/trading/edge_execution_style_broker_patch.py \
+            backend/trading/edge_execution_attribution_patch.py \
             backend/trading/edge_entry_profitability_patch.py \
             backend/trading/edge_handoff_contract_patch.py \
             backend/trading/edge_live_entry_policy_patch.py \
+            backend/trading/live_execution_orchestrator_patch.py \
+            backend/brokers/base.py \
+            backend/brokers/alpaca_adapter.py \
+            backend/brokers/tradier_adapter.py \
+            backend/schemas.py \
             backend/trading/__init__.py
-      - name: Run supervision, entry profitability, and handoff regressions
+      - name: Run supervision, execution-style, and handoff regressions
         id: tests
         env:
           PYTHONPATH: backend
@@ -59,6 +73,7 @@ jobs:
         run: |
           set +e
           python -m pytest \
+            backend/tests/test_edge_execution_styles.py \
             backend/tests/test_edge_entry_profitability.py \
             backend/tests/test_edge_execution_intent_v2.py \
             backend/tests/test_edge_supervision_intent_v3.py \
@@ -85,14 +100,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"success\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse entry and supervision checks passed\",\"target_url\":\"${target_url}\"}"
+          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"success\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse style, attribution, and supervision checks passed\",\"target_url\":\"${target_url}\"}"
       - name: Publish failed supervision status
         if: ${{ always() && steps.tests.outputs.status != '0' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"failure\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse entry or supervision checks failed\",\"target_url\":\"${target_url}\"}"
+          curl --fail-with-body -sS -L -X POST -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $GH_TOKEN" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -d "{\"state\":\"failure\",\"context\":\"Pulse Edge Supervision\",\"description\":\"Pulse style, attribution, or supervision checks failed\",\"target_url\":\"${target_url}\"}"
       - name: Fail when supervision tests failed
         if: ${{ always() && steps.tests.outputs.status != '0' }}
         run: exit 1
