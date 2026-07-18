@@ -9,6 +9,10 @@ from trading import live_order_reconciliation_patch as _live_order_reconciliatio
 from trading import live_broker_scope_patch as _live_broker_scope_patch  # noqa: F401,E402
 from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E402
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
+
+# Trade-card authorization wraps execution-intent handling. Durable idempotency
+# is still installed later and remains the outermost exactly-once guard.
+from trading import edge_strategy_contract_patch as _edge_strategy_contract_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
 
 # The wrapper now supports execution-intent v2 and v3, but the v2 marker is an
