@@ -1,6 +1,7 @@
 """Alpaca broker adapter — API-first broker for algorithmic trading."""
 import asyncio
 import logging
+import math
 import re
 import uuid
 from .base import BrokerAdapter, BrokerOpenOrder, BrokerOrder, BrokerPosition, BrokerAccountInfo, OrderSide, OrderType
@@ -28,17 +29,16 @@ class AlpacaAdapter(BrokerAdapter):
         raw = str(order.client_order_id or order.idempotency_key or "").strip()
         if not raw:
             return ""
-
         safe = _CLIENT_ORDER_ID_UNSAFE_RE.sub("-", raw)
         if len(safe) <= _CLIENT_ORDER_ID_MAX_LENGTH:
             return safe
-
         return f"sp_{uuid.uuid5(uuid.NAMESPACE_DNS, raw)}"
 
     def _apply_order_payload(self, order: BrokerOrder, data: dict) -> BrokerOrder:
         order.broker_order_id = data.get("id", order.broker_order_id)
         order.client_order_id = data.get("client_order_id", order.client_order_id)
         order.status = data.get("status", order.status)
+        order.submitted_at = str(data.get("submitted_at") or order.submitted_at or "")
         try:
             order.filled_price = float(data.get("filled_avg_price") or data.get("filled_price") or order.filled_price or 0)
         except (TypeError, ValueError):
@@ -49,19 +49,38 @@ class AlpacaAdapter(BrokerAdapter):
             order.filled_quantity = 0.0
         return order
 
-    async def _poll_order_until_terminal(self, order: BrokerOrder, *, attempts: int = 6) -> BrokerOrder:
+    async def _poll_order_until_terminal(
+        self,
+        order: BrokerOrder,
+        *,
+        attempts: int = 6,
+        interval_seconds: float = 0.5,
+    ) -> BrokerOrder:
         if not order.broker_order_id:
             return order
-
         session = await self._get_session()
-        for attempt in range(attempts):
+        for attempt in range(max(1, attempts)):
             async with session.get(f"{self._base_url()}/v2/orders/{order.broker_order_id}", headers=self._headers()) as resp:
                 if resp.status == 200:
                     self._apply_order_payload(order, await resp.json())
                     if str(order.status or "").lower() in _ORDER_TERMINAL_STATUSES:
                         break
             if attempt < attempts - 1:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(max(0.05, interval_seconds))
+        return order
+
+    async def _cancel_after_timeout(self, order: BrokerOrder) -> BrokerOrder:
+        timeout = int(order.timeout_seconds or 0)
+        if timeout <= 0 or not order.broker_order_id:
+            return order
+        attempts = max(1, int(math.ceil(timeout / 0.5)))
+        await self._poll_order_until_terminal(order, attempts=attempts)
+        if str(order.status or "").lower() in _ORDER_TERMINAL_STATUSES:
+            return order
+        cancelled = await self.cancel_order(order.broker_order_id)
+        await self._poll_order_until_terminal(order, attempts=3, interval_seconds=0.25)
+        if cancelled and str(order.status or "").lower() not in _ORDER_TERMINAL_STATUSES:
+            order.status = "canceled"
         return order
 
     async def check_connection(self) -> bool:
@@ -131,29 +150,31 @@ class AlpacaAdapter(BrokerAdapter):
 
     async def place_order(self, order: BrokerOrder) -> BrokerOrder:
         session = await self._get_session()
+        order_type = getattr(order.order_type, "value", order.order_type)
         payload = {
             "symbol": order.symbol,
             "qty": str(order.quantity),
             "side": order.side.value.lower(),
-            "type": order.order_type.value.lower(),
-            "time_in_force": "day",
+            "type": str(order_type).lower(),
+            "time_in_force": str(order.time_in_force or "day").lower(),
         }
         client_order_id = self._client_order_id_for(order)
         if client_order_id:
             payload["client_order_id"] = client_order_id
             order.client_order_id = client_order_id
-        if order.limit_price and order.order_type in ("LIMIT", "STOP_LIMIT"):
+        if order.limit_price and str(order_type).upper() in {"LIMIT", "STOP_LIMIT"}:
             payload["limit_price"] = str(order.limit_price)
-        if order.stop_price and order.order_type in ("STOP", "STOP_LIMIT"):
+        if order.stop_price and str(order_type).upper() in {"STOP", "STOP_LIMIT"}:
             payload["stop_price"] = str(order.stop_price)
 
         async with session.post(f"{self._base_url()}/v2/orders", headers=self._headers(), json=payload) as resp:
             data = await resp.json()
             if resp.status in (200, 201):
                 self._apply_order_payload(order, data)
-                order_type = getattr(order.order_type, "value", order.order_type)
                 if str(order_type).upper() == "MARKET" and str(order.status or "").lower() not in _ORDER_TERMINAL_STATUSES:
                     await self._poll_order_until_terminal(order)
+                elif order.timeout_seconds:
+                    await self._cancel_after_timeout(order)
             else:
                 order.status = "rejected"
                 order.error = data.get("message", f"HTTP {resp.status}")
