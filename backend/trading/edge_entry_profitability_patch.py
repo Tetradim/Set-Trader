@@ -1,4 +1,4 @@
-"""Pre-mutation Edge entry profitability guard for Pulse handoffs."""
+"""Pre-mutation Edge entry profitability and execution-style guard."""
 from __future__ import annotations
 
 import functools
@@ -12,6 +12,11 @@ from trading.edge_entry_policy import (
     finite,
     normalise_entry_policy,
     validate_long_entry,
+)
+from trading.edge_execution_style import (
+    EdgeExecutionStyleError,
+    execution_attribution,
+    select_execution_style,
 )
 
 
@@ -67,6 +72,23 @@ def _rejection_response(edge_module: Any, body: Any, error: EdgeEntryPolicyError
     return response
 
 
+def _style_rejection_response(edge_module: Any, body: Any, error: Exception, policy: dict[str, Any]) -> dict[str, Any]:
+    response = edge_module._handoff_response(
+        body,
+        accepted=False,
+        status="deferred",
+        reason="entry_execution_style_unavailable",
+        message=str(error),
+    )
+    response.update(
+        {
+            "execution_code": "ENTRY_DEFERRED_EXECUTION_STYLE_UNAVAILABLE",
+            "entry_policy": policy,
+        }
+    )
+    return response
+
+
 async def _prepare_policy(edge_module: Any, body: Any) -> dict[str, Any] | None:
     if _action(body) != "buy":
         return None
@@ -89,34 +111,74 @@ async def _prepare_policy(edge_module: Any, body: Any) -> dict[str, Any] | None:
         )
     except EdgeEntryPolicyError as exc:
         return _rejection_response(edge_module, body, exc)
+    try:
+        selection = select_execution_style(
+            policy,
+            bid=bid,
+            ask=ask,
+            observed_price=preflight.get("executable_price") or price,
+        )
+    except EdgeExecutionStyleError as exc:
+        return _style_rejection_response(edge_module, body, exc, policy)
 
     _runtime_policies(edge_module.deps.engine)[body.symbol] = {
         "intent_id": str(getattr(body, "idempotency_key", "") or ""),
         "policy": policy,
         "preflight": preflight,
+        "execution_style": selection,
         "execution_checks": [],
         "rejection": None,
+        "attribution": None,
     }
     return None
+
+
+def _latest_fill(engine: Any, symbol: str) -> tuple[float, float]:
+    trade = getattr(engine, "_last_broker_truth_trade", None)
+    if trade is None or str(getattr(trade, "symbol", "")).upper() != symbol.upper():
+        return 0.0, 0.0
+    return finite(getattr(trade, "price", 0.0)), finite(getattr(trade, "quantity", 0.0))
 
 
 async def _persist_audit(edge_module: Any, body: Any, response: Any, runtime: dict[str, Any] | None) -> None:
     if not isinstance(runtime, dict):
         return
+    status = response.get("status") if isinstance(response, dict) else "unknown"
+    fill_price, fill_quantity = _latest_fill(edge_module.deps.engine, body.symbol)
+    attribution = execution_attribution(
+        runtime.get("execution_style") or {},
+        status=str(status or "unknown"),
+        fill_price=fill_price,
+        filled_quantity=fill_quantity,
+    )
+    runtime["attribution"] = attribution
     audit = {
         "intent_id": runtime.get("intent_id"),
         "policy": runtime.get("policy"),
         "preflight": runtime.get("preflight"),
+        "execution_style": runtime.get("execution_style"),
         "execution_checks": list(runtime.get("execution_checks") or []),
         "rejection": runtime.get("rejection"),
-        "response_status": response.get("status") if isinstance(response, dict) else None,
+        "attribution": attribution,
+        "response_status": status,
         "response_reason": response.get("reason") if isinstance(response, dict) else None,
     }
+    if isinstance(response, dict):
+        response.setdefault("entry_policy", runtime.get("policy"))
+        response.setdefault("execution_style", runtime.get("execution_style"))
+        response.setdefault("execution_attribution", attribution)
     try:
         await edge_module.deps.db.tickers.update_one(
             {"symbol": body.symbol},
-            {"$set": {"edge_entry_policy_audit": audit}},
+            {"$set": {"edge_entry_policy_audit": audit, "edge_execution_attribution": attribution}},
         )
+        collection = getattr(edge_module.deps.db, "execution_attributions", None)
+        if collection is not None:
+            await collection.update_one(
+                {"intent_id": runtime.get("intent_id")},
+                {"$set": {"symbol": body.symbol, **audit}},
+                upsert=True,
+            )
     except Exception:
         # Audit persistence must not turn a correctly vetoed order into a retry.
         pass
@@ -128,6 +190,7 @@ def _normalise_live_rejection(response: Any, runtime: dict[str, Any] | None) -> 
     rejection = runtime.get("rejection")
     if not isinstance(rejection, dict):
         response.setdefault("entry_policy", runtime.get("policy"))
+        response.setdefault("execution_style", runtime.get("execution_style"))
         response.setdefault("execution_quality", list(runtime.get("execution_checks") or []))
         return response
     response.update(
@@ -139,6 +202,7 @@ def _normalise_live_rejection(response: Any, runtime: dict[str, Any] | None) -> 
             "message": rejection.get("message") or response.get("message") or "Pulse rejected the entry policy.",
             "execution_code": rejection.get("execution_code"),
             "entry_policy": runtime.get("policy"),
+            "execution_style": runtime.get("execution_style"),
             "execution_quality": rejection.get("details") or list(runtime.get("execution_checks") or []),
         }
     )
