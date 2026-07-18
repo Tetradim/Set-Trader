@@ -10,6 +10,12 @@ from trading import live_broker_scope_patch as _live_broker_scope_patch  # noqa:
 from trading import live_pretrade_patch as _live_pretrade_patch  # noqa: F401,E402
 from trading import live_broker_capability_patch as _live_broker_capability_patch  # noqa: F401,E402
 from trading import edge_handoff_contract_patch as _edge_handoff_contract_patch  # noqa: F401,E402
+
+# The wrapper now supports execution-intent v2 and v3, but the v2 marker is an
+# established readiness ABI used to verify that the execution-intent layer sits
+# immediately inside durable idempotency. Keep that marker name on the route.
+_edge_handoff_contract_patch._PATCH_MARKER = "_pulse_edge_execution_intent_v2"
+
 # Idempotency must be installed after the execution-intent wrapper so it becomes
 # the outermost guard on the final /api/edge/handoff route. Duplicate commands
 # are claimed/replayed before expiry or broker submission logic can run.
