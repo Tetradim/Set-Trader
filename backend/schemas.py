@@ -50,11 +50,12 @@ class TickerConfig(BaseModel):
     rebracket_lookback: int = Field(10, ge=2, le=100, description="Recent price sample count for rebracket anchoring")
     rebracket_buffer: float = Field(0.10, ge=0, le=99999, description="Absolute price buffer below the recent anchor")
     rebracket_min_drift: float = Field(0.50, ge=0, le=99999, description="Minimum absolute price movement to trigger rebracket")
-    
+
     @field_validator('symbol')
     @classmethod
     def validate_symbol_field(cls, v: str) -> str:
         return validate_symbol(v)
+
     enabled: bool = True
     strategy: str = "custom"
     broker_id: str = ""
@@ -64,8 +65,8 @@ class TickerConfig(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     # Partial fills (scale in / scale out)
     partial_fills_enabled: bool = False
-    buy_legs: list = []   # [{"alloc_pct": 50, "offset": -3.0, "is_percent": True}]
-    sell_legs: list = []  # [{"alloc_pct": 60, "offset": 3.0, "is_percent": True}]
+    buy_legs: list = []
+    sell_legs: list = []
     # Time-based risk rules (per-ticker)
     lock_trailing_at_open: bool = False
     halve_stop_at_open: bool = False
@@ -76,13 +77,13 @@ class TickerConfig(BaseModel):
     # Market / exchange (determines trading hours, currency, opening bell time)
     market: str = "US"
     # Pluggable strategy system
-    strategy_config: Dict[str, Any] = {}   # per-ticker params for signal strategies
+    strategy_config: Dict[str, Any] = {}
 
 
 class TickerCreate(BaseModel):
     symbol: str
     base_power: float = 100.0
-    market: Optional[str] = None  # Auto-detected from symbol suffix if not provided
+    market: Optional[str] = None
 
 
 class TickerUpdate(BaseModel):
@@ -156,6 +157,8 @@ class TradeRecord(BaseModel):
     trail_mode: str = ""
     trading_mode: str = "paper"
     broker_results: list = []
+    execution_style: str = ""
+    execution_attribution: Dict[str, Any] = {}
 
 
 class Position(BaseModel):
@@ -188,10 +191,8 @@ class SettingsUpdate(BaseModel):
     account_balance: Optional[float] = None
     global_daily_drawdown: Optional[GlobalDailyDrawdownConfig] = None
     market_hours_only: Optional[bool] = None
-    # Auto mode switching
     live_during_market_hours: Optional[bool] = None
     paper_after_hours: Optional[bool] = None
-    # Pattern detection (Pulse → Edge)
     pattern_detection_enabled: Optional[bool] = None
     pattern_min_confidence: Optional[float] = None
     pattern_send_to_edge: Optional[bool] = None
