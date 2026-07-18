@@ -1,7 +1,6 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-
-import pytest
 
 from trading import edge_strategy_contract_patch as contract
 
@@ -69,31 +68,28 @@ def _body(action="buy", metadata=None):
     return SimpleNamespace(symbol="AAPL", action=SimpleNamespace(value=action), metadata=metadata or {})
 
 
-@pytest.mark.asyncio
-async def test_new_exposure_requires_edge_trade_card(monkeypatch):
+def test_new_exposure_requires_edge_trade_card(monkeypatch):
     monkeypatch.setenv("PULSE_REQUIRE_EDGE_TRADE_CARD", "true")
     edge = FakeEdgeModule()
 
-    rejection = await contract._validate(edge, _body("buy", {"price": 200.0}))
+    rejection = asyncio.run(contract._validate(edge, _body("buy", {"price": 200.0})))
 
     assert rejection["reason"] == "edge_trade_card_required"
 
 
-@pytest.mark.asyncio
-async def test_authorized_buy_persists_position_owner():
+def test_authorized_buy_persists_position_owner():
     edge = FakeEdgeModule(ticker={"symbol": "AAPL"})
     card = _card()
     body = _body("buy", {"price": 200.0, "trade_card": card, "position_id": card["position_id"]})
 
-    assert await contract._validate(edge, body) is None
-    await contract._persist_after(edge, body, {"accepted": True, "sent": True, "status": "accepted"})
+    assert asyncio.run(contract._validate(edge, body)) is None
+    asyncio.run(contract._persist_after(edge, body, {"accepted": True, "sent": True, "status": "accepted"}))
 
     assert edge.collection.ticker["edge_position_id"] == "edge-position:pulse"
     assert edge.collection.ticker["edge_card_id"] == "edge-card:pulse"
 
 
-@pytest.mark.asyncio
-async def test_supervision_rejects_different_position_owner():
+def test_supervision_rejects_different_position_owner():
     edge = FakeEdgeModule(
         ticker={"symbol": "AAPL", "edge_position_id": "edge-position:other"},
         position={"qty": 10},
@@ -109,13 +105,12 @@ async def test_supervision_rejects_different_position_owner():
         },
     )
 
-    rejection = await contract._validate(edge, body)
+    rejection = asyncio.run(contract._validate(edge, body))
 
     assert rejection["reason"] == "edge_position_owner_mismatch"
 
 
-@pytest.mark.asyncio
-async def test_full_exit_invalidates_position_scoped_stop():
+def test_full_exit_invalidates_position_scoped_stop():
     card = _card(state="active")
     edge = FakeEdgeModule(
         ticker={
@@ -137,7 +132,7 @@ async def test_full_exit_invalidates_position_scoped_stop():
         },
     )
 
-    await contract._persist_after(edge, body, {"accepted": True, "sent": True, "status": "accepted"})
+    asyncio.run(contract._persist_after(edge, body, {"accepted": True, "sent": True, "status": "accepted"}))
 
     assert "edge_position_id" not in edge.collection.ticker
     assert "edge_stop_position_id" not in edge.collection.ticker
