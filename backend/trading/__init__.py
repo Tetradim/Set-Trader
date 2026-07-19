@@ -40,3 +40,4 @@ from trading import passive_broker_adapter_patch as _passive_broker_adapter_patc
 from trading import passive_range_patch as _passive_range_patch  # noqa: F401,E402
 from trading import passive_range_controls_patch as _passive_range_controls_patch  # noqa: F401,E402
 from trading import passive_range_risk_patch as _passive_range_risk_patch  # noqa: F401,E402
+from trading import passive_range_cycle_telemetry_patch as _passive_range_cycle_telemetry_patch  # noqa: F401,E402
