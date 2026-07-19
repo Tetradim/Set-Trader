@@ -1,0 +1,63 @@
+name: Execution Safety Regressions
+
+on:
+  pull_request:
+    branches: [main, main-2, Sentinel-Prod, Beta-Maximum]
+    paths:
+      - 'backend/trading/**'
+      - 'backend/tests/test_execution_safety_review.py'
+      - '.github/workflows/execution-safety-review.yml'
+  push:
+    branches: [main, main-2, Sentinel-Prod, Beta-Maximum]
+    paths:
+      - 'backend/trading/**'
+      - 'backend/tests/test_execution_safety_review.py'
+      - '.github/workflows/execution-safety-review.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  execution-safety:
+    name: Live execution safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r backend/requirements.txt
+
+      - name: Compile execution safety modules
+        env:
+          PYTHONPATH: backend
+        run: |
+          python -m py_compile \
+            backend/trading/risk_safety_patch.py \
+            backend/trading/broker_position_safety_patch.py \
+            backend/trading/broker_position_truth_patch.py \
+            backend/trading/execution_order_safety_patch.py \
+            backend/trading/partial_publication_safety_patch.py \
+            backend/trading/execution_safety_compatibility_patch.py \
+            backend/trading/state_safety_compatibility_patch.py
+
+      - name: Run execution safety regressions
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest backend/tests/test_execution_safety_review.py -q
