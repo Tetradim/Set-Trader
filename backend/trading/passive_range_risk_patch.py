@@ -151,27 +151,35 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
 
 
 async def _evaluate_passive_range_with_stop(self, ticker_doc: dict) -> None:
-    symbol = str(ticker_doc.get("symbol") or "").upper()
-    if symbol:
-        state = await passive._load_state(self, symbol)
-        if state.get("phase") in {"LONG", "SELL_WORKING"} and _number(state.get("position_qty")) > 0:
-            current_price = _number(await deps.price_service.get_price(symbol))
-            entry = _number(state.get("entry_price"))
-            if current_price > 0 and entry > 0:
-                tick = infer_tick_size(current_price, ticker_doc.get("price_tick_size", 0))
-                stop_target = decimal_to_float(
-                    bracket_target(
-                        entry,
-                        ticker_doc.get("stop_offset", -6.0),
-                        is_percent=bool(ticker_doc.get("stop_percent", True)),
-                        tick_size=tick,
-                        side="stop",
-                    )
-                )
-                if stop_target > 0 and current_price <= stop_target:
-                    await _stop_exit(self, ticker_doc, state, current_price, stop_target)
-                    return
+    # Let the passive evaluator obtain and store the current price once. Stop
+    # protection then evaluates that same observation, avoiding a second quote
+    # request and ensuring paper tests/live decisions share one market snapshot.
     await _ORIGINAL_EVALUATE_PASSIVE_RANGE(self, ticker_doc)
+
+    symbol = str(ticker_doc.get("symbol") or "").upper()
+    if not symbol:
+        return
+    state = await passive._load_state(self, symbol)
+    if state.get("phase") not in {"LONG", "SELL_WORKING"} or _number(state.get("position_qty")) <= 0:
+        return
+
+    current_price = _number(getattr(self, "_prices", {}).get(symbol))
+    entry = _number(state.get("entry_price"))
+    if current_price <= 0 or entry <= 0:
+        return
+
+    tick = infer_tick_size(current_price, ticker_doc.get("price_tick_size", 0))
+    stop_target = decimal_to_float(
+        bracket_target(
+            entry,
+            ticker_doc.get("stop_offset", -6.0),
+            is_percent=bool(ticker_doc.get("stop_percent", True)),
+            tick_size=tick,
+            side="stop",
+        )
+    )
+    if stop_target > 0 and current_price <= stop_target:
+        await _stop_exit(self, ticker_doc, state, current_price, stop_target)
 
 
 passive._evaluate_passive_range = _evaluate_passive_range_with_stop
