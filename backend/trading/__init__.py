@@ -38,3 +38,4 @@ from trading import live_cycle_accounting_composition_patch as _live_cycle_accou
 # the evaluator can require real order-status and bid/ask evidence in live mode.
 from trading import passive_broker_adapter_patch as _passive_broker_adapter_patch  # noqa: F401,E402
 from trading import passive_range_patch as _passive_range_patch  # noqa: F401,E402
+from trading import passive_range_risk_patch as _passive_range_risk_patch  # noqa: F401,E402
