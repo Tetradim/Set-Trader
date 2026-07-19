@@ -20,6 +20,9 @@ from brokers.tradier_adapter import API_BASE, TradierAdapter
 from brokers.base import BrokerOrder, OrderSide, OrderType
 
 
+_ALPACA_DATA_BASE = "https://data.alpaca.markets"
+
+
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -49,9 +52,11 @@ async def _alpaca_get_order_status(self: AlpacaAdapter, broker_order_id: str) ->
 async def _alpaca_get_quote_snapshot(self: AlpacaAdapter, symbol: str) -> dict:
     session = await self._get_session()
     async with session.get(
-        f"{self._base_url()}/v2/stocks/{symbol}/quotes/latest",
+        f"{_ALPACA_DATA_BASE}/v2/stocks/{symbol}/quotes/latest",
         headers=self._headers(),
     ) as response:
+        if response.status != 200:
+            return {"bid": 0.0, "ask": 0.0, "last": 0.0, "timestamp": _utc_iso(), "source": "alpaca"}
         data = await response.json()
     quote = data.get("quote") or {}
     bid = float(quote.get("bp") or 0)
@@ -111,6 +116,8 @@ async def _tradier_get_quote_snapshot(self: TradierAdapter, symbol: str) -> dict
         headers=self._headers(),
         params={"symbols": symbol},
     ) as response:
+        if response.status != 200:
+            return {"bid": 0.0, "ask": 0.0, "last": 0.0, "timestamp": _utc_iso(), "source": "tradier"}
         data = await response.json()
     quote = (data.get("quotes") or {}).get("quote") or {}
     if isinstance(quote, list):
