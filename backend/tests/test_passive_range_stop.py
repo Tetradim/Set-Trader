@@ -29,12 +29,16 @@ class FakePriceService:
 
 class FakeEngine:
     def __init__(self):
+        self._prices = {}
         self._positions = {"QSI": {"qty": 523, "avg_entry": 0.955, "high": 0.955}}
         self._last_exit_ts = {}
         self.trades = []
         self.profits = []
 
     def is_paper_trading(self):
+        return True
+
+    def _is_ticker_market_open(self, ticker_doc):
         return True
 
     async def _record_trade(self, trade):
