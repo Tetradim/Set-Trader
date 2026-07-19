@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import ValidationError
 
 import deps
 from schemas import TickerConfig, TickerCreate, TickerUpdate
@@ -55,6 +56,22 @@ async def update_ticker(symbol: str, body: TickerUpdate):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "No updates provided")
+
+    current_doc = await deps.db.tickers.find_one({"symbol": sym})
+    if not current_doc:
+        raise HTTPException(404, f"{sym} not found")
+
+    candidate = {key: value for key, value in current_doc.items() if key != "_id"}
+    candidate.update(updates)
+    try:
+        validated = TickerConfig(**candidate).model_dump()
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    # Persist only explicitly requested fields, using their validated/normalized
+    # values. Existing extra documents such as custom strategy backups remain
+    # untouched.
+    updates = {key: validated[key] for key in updates}
     result = await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(404, f"{sym} not found")
