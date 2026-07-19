@@ -108,10 +108,6 @@ class TickerConfig(BaseModel):
             raise ValueError("stop_offset must be a positive absolute price when stop_percent is disabled")
 
         if self.passive_range_enabled:
-            if str(self.buy_order_type or "").lower() != "limit":
-                raise ValueError("passive range mode requires a limit buy order type")
-            if str(self.sell_order_type or "").lower() != "limit":
-                raise ValueError("passive range mode requires a limit sell order type")
             if not self.buy_percent and not self.sell_percent and self.buy_offset >= self.sell_offset:
                 raise ValueError("passive range absolute buy price must be below the sell price")
             if not self.buy_percent and not self.stop_percent and self.stop_offset >= self.buy_offset:
