@@ -90,25 +90,33 @@ class TickerConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_price_modes(self):
-        if self.buy_percent:
-            if not -50 <= self.buy_offset <= 0:
-                raise ValueError("buy_offset must be between -50 and 0 when buy_percent is enabled")
-        elif self.buy_offset <= 0:
-            raise ValueError("buy_offset must be a positive absolute price when buy_percent is disabled")
+        # Preserve the legacy percentage ranges regardless of execution mode.
+        if self.buy_percent and not -50 <= self.buy_offset <= 0:
+            raise ValueError("buy_offset must be between -50 and 0 when buy_percent is enabled")
+        if self.sell_percent and not 0 <= self.sell_offset <= 50:
+            raise ValueError("sell_offset must be between 0 and 50 when sell_percent is enabled")
+        if self.stop_percent and not -50 <= self.stop_offset <= 0:
+            raise ValueError("stop_offset must be between -50 and 0 when stop_percent is enabled")
 
-        if self.sell_percent:
-            if not 0 <= self.sell_offset <= 50:
-                raise ValueError("sell_offset must be between 0 and 50 when sell_percent is enabled")
-        elif self.sell_offset <= 0:
-            raise ValueError("sell_offset must be a positive absolute price when sell_percent is disabled")
-
-        if self.stop_percent:
-            if not -50 <= self.stop_offset <= 0:
-                raise ValueError("stop_offset must be between -50 and 0 when stop_percent is enabled")
-        elif self.stop_offset <= 0:
-            raise ValueError("stop_offset must be a positive absolute price when stop_percent is disabled")
-
+        # Passive orders always use exact limit/trigger prices, so their absolute
+        # values must be executable. Non-passive market configurations retain
+        # their historical tolerance for ignored sentinel offsets.
         if self.passive_range_enabled:
+            if self.buy_percent:
+                pass
+            elif self.buy_offset <= 0:
+                raise ValueError("passive range buy_offset must be a positive absolute price")
+
+            if self.sell_percent:
+                pass
+            elif self.sell_offset <= 0:
+                raise ValueError("passive range sell_offset must be a positive absolute price")
+
+            if self.stop_percent:
+                pass
+            elif self.stop_offset <= 0:
+                raise ValueError("passive range stop_offset must be a positive absolute price")
+
             if not self.buy_percent and not self.sell_percent and self.buy_offset >= self.sell_offset:
                 raise ValueError("passive range absolute buy price must be below the sell price")
             if not self.buy_percent and not self.stop_percent and self.stop_offset >= self.buy_offset:
