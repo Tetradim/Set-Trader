@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
+import { toast } from 'sonner';
 import { TestConnectionModal } from './BrokersTestConnectionModal';
 import { AlertTriangle, ExternalLink, CheckCircle2, Lock, Plug, DollarSign, Settings2, Gauge, Activity, ChevronDown, ChevronUp, FlaskConical } from 'lucide-react';
 import { GeneralApiSection } from './GeneralApiSection';
@@ -194,6 +195,7 @@ function BrokerCard({ broker, onTestClick, accountInfo }: { broker: BrokerData; 
             <FlaskConical size={12} /> Test
           </button>
           <button
+            onClick={onTestClick}
             disabled={!broker.supported}
             className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
               broker.supported ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'bg-secondary text-muted-foreground/50 cursor-not-allowed'
