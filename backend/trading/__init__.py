@@ -42,3 +42,5 @@ from trading import broker_position_safety_patch as _broker_position_safety_patc
 from trading import broker_position_truth_patch as _broker_position_truth_patch  # noqa: F401,E402
 from trading import execution_order_safety_patch as _execution_order_safety_patch  # noqa: F401,E402
 from trading import partial_publication_safety_patch as _partial_publication_safety_patch  # noqa: F401,E402
+from trading import execution_safety_compatibility_patch as _execution_safety_compatibility_patch  # noqa: F401,E402
+from trading import state_safety_compatibility_patch as _state_safety_compatibility_patch  # noqa: F401,E402
