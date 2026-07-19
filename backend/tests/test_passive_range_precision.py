@@ -67,6 +67,19 @@ def test_ticker_schema_rejects_absolute_price_in_percent_mode():
         raise AssertionError("positive absolute buy price was accepted as a percentage")
 
 
+def test_legacy_non_passive_market_buy_can_keep_ignored_zero_offset():
+    ticker = TickerConfig(
+        symbol="QSI",
+        buy_percent=False,
+        buy_offset=0,
+        buy_order_type="market",
+        passive_range_enabled=False,
+    )
+
+    assert ticker.buy_offset == 0
+    assert ticker.buy_order_type == "market"
+
+
 def test_ticker_schema_rejects_inverted_passive_range():
     try:
         TickerConfig(
