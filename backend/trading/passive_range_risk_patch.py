@@ -1,10 +1,10 @@
-"""Range-break protection for passive range scalping.
+"""Range-break and maximum-hold protection for passive range scalping.
 
-A passive sell can remain unfilled while the market moves lower. This wrapper
-uses the ticker's existing stop configuration as a mandatory exit trigger for
-an open passive-range position. It cancels the resting sell before submitting a
-live market exit and refuses to send the exit if cancellation cannot be
-confirmed, preventing an accidental double-sell.
+A passive sell can remain unfilled while the market moves lower or simply stops
+cycling. This wrapper uses the ticker's existing stop configuration and an
+optional maximum holding time. It cancels the resting sell before submitting a
+live market exit and refuses to send that exit unless cancellation is confirmed,
+preventing an accidental double-sell.
 """
 
 from __future__ import annotations
@@ -28,7 +28,17 @@ def _number(value) -> float:
         return 0.0
 
 
-async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, stop_target: float) -> bool:
+async def _forced_exit(
+    self,
+    ticker_doc: dict,
+    state: dict,
+    current_price: float,
+    *,
+    target_price: float,
+    exit_reason: str,
+    action_label: str,
+    reason: str,
+) -> bool:
     symbol = state["symbol"]
     quantity = _number(state.get("position_qty"))
     entry = _number(state.get("entry_price"))
@@ -38,7 +48,7 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
     is_paper = passive._is_paper(self, ticker_doc)
     broker_result = {
         "broker_id": "paper",
-        "broker_order_id": f"paper-stop:{state.get('cycle_id', symbol)}",
+        "broker_order_id": f"paper-{exit_reason}:{state.get('cycle_id', symbol)}",
         "order_id": "",
         "status": "filled",
         "filled_price": current_price,
@@ -57,7 +67,8 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
             cancelled = await passive._cancel_live_order(self, broker_id, sell_order)
             if not cancelled:
                 deps.logger.error(
-                    "Passive stop for %s blocked: resting sell cancellation was not confirmed",
+                    "Passive %s for %s blocked: resting sell cancellation was not confirmed",
+                    exit_reason,
                     symbol,
                 )
                 return False
@@ -67,7 +78,7 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
                 sym=symbol,
                 broker_ids=[broker_id],
                 broker_allocs=ticker_doc.get("broker_allocations") or {},
-                action_label="PASSIVE_RANGE_STOP",
+                action_label=action_label,
                 order_template={
                     "symbol": symbol,
                     "side": "SELL",
@@ -77,7 +88,7 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
                 },
             )
         except LiveOrderExecutionError as exc:
-            deps.logger.error("Passive stop execution failed for %s: %s", symbol, exc)
+            deps.logger.error("Passive %s execution failed for %s: %s", exit_reason, symbol, exc)
             state.update({"phase": "LONG", "sell_order": None})
             await passive._persist_state(state)
             return False
@@ -91,25 +102,27 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
             broker_result.get("filled_price") or broker_result.get("avg_fill_price")
         )
         if exit_quantity <= 0 or exit_price <= 0:
-            deps.logger.error("Passive stop for %s lacked terminal fill evidence", symbol)
+            deps.logger.error(
+                "Passive %s for %s lacked terminal fill evidence", exit_reason, symbol
+            )
             return False
 
     sold = min(quantity, exit_quantity)
     pnl = (exit_price - entry) * sold
     trade = TradeRecord(
         symbol=symbol,
-        side="STOP",
+        side="STOP" if exit_reason == "stop" else "SELL",
         price=exit_price,
         quantity=sold,
-        reason=f"[PASSIVE RANGE] Stop triggered at ${current_price} <= ${stop_target}",
+        reason=reason,
         pnl=round(pnl, 2),
         order_type="MARKET",
         rule_mode="PASSIVE_RANGE",
         entry_price=entry,
-        target_price=stop_target,
+        target_price=target_price,
         total_value=round(exit_price * sold, 2),
         buy_power=_number(ticker_doc.get("base_power")),
-        stop_target=stop_target,
+        stop_target=target_price if exit_reason == "stop" else 0.0,
         trading_mode="paper" if is_paper else "live",
         broker_results=[] if is_paper else [broker_result],
     )
@@ -142,7 +155,7 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
         exit_price=exit_price,
         exit_quantity=sold,
         pnl=pnl,
-        exit_reason="stop",
+        exit_reason=exit_reason,
     )
     state.update({"phase": "COOLDOWN", "entry_price": 0.0})
     self._last_exit_ts[symbol] = datetime.now(timezone.utc)
@@ -151,7 +164,7 @@ async def _stop_exit(self, ticker_doc: dict, state: dict, current_price: float, 
 
 
 async def _evaluate_passive_range_with_stop(self, ticker_doc: dict) -> None:
-    # Let the passive evaluator obtain and store the current price once. Stop
+    # Let the passive evaluator obtain and store the current price once. Risk
     # protection then evaluates that same observation, avoiding a second quote
     # request and ensuring paper tests/live decisions share one market snapshot.
     await _ORIGINAL_EVALUATE_PASSIVE_RANGE(self, ticker_doc)
@@ -168,6 +181,12 @@ async def _evaluate_passive_range_with_stop(self, ticker_doc: dict) -> None:
     if current_price <= 0 or entry <= 0:
         return
 
+    previous_min = _number(state.get("min_observed_price")) or entry
+    previous_max = _number(state.get("max_observed_price")) or entry
+    state["min_observed_price"] = min(previous_min, current_price)
+    state["max_observed_price"] = max(previous_max, current_price)
+    await passive._persist_state(state)
+
     tick = infer_tick_size(current_price, ticker_doc.get("price_tick_size", 0))
     stop_target = decimal_to_float(
         bracket_target(
@@ -179,7 +198,35 @@ async def _evaluate_passive_range_with_stop(self, ticker_doc: dict) -> None:
         )
     )
     if stop_target > 0 and current_price <= stop_target:
-        await _stop_exit(self, ticker_doc, state, current_price, stop_target)
+        await _forced_exit(
+            self,
+            ticker_doc,
+            state,
+            current_price,
+            target_price=stop_target,
+            exit_reason="stop",
+            action_label="PASSIVE_RANGE_STOP",
+            reason=f"[PASSIVE RANGE] Stop triggered at ${current_price} <= ${stop_target}",
+        )
+        return
+
+    max_hold_seconds = max(0, int(ticker_doc.get("passive_max_hold_seconds", 0) or 0))
+    if max_hold_seconds > 0:
+        held_seconds = passive._elapsed_seconds(state.get("buy_filled_at"))
+        if held_seconds >= max_hold_seconds:
+            await _forced_exit(
+                self,
+                ticker_doc,
+                state,
+                current_price,
+                target_price=current_price,
+                exit_reason="max_hold",
+                action_label="PASSIVE_RANGE_MAX_HOLD",
+                reason=(
+                    f"[PASSIVE RANGE] Maximum hold reached after {held_seconds:.0f}s "
+                    f"(limit {max_hold_seconds}s)"
+                ),
+            )
 
 
 passive._evaluate_passive_range = _evaluate_passive_range_with_stop
