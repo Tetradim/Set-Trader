@@ -13,6 +13,7 @@ export function TradingModeSection() {
   const simulate247 = useStore((s) => s.simulate247);
   const liveDuringMarketHours = useStore((s) => s.liveDuringMarketHours);
   const setSimulate247 = useStore((s) => s.setSimulate247);
+  const setTradingMode = useStore((s) => s.setTradingMode);
   const liveTrading = isLiveTradingMode({ simulate247, liveDuringMarketHours });
 
   const handleToggle = async (checked: boolean) => {
@@ -26,6 +27,7 @@ export function TradingModeSection() {
       return;
     }
     const previous = currentMode.simulate247;
+    const previousLiveMode = isLiveTradingMode(currentMode);
     const nextLiveMode = isCandidateLiveTradingMode(currentMode, payload);
     setSimulate247(checked);
     try {
@@ -33,6 +35,7 @@ export function TradingModeSection() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      setTradingMode(nextLiveMode ? 'live' : 'paper');
       if (nextLiveMode) {
         toast.success('Live Trading mode enabled. Real market hours, orders routed to brokers.');
       } else {
@@ -40,6 +43,7 @@ export function TradingModeSection() {
       }
     } catch (error: any) {
       setSimulate247(previous);
+      setTradingMode(previousLiveMode ? 'live' : 'paper');
       toast.error(error.message || 'Failed to save mode');
     }
   };
