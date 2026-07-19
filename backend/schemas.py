@@ -83,6 +83,7 @@ class TickerConfig(BaseModel):
     price_tick_size: float = Field(0, ge=0, le=1000, description="Explicit price tick; 0 infers from price")
     passive_reentry_seconds: int = Field(0, ge=0, le=86400)
     passive_order_ttl_seconds: int = Field(300, ge=0, le=86400)
+    passive_max_hold_seconds: int = Field(0, ge=0, le=2592000)
     passive_cancel_on_partial: bool = True
     passive_fractional_shares: bool = False
     passive_paper_min_touches: int = Field(2, ge=1, le=100)
@@ -170,6 +171,7 @@ class TickerUpdate(BaseModel):
     price_tick_size: Optional[float] = None
     passive_reentry_seconds: Optional[int] = None
     passive_order_ttl_seconds: Optional[int] = None
+    passive_max_hold_seconds: Optional[int] = None
     passive_cancel_on_partial: Optional[bool] = None
     passive_fractional_shares: Optional[bool] = None
     passive_paper_min_touches: Optional[int] = None
