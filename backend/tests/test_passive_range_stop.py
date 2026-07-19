@@ -23,8 +23,11 @@ class FakeCollection:
 
 
 class FakePriceService:
+    def __init__(self, price):
+        self.price = price
+
     async def get_price(self, symbol):
-        return 0.90
+        return self.price
 
 
 class FakeEngine:
@@ -48,20 +51,29 @@ class FakeEngine:
         self.profits.append((symbol, pnl, compound))
 
 
-def test_passive_range_stop_closes_position_and_cycle(monkeypatch):
-    state = {
+def _working_sell_state():
+    return {
         "symbol": "QSI",
         "phase": "SELL_WORKING",
         "cycle_id": "cycle-1",
-        "cycle_started_at": "2026-07-18T14:00:00+00:00",
-        "buy_filled_at": "2026-07-18T14:01:00+00:00",
+        "cycle_started_at": "2000-01-01T14:00:00+00:00",
+        "buy_filled_at": "2000-01-01T14:01:00+00:00",
         "buy_target": 0.955,
         "sell_target": 0.966,
         "position_qty": 523,
         "entry_price": 0.955,
-        "sell_order": {"broker_order_id": "paper-sell"},
+        "sell_order": {
+            "broker_order_id": "paper-sell",
+            "side": "SELL",
+            "limit_price": 0.966,
+            "requested_quantity": 523,
+            "submitted_at": "2000-01-01T14:01:00+00:00",
+        },
     }
-    state_collection = FakeCollection(state)
+
+
+def _install_fakes(monkeypatch, *, price):
+    state_collection = FakeCollection(_working_sell_state())
     cycle_collection = FakeCollection()
     monkeypatch.setattr(
         deps,
@@ -71,9 +83,13 @@ def test_passive_range_stop_closes_position_and_cycle(monkeypatch):
             passive_range_cycles=cycle_collection,
         ),
     )
-    monkeypatch.setattr(deps, "price_service", FakePriceService())
+    monkeypatch.setattr(deps, "price_service", FakePriceService(price))
     monkeypatch.setattr(deps, "broker_mgr", None)
+    return state_collection, cycle_collection
 
+
+def test_passive_range_stop_closes_position_and_cycle(monkeypatch):
+    state_collection, cycle_collection = _install_fakes(monkeypatch, price=0.90)
     engine = FakeEngine()
     ticker = {
         "symbol": "QSI",
@@ -94,3 +110,29 @@ def test_passive_range_stop_closes_position_and_cycle(monkeypatch):
     assert engine._positions["QSI"]["qty"] == 0
     assert state_collection.document["phase"] == "COOLDOWN"
     assert cycle_collection.inserted[0]["exit_reason"] == "stop"
+
+
+def test_passive_range_max_hold_releases_stuck_capital(monkeypatch):
+    state_collection, cycle_collection = _install_fakes(monkeypatch, price=0.95)
+    engine = FakeEngine()
+    ticker = {
+        "symbol": "QSI",
+        "enabled": True,
+        "broker_ids": [],
+        "broker_allocations": {},
+        "base_power": 500,
+        "stop_percent": False,
+        "stop_offset": 0.92,
+        "price_tick_size": 0.0001,
+        "compound_profits": True,
+        "passive_max_hold_seconds": 60,
+    }
+
+    asyncio.run(_evaluate_passive_range_with_stop(engine, ticker))
+
+    assert engine.trades[0].side == "SELL"
+    assert "Maximum hold reached" in engine.trades[0].reason
+    assert engine.trades[0].price == 0.95
+    assert engine._positions["QSI"]["qty"] == 0
+    assert state_collection.document["phase"] == "COOLDOWN"
+    assert cycle_collection.inserted[0]["exit_reason"] == "max_hold"
