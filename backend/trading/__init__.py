@@ -39,5 +39,6 @@ from trading import live_cycle_accounting_composition_patch as _live_cycle_accou
 # reconciliation use one authoritative execution path.
 from trading import risk_safety_patch as _risk_safety_patch  # noqa: F401,E402
 from trading import broker_position_safety_patch as _broker_position_safety_patch  # noqa: F401,E402
+from trading import broker_position_truth_patch as _broker_position_truth_patch  # noqa: F401,E402
 from trading import execution_order_safety_patch as _execution_order_safety_patch  # noqa: F401,E402
 from trading import partial_publication_safety_patch as _partial_publication_safety_patch  # noqa: F401,E402
