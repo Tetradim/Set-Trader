@@ -33,3 +33,8 @@ from trading import live_terminal_fill_patch as _live_terminal_fill_patch  # noq
 from trading import live_execution_orchestrator_patch as _live_execution_orchestrator_patch  # noqa: F401,E402
 from trading import live_cycle_capital_patch as _live_cycle_capital_patch  # noqa: F401,E402
 from trading import live_cycle_accounting_composition_patch as _live_cycle_accounting_composition_patch  # noqa: F401,E402
+
+# Passive range scalping is opt-in per ticker. Adapter capabilities load first so
+# the evaluator can require real order-status and bid/ask evidence in live mode.
+from trading import passive_broker_adapter_patch as _passive_broker_adapter_patch  # noqa: F401,E402
+from trading import passive_range_patch as _passive_range_patch  # noqa: F401,E402
