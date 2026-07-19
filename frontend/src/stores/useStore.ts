@@ -54,6 +54,14 @@ export interface TickerConfig {
   market: string;
   // Pluggable strategy params (stored per-ticker for signal strategies)
   strategy_config: Record<string, number | boolean | string>;
+  // Passive range scalping
+  passive_range_enabled: boolean;
+  price_tick_size: number;
+  passive_reentry_seconds: number;
+  passive_order_ttl_seconds: number;
+  passive_cancel_on_partial: boolean;
+  passive_fractional_shares: boolean;
+  passive_paper_min_touches: number;
 }
 
 /* Strategy metadata + JSON schema from /api/strategies/registry */
