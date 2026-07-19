@@ -24,13 +24,13 @@ class TickerConfig(BaseModel):
     symbol: str = Field(..., description="Ticker symbol")
     base_power: float = Field(100.0, ge=0, le=100000, description="Base power (max position size)")
     avg_days: int = Field(30, ge=1, le=365, description="Average days for calculation")
-    buy_offset: float = Field(-3.0, ge=-50, le=0, description="Buy offset percentage")
+    buy_offset: float = Field(-3.0, ge=-50, le=99999, description="Buy percentage offset or absolute price")
     buy_percent: bool = True
     buy_order_type: str = "limit"
-    sell_offset: float = Field(3.0, ge=0, le=50, description="Sell offset percentage")
+    sell_offset: float = Field(3.0, ge=0, le=99999, description="Sell percentage offset or absolute price")
     sell_percent: bool = True
     sell_order_type: str = "limit"
-    stop_offset: float = Field(-6.0, ge=-50, le=0, description="Stop loss offset percentage")
+    stop_offset: float = Field(-6.0, ge=-50, le=99999, description="Stop percentage offset or absolute price")
     stop_percent: bool = True
     stop_order_type: str = "limit"
     trailing_enabled: bool = False
@@ -50,7 +50,7 @@ class TickerConfig(BaseModel):
     rebracket_lookback: int = Field(10, ge=2, le=100, description="Recent price sample count for rebracket anchoring")
     rebracket_buffer: float = Field(0.10, ge=0, le=99999, description="Absolute price buffer below the recent anchor")
     rebracket_min_drift: float = Field(0.50, ge=0, le=99999, description="Minimum absolute price movement to trigger rebracket")
-    
+
     @field_validator('symbol')
     @classmethod
     def validate_symbol_field(cls, v: str) -> str:
@@ -77,6 +77,14 @@ class TickerConfig(BaseModel):
     market: str = "US"
     # Pluggable strategy system
     strategy_config: Dict[str, Any] = {}   # per-ticker params for signal strategies
+    # Passive range scalping (resting limit buy -> confirmed fill -> resting limit sell)
+    passive_range_enabled: bool = False
+    price_tick_size: float = Field(0, ge=0, le=1000, description="Explicit price tick; 0 infers from price")
+    passive_reentry_seconds: int = Field(0, ge=0, le=86400)
+    passive_order_ttl_seconds: int = Field(300, ge=0, le=86400)
+    passive_cancel_on_partial: bool = True
+    passive_fractional_shares: bool = False
+    passive_paper_min_touches: int = Field(2, ge=1, le=100)
 
 
 class TickerCreate(BaseModel):
@@ -129,6 +137,13 @@ class TickerUpdate(BaseModel):
     opening_bell_trail_is_percent: Optional[bool] = None
     market: Optional[str] = None
     strategy_config: Optional[Dict[str, Any]] = None
+    passive_range_enabled: Optional[bool] = None
+    price_tick_size: Optional[float] = None
+    passive_reentry_seconds: Optional[int] = None
+    passive_order_ttl_seconds: Optional[int] = None
+    passive_cancel_on_partial: Optional[bool] = None
+    passive_fractional_shares: Optional[bool] = None
+    passive_paper_min_touches: Optional[int] = None
 
 
 class TradeRecord(BaseModel):
