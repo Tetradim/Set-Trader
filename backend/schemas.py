@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 import re
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 
 def validate_symbol(symbol: str) -> str:
@@ -55,6 +55,7 @@ class TickerConfig(BaseModel):
     @classmethod
     def validate_symbol_field(cls, v: str) -> str:
         return validate_symbol(v)
+
     enabled: bool = True
     strategy: str = "custom"
     broker_id: str = ""
@@ -85,6 +86,38 @@ class TickerConfig(BaseModel):
     passive_cancel_on_partial: bool = True
     passive_fractional_shares: bool = False
     passive_paper_min_touches: int = Field(2, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_price_modes(self):
+        if self.buy_percent:
+            if not -50 <= self.buy_offset <= 0:
+                raise ValueError("buy_offset must be between -50 and 0 when buy_percent is enabled")
+        elif self.buy_offset <= 0:
+            raise ValueError("buy_offset must be a positive absolute price when buy_percent is disabled")
+
+        if self.sell_percent:
+            if not 0 <= self.sell_offset <= 50:
+                raise ValueError("sell_offset must be between 0 and 50 when sell_percent is enabled")
+        elif self.sell_offset <= 0:
+            raise ValueError("sell_offset must be a positive absolute price when sell_percent is disabled")
+
+        if self.stop_percent:
+            if not -50 <= self.stop_offset <= 0:
+                raise ValueError("stop_offset must be between -50 and 0 when stop_percent is enabled")
+        elif self.stop_offset <= 0:
+            raise ValueError("stop_offset must be a positive absolute price when stop_percent is disabled")
+
+        if self.passive_range_enabled:
+            if str(self.buy_order_type or "").lower() != "limit":
+                raise ValueError("passive range mode requires a limit buy order type")
+            if str(self.sell_order_type or "").lower() != "limit":
+                raise ValueError("passive range mode requires a limit sell order type")
+            if not self.buy_percent and not self.sell_percent and self.buy_offset >= self.sell_offset:
+                raise ValueError("passive range absolute buy price must be below the sell price")
+            if not self.buy_percent and not self.stop_percent and self.stop_offset >= self.buy_offset:
+                raise ValueError("passive range absolute stop price must be below the buy price")
+
+        return self
 
 
 class TickerCreate(BaseModel):
