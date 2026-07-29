@@ -33,3 +33,14 @@ from trading import live_terminal_fill_patch as _live_terminal_fill_patch  # noq
 from trading import live_execution_orchestrator_patch as _live_execution_orchestrator_patch  # noqa: F401,E402
 from trading import live_cycle_capital_patch as _live_cycle_capital_patch  # noqa: F401,E402
 from trading import live_cycle_accounting_composition_patch as _live_cycle_accounting_composition_patch  # noqa: F401,E402
+
+# Cross-feature safety composition must remain last. These guards preserve the
+# public engine API while making partial fills, risk state, and multi-broker
+# reconciliation use one authoritative execution path.
+from trading import risk_safety_patch as _risk_safety_patch  # noqa: F401,E402
+from trading import broker_position_safety_patch as _broker_position_safety_patch  # noqa: F401,E402
+from trading import broker_position_truth_patch as _broker_position_truth_patch  # noqa: F401,E402
+from trading import execution_order_safety_patch as _execution_order_safety_patch  # noqa: F401,E402
+from trading import partial_publication_safety_patch as _partial_publication_safety_patch  # noqa: F401,E402
+from trading import execution_safety_compatibility_patch as _execution_safety_compatibility_patch  # noqa: F401,E402
+from trading import state_safety_compatibility_patch as _state_safety_compatibility_patch  # noqa: F401,E402
