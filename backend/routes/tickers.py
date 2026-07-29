@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import ValidationError
 
 import deps
 from schemas import TickerConfig, TickerCreate, TickerUpdate
@@ -9,6 +10,13 @@ from strategies import PRESET_STRATEGIES
 from routes.runtime_state import reset_trailing_state_if_needed
 
 router = APIRouter()
+
+
+def _number(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 async def _broadcast_account_update():
@@ -28,6 +36,48 @@ async def _broadcast_account_update():
 async def get_tickers():
     docs = await deps.db.tickers.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
     return docs
+
+
+@router.get("/tickers/{symbol}/passive-cycles")
+async def get_passive_cycles(
+    symbol: str,
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Return recent passive cycles and a compact realized-performance summary."""
+    sym = symbol.upper()
+    cycles = await (
+        deps.db.passive_range_cycles.find({"symbol": sym}, {"_id": 0})
+        .sort("completed_at", -1)
+        .to_list(limit)
+    )
+    pnls = [_number(cycle.get("gross_pnl")) for cycle in cycles]
+    durations = [_number(cycle.get("duration_seconds")) for cycle in cycles]
+    returns = [_number(cycle.get("return_pct")) for cycle in cycles]
+    wins = sum(1 for pnl in pnls if pnl > 0)
+    losses = sum(1 for pnl in pnls if pnl < 0)
+    total = len(cycles)
+    summary = {
+        "completed_cycles": total,
+        "target_exits": sum(1 for cycle in cycles if cycle.get("exit_reason") == "sell_target"),
+        "stop_exits": sum(1 for cycle in cycles if cycle.get("exit_reason") == "stop"),
+        "max_hold_exits": sum(1 for cycle in cycles if cycle.get("exit_reason") == "max_hold"),
+        "winning_cycles": wins,
+        "losing_cycles": losses,
+        "win_rate_pct": round((wins / total) * 100, 2) if total else 0.0,
+        "gross_pnl": round(sum(pnls), 4),
+        "average_cycle_pnl": round(sum(pnls) / total, 4) if total else 0.0,
+        "average_duration_seconds": round(sum(durations) / total, 2) if total else 0.0,
+        "average_return_pct": round(sum(returns) / total, 6) if total else 0.0,
+        "worst_adverse_excursion": round(
+            min((_number(cycle.get("max_adverse_excursion")) for cycle in cycles), default=0.0),
+            4,
+        ),
+        "best_favorable_excursion": round(
+            max((_number(cycle.get("max_favorable_excursion")) for cycle in cycles), default=0.0),
+            4,
+        ),
+    }
+    return {"symbol": sym, "summary": summary, "cycles": cycles}
 
 
 @router.post("/tickers")
@@ -55,6 +105,22 @@ async def update_ticker(symbol: str, body: TickerUpdate):
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(400, "No updates provided")
+
+    current_doc = await deps.db.tickers.find_one({"symbol": sym})
+    if not current_doc:
+        raise HTTPException(404, f"{sym} not found")
+
+    candidate = {key: value for key, value in current_doc.items() if key != "_id"}
+    candidate.update(updates)
+    try:
+        validated = TickerConfig(**candidate).model_dump()
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    # Persist only explicitly requested fields, using their validated/normalized
+    # values. Existing extra documents such as custom strategy backups remain
+    # untouched.
+    updates = {key: validated[key] for key in updates}
     result = await deps.db.tickers.update_one({"symbol": sym}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(404, f"{sym} not found")
