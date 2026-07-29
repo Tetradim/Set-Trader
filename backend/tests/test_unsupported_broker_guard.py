@@ -13,6 +13,7 @@ if str(BACKEND) not in sys.path:
 
 import broker_manager as broker_manager_module  # noqa: E402
 import brokers.registry as broker_registry  # noqa: E402
+import trading  # noqa: F401,E402
 from broker_manager import BrokerConnectionManager  # noqa: E402
 from brokers import BROKER_REGISTRY, get_broker_adapter  # noqa: E402
 from brokers.base import BrokerInfo  # noqa: E402
@@ -108,7 +109,7 @@ def test_legacy_schwab_aliases_are_unavailable_until_live_certified():
         assert get_broker_adapter(broker_id, {}) is None
 
 
-def test_experimental_brokers_are_disabled_without_operator_opt_in(monkeypatch):
+def test_uncertified_brokers_are_disabled_without_operator_opt_in(monkeypatch):
     monkeypatch.delenv("SENTINEL_PULSE_ENABLE_EXPERIMENTAL_BROKERS", raising=False)
     broker_connection_enabled = getattr(broker_registry, "broker_connection_enabled", None)
 
@@ -117,13 +118,14 @@ def test_experimental_brokers_are_disabled_without_operator_opt_in(monkeypatch):
     for broker_id in ("robinhood", "webull", "wealthsimple"):
         info = BROKER_REGISTRY[broker_id]
 
-        assert info.supported is True
-        assert info.readiness == "experimental"
+        assert info.supported is False
+        assert info.readiness == "unavailable"
+        assert "cumulative order status" in info.readiness_note
         assert broker_connection_enabled(info) is False
         assert get_broker_adapter(broker_id, {}) is None
 
 
-def test_experimental_brokers_require_explicit_truthy_operator_opt_in(monkeypatch):
+def test_uncertified_brokers_stay_disabled_with_operator_opt_in(monkeypatch):
     monkeypatch.setenv("SENTINEL_PULSE_ENABLE_EXPERIMENTAL_BROKERS", "true")
     broker_connection_enabled = getattr(broker_registry, "broker_connection_enabled", None)
 
@@ -132,4 +134,6 @@ def test_experimental_brokers_require_explicit_truthy_operator_opt_in(monkeypatc
     for broker_id in ("robinhood", "webull", "wealthsimple"):
         info = BROKER_REGISTRY[broker_id]
 
-        assert broker_connection_enabled(info) is True
+        assert info.supported is False
+        assert info.readiness == "unavailable"
+        assert broker_connection_enabled(info) is False

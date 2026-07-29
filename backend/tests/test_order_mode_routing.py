@@ -46,9 +46,12 @@ class _Tickers:
 class _Settings:
     def __init__(self):
         self.updated = None
+        self.updates = []
 
     async def update_one(self, query, update, upsert=False):
-        self.updated = {"query": query, "update": update, "upsert": upsert}
+        entry = {"query": query, "update": update, "upsert": upsert}
+        self.updated = entry
+        self.updates.append(entry)
 
     async def find_one(self, *_args, **_kwargs):
         return None
@@ -142,6 +145,7 @@ def _engine(monkeypatch, ticker_doc=None, broker_results=None, broker_adapter=No
     monkeypatch.setattr(deps, "logger", _Logger())
 
     engine = TradingEngine()
+    monkeypatch.setattr(deps, "engine", engine)
     engine.simulate_24_7 = False
     engine.live_during_market_hours = False
     engine.REENTRY_COOLDOWN_SECS = 0
@@ -609,5 +613,10 @@ def test_sync_positions_from_broker_replaces_stale_internal_positions(monkeypatc
     assert engine._positions["NVDA"]["qty"] == 3.5175
     assert "MSFT" not in engine._trailing_highs
     assert "MSFT" in engine._last_exit_ts
-    saved_positions = engine._test_db.settings.updated["update"]["$set"]["value"]["positions"]
+    state_updates = [
+        update
+        for update in engine._test_db.settings.updates
+        if update["query"] == {"key": "engine_state"}
+    ]
+    saved_positions = state_updates[-1]["update"]["$set"]["value"]["positions"]
     assert set(saved_positions) == {"AMD", "NVDA"}

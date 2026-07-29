@@ -6,8 +6,8 @@ import http from 'node:http';
 import path from 'node:path';
 
 const root = process.cwd();
-const frontendPort = 3001;
-const backendPort = 8765;
+const frontendPort = Number(process.env.SENTINEL_VERIFY_FRONTEND_PORT || 39101);
+const backendPort = Number(process.env.SENTINEL_VERIFY_BACKEND_PORT || 39765);
 const artifactDir = path.join(root, 'test-artifacts');
 const screenshotPath = path.join(artifactDir, 'sentinel-ui.png');
 const failureScreenshotPath = path.join(artifactDir, 'sentinel-ui-failure.png');
@@ -86,6 +86,31 @@ const server = http.createServer((request, response) => {
 
   const url = request.url ?? '';
   response.setHeader('Content-Type', 'application/json');
+
+  if (url.startsWith('/api/auth/me')) {
+    response.end(JSON.stringify({ username: 'verify-ui' }));
+    return;
+  }
+
+  if (url.startsWith('/api/auth/bootstrap-status')) {
+    response.end(JSON.stringify({ needs_bootstrap: false }));
+    return;
+  }
+
+  if (url.startsWith('/api/auth/login') || url.startsWith('/api/auth/bootstrap')) {
+    response.end(JSON.stringify({ access_token: 'verify-ui-token', username: 'verify-ui' }));
+    return;
+  }
+
+  if (url.startsWith('/api/auth/users')) {
+    response.end(JSON.stringify([{ id: 'verify-ui', username: 'verify-ui', role: 'owner', enabled: true }]));
+    return;
+  }
+
+  if (url.startsWith('/api/auth/api-keys')) {
+    response.end(JSON.stringify([{ id: 'paper-key', name: 'Paper Key', prefix: 'sp_test', created_at: new Date().toISOString() }]));
+    return;
+  }
 
   if (url.startsWith('/api/fx-rates')) {
     response.end(JSON.stringify({ rates: { USD: 1 } }));
