@@ -399,7 +399,7 @@ async def _arm_buy(
             "touch_count": 0,
         }
     )
-    await _persist_state(state)
+    await _persist_state(self, state)
 
 
 async def _arm_sell(
@@ -434,7 +434,7 @@ async def _arm_sell(
             "touch_count": 0,
         }
     )
-    await _persist_state(state)
+    await _persist_state(self, state)
 
 
 async def _paper_fill_if_touched(
@@ -557,7 +557,7 @@ async def _handle_buy_fill(
             side="sell",
         )
     )
-    await _persist_state(state)
+    await _persist_state(self, state)
     await _arm_sell(self, ticker_doc=ticker_doc, state=state, sell_target=sell_target)
 
 
@@ -613,7 +613,7 @@ async def _handle_sell_fill(
 
     if remaining > 0:
         state["phase"] = "LONG"
-        await _persist_state(state)
+        await _persist_state(self, state)
         await _arm_sell(
             self,
             ticker_doc=ticker_doc,
@@ -641,7 +641,7 @@ async def _handle_sell_fill(
         }
     )
     self._last_exit_ts[symbol] = _now()
-    await _persist_state(state)
+    await _persist_state(self, state)
 
 
 async def _expire_working_buy(
@@ -659,7 +659,7 @@ async def _expire_working_buy(
         if not broker_id or not await _cancel_live_order(self, broker_id, order):
             return False
     state.update({"phase": "IDLE", "buy_order": None, "touch_count": 0})
-    await _persist_state(state)
+    await _persist_state(self, state)
     return True
 
 
@@ -744,13 +744,13 @@ async def _evaluate_passive_range(self, ticker_doc: dict) -> None:
             self, ticker_doc=ticker_doc, state=state, order=order, quote=quote
         )
         if not result:
-            await _persist_state(state)
+            await _persist_state(self, state)
             return
         status = _status(result.get("status"))
         state["buy_order"] = {**order, **result}
         if status in _FAILED and _number(result.get("filled_quantity")) <= 0:
             state.update({"phase": "IDLE", "buy_order": None, "touch_count": 0})
-            await _persist_state(state)
+            await _persist_state(self, state)
             return
         await _handle_buy_fill(
             self,
@@ -759,7 +759,7 @@ async def _evaluate_passive_range(self, ticker_doc: dict) -> None:
             result={**order, **result},
             tick_size=tick_float,
         )
-        await _persist_state(state)
+        await _persist_state(self, state)
         return
 
     if phase == "LONG":
@@ -781,13 +781,13 @@ async def _evaluate_passive_range(self, ticker_doc: dict) -> None:
             self, ticker_doc=ticker_doc, state=state, order=order, quote=quote
         )
         if not result:
-            await _persist_state(state)
+            await _persist_state(self, state)
             return
         status = _status(result.get("status"))
         state["sell_order"] = {**order, **result}
         if status in _FAILED and _number(result.get("filled_quantity")) <= 0:
             state.update({"phase": "LONG", "sell_order": None, "touch_count": 0})
-            await _persist_state(state)
+            await _persist_state(self, state)
             return
         await _handle_sell_fill(
             self,
@@ -795,7 +795,7 @@ async def _evaluate_passive_range(self, ticker_doc: dict) -> None:
             state=state,
             result={**order, **result},
         )
-        await _persist_state(state)
+        await _persist_state(self, state)
 
 
 async def _patched_evaluate_ticker(self, ticker_doc: dict):

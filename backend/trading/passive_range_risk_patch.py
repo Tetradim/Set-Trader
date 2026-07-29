@@ -90,7 +90,7 @@ async def _forced_exit(
         except LiveOrderExecutionError as exc:
             deps.logger.error("Passive %s execution failed for %s: %s", exit_reason, symbol, exc)
             state.update({"phase": "LONG", "sell_order": None})
-            await passive._persist_state(state)
+            await passive._persist_state(self, state)
             return False
         if not results:
             return False
@@ -145,7 +145,7 @@ async def _forced_exit(
     )
     if remaining > 0:
         state["phase"] = "LONG"
-        await passive._persist_state(state)
+        await passive._persist_state(self, state)
         return True
 
     await passive._complete_cycle(
@@ -159,7 +159,7 @@ async def _forced_exit(
     )
     state.update({"phase": "COOLDOWN", "entry_price": 0.0})
     self._last_exit_ts[symbol] = datetime.now(timezone.utc)
-    await passive._persist_state(state)
+    await passive._persist_state(self, state)
     return True
 
 
@@ -185,7 +185,7 @@ async def _evaluate_passive_range_with_stop(self, ticker_doc: dict) -> None:
     previous_max = _number(state.get("max_observed_price")) or entry
     state["min_observed_price"] = min(previous_min, current_price)
     state["max_observed_price"] = max(previous_max, current_price)
-    await passive._persist_state(state)
+    await passive._persist_state(self, state)
 
     tick = infer_tick_size(current_price, ticker_doc.get("price_tick_size", 0))
     stop_target = decimal_to_float(

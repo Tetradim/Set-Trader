@@ -33,7 +33,7 @@ async def _arm_buy_with_paper_risk(
         )
         if not allowed:
             state["last_risk_block_reason"] = str(reason or "pre-trade risk check failed")
-            await passive._persist_state(state)
+            await passive._persist_state(self, state)
             deps.logger.warning(
                 "Passive paper BUY blocked for %s: %s",
                 state.get("symbol") or ticker_doc.get("symbol"),

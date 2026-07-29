@@ -142,7 +142,7 @@ async def _evaluate_with_cancel_replace(self, ticker_doc: dict) -> None:
                 "replace_reason": "buy_configuration_changed",
             }
         )
-        await passive._persist_state(state)
+        await passive._persist_state(self, state)
 
     elif phase == "SELL_WORKING" and not _same_key(
         state.get("sell_config_key"), _sell_config_key(ticker_doc)
@@ -158,7 +158,7 @@ async def _evaluate_with_cancel_replace(self, ticker_doc: dict) -> None:
                 "replace_reason": "sell_configuration_changed",
             }
         )
-        await passive._persist_state(state)
+        await passive._persist_state(self, state)
 
     await _ORIGINAL_EVALUATE(self, ticker_doc)
 
