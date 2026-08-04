@@ -109,7 +109,7 @@ def _order_result(broker_id: str, value: Any) -> dict:
 
 
 def _is_paper(self, ticker_doc: dict) -> bool:
-    return self.is_paper_trading() or not (ticker_doc.get("broker_ids") or [])
+    return False
 
 
 async def _load_state(self, symbol: str) -> dict:
@@ -270,22 +270,6 @@ async def _submit_live_limit(
     return result
 
 
-def _paper_order(side: str, quantity: float, limit_price: float) -> dict:
-    return {
-        "broker_id": "paper",
-        "broker_order_id": f"paper:{uuid.uuid4()}",
-        "order_id": "",
-        "status": "working",
-        "filled_price": 0.0,
-        "filled_quantity": 0.0,
-        "error": "",
-        "side": side,
-        "limit_price": limit_price,
-        "requested_quantity": quantity,
-        "submitted_at": _iso_now(),
-    }
-
-
 async def _record_fill(
     self,
     *,
@@ -300,7 +284,6 @@ async def _record_fill(
     pnl: float = 0.0,
     reason: str,
 ) -> None:
-    is_paper = _is_paper(self, ticker_doc)
     trade = TradeRecord(
         symbol=symbol,
         side=side,
@@ -314,8 +297,8 @@ async def _record_fill(
         target_price=target,
         total_value=round(price * quantity, 2),
         buy_power=_number(ticker_doc.get("base_power")),
-        trading_mode="paper" if is_paper else "live",
-        broker_results=[] if is_paper else [broker_result],
+        trading_mode="live",
+        broker_results=[broker_result],
     )
     await self._record_trade(trade)
 
@@ -345,7 +328,7 @@ async def _complete_cycle(
         "completed_at": _iso_now(),
         "duration_seconds": _elapsed_seconds(state.get("cycle_started_at")),
         "exit_reason": exit_reason,
-        "trading_mode": "paper" if _is_paper(self, ticker_doc) else "live",
+        "trading_mode": "live",
     }
     try:
         await deps.db.passive_range_cycles.insert_one(cycle)
@@ -371,19 +354,16 @@ async def _arm_buy(
         deps.logger.warning("Passive range buy for %s has zero executable quantity", symbol)
         return
 
-    if _is_paper(self, ticker_doc):
-        order = _paper_order("BUY", quantity, buy_target)
-    else:
-        order = await _submit_live_limit(
-            self,
-            ticker_doc=ticker_doc,
-            symbol=symbol,
-            side="BUY",
-            quantity=quantity,
-            limit_price=buy_target,
-        )
-        if not order:
-            return
+    order = await _submit_live_limit(
+        self,
+        ticker_doc=ticker_doc,
+        symbol=symbol,
+        side="BUY",
+        quantity=quantity,
+        limit_price=buy_target,
+    )
+    if not order:
+        return
 
     state.update(
         {
@@ -413,19 +393,16 @@ async def _arm_sell(
     if quantity <= 0:
         return
     symbol = state["symbol"]
-    if _is_paper(self, ticker_doc):
-        order = _paper_order("SELL", quantity, sell_target)
-    else:
-        order = await _submit_live_limit(
-            self,
-            ticker_doc=ticker_doc,
-            symbol=symbol,
-            side="SELL",
-            quantity=quantity,
-            limit_price=sell_target,
-        )
-        if not order:
-            return
+    order = await _submit_live_limit(
+        self,
+        ticker_doc=ticker_doc,
+        symbol=symbol,
+        side="SELL",
+        quantity=quantity,
+        limit_price=sell_target,
+    )
+    if not order:
+        return
     state.update(
         {
             "phase": "SELL_WORKING",
@@ -437,42 +414,6 @@ async def _arm_sell(
     await _persist_state(self, state)
 
 
-async def _paper_fill_if_touched(
-    *,
-    ticker_doc: dict,
-    state: dict,
-    order: dict,
-    quote: dict,
-) -> Optional[dict]:
-    side = order["side"]
-    limit_price = _number(order["limit_price"])
-    bid = _number(quote.get("bid"))
-    ask = _number(quote.get("ask"))
-    last = _number(quote.get("last"))
-    touched = (ask > 0 and ask <= limit_price) if side == "BUY" else (bid > 0 and bid >= limit_price)
-    if bid <= 0 or ask <= 0:
-        touched = last <= limit_price if side == "BUY" else last >= limit_price
-
-    if not touched:
-        state["touch_count"] = 0
-        return None
-
-    state["touch_count"] = int(state.get("touch_count", 0)) + 1
-    min_touches = max(1, int(ticker_doc.get("passive_paper_min_touches", 2) or 2))
-    if state["touch_count"] < min_touches:
-        return None
-
-    result = dict(order)
-    result.update(
-        {
-            "status": "filled",
-            "filled_price": limit_price,
-            "filled_quantity": _number(order.get("requested_quantity")),
-        }
-    )
-    return result
-
-
 async def _current_order_result(
     self,
     *,
@@ -481,10 +422,6 @@ async def _current_order_result(
     order: dict,
     quote: dict,
 ) -> Optional[dict]:
-    if _is_paper(self, ticker_doc):
-        return await _paper_fill_if_touched(
-            ticker_doc=ticker_doc, state=state, order=order, quote=quote
-        )
     broker_id, _ = _active_broker(ticker_doc)
     return await _poll_live_order(self, broker_id, order) if broker_id else None
 
@@ -495,8 +432,6 @@ async def _maybe_cancel_partial(
     ticker_doc: dict,
     result: dict,
 ) -> bool:
-    if _is_paper(self, ticker_doc):
-        return True
     if not ticker_doc.get("passive_cancel_on_partial", True):
         return False
     broker_id, _ = _active_broker(ticker_doc)

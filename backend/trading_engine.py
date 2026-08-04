@@ -40,8 +40,9 @@ class TradingEngine(
         self.paused = False
         self.simulate_24_7 = False
         self.market_hours_only = True
-        # Auto mode switching
-        self.live_during_market_hours = False
+        # Runtime execution is broker-routed only. Alpaca paper is a broker
+        # endpoint, not a Pulse-local paper engine.
+        self.live_during_market_hours = True
         self.paper_after_hours = False
         self._last_mode_check: datetime = None
         self._last_market_state: bool = None  # Track market open/close transitions
@@ -70,7 +71,7 @@ class TradingEngine(
         self._order_id_timestamps: Dict[str, datetime] = {}  # order_id -> timestamp
         
         # Safety flags
-        self._dry_run_mode: bool = False  # If True, no real orders placed
+        self._dry_run_mode: bool = False
         
         # Error tracking for backpressure
         self._ticker_errors: Dict[str, int] = {}  # symbol -> error count
@@ -259,9 +260,10 @@ class TradingEngine(
         return self._dry_run_mode
     
     def set_dry_run(self, enabled: bool):
-        """Enable or disable dry-run mode."""
-        self._dry_run_mode = enabled
-        deps.logger.warning(f"Dry-run mode {'ENABLED' if enabled else 'DISABLED'}")
+        """Dry-run execution has been removed; runtime trades must route to brokers."""
+        self._dry_run_mode = False
+        if enabled:
+            raise ValueError("Dry-run mode has been removed; broker-routed execution is required")
     
     def is_live_trading(self) -> bool:
         """Check if actually trading live (not paper)."""

@@ -123,7 +123,7 @@ async def _forced_exit(
         total_value=round(exit_price * sold, 2),
         buy_power=_number(ticker_doc.get("base_power")),
         stop_target=target_price if exit_reason == "stop" else 0.0,
-        trading_mode="paper" if is_paper else "live",
+        trading_mode="live",
         broker_results=[] if is_paper else [broker_result],
     )
     await self._record_trade(trade)

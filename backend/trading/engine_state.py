@@ -98,11 +98,11 @@ class EngineStateMixin:
             v = doc["value"]
             self.running = v.get("running", False)
             self.paused = v.get("paused", False)
-            self.simulate_24_7 = v.get("simulate_24_7", False)
+            self.simulate_24_7 = False
             self.market_hours_only = v.get("market_hours_only", True)
-            self.live_during_market_hours = v.get("live_during_market_hours", False)
-            self.paper_after_hours = v.get("paper_after_hours", False)
-            self._dry_run_mode = bool(v.get("dry_run_mode", False))
+            self.live_during_market_hours = True
+            self.paper_after_hours = False
+            self._dry_run_mode = False
             self._positions = v.get("positions", {}) or {}
             self._prices = v.get("prices", {}) or {}
             self._trailing_highs = v.get("trailing_highs", {}) or {}
@@ -297,32 +297,11 @@ class EngineStateMixin:
         """Check and apply auto mode switching based on market hours. 
         Only switches on market open/close TRANSITIONS, not continuously.
         Returns True if mode changed."""
-        if not self.live_during_market_hours and not self.paper_after_hours:
-            return False
-        
-        market_open = self._is_actual_market_hours()
-        
-        # Only switch on transition (market state changed)
-        if self._last_market_state is not None and market_open == self._last_market_state:
-            return False  # No transition, don't override
-        
-        self._last_market_state = market_open
-        mode_changed = False
-        
-        if market_open and self.live_during_market_hours:
-            # Market just opened and user wants live trading during market hours
-            if self.simulate_24_7:
-                self.simulate_24_7 = False
-                mode_changed = True
-                deps.logger.info("AUTO MODE: Switched to LIVE trading (market opened)")
-        elif not market_open and self.paper_after_hours:
-            # Market just closed and user wants paper trading after hours
-            if not self.simulate_24_7:
-                self.simulate_24_7 = True
-                mode_changed = True
-                deps.logger.info("AUTO MODE: Switched to PAPER trading (market closed)")
-        
-        return mode_changed
+        self.simulate_24_7 = False
+        self.paper_after_hours = False
+        self.live_during_market_hours = True
+        self._dry_run_mode = False
+        return False
 
     def _is_actual_market_hours(self) -> bool:
         """Check if we're in actual US market hours (ignoring simulate_24_7). DST-aware."""
@@ -343,20 +322,8 @@ class EngineStateMixin:
         return MARKETS.get(market_code, MARKETS["US"])
 
     def _is_ticker_market_open(self, ticker_doc: dict) -> bool:
-        """Check if the market for this specific ticker is currently open.
-
-        simulate_24_7 bypasses the "market closed" gate (paper trading runs 24/7)
-        but still blocks structured lunch breaks for markets that have them
-        (CN_SS, CN_SZ, HK). No broker would fill an order during Shanghai/HK
-        lunch regardless of mode, so we guard against those misfires.
-        """
+        """Check if the market for this specific ticker is currently open."""
         market = self._get_market(ticker_doc)
-
-        if self.simulate_24_7:
-            # Respect lunch breaks even in simulate mode
-            if market.lunch_break and market.is_in_lunch_break():
-                return False
-            return True
 
         if not self.market_hours_only:
             return True
@@ -364,34 +331,25 @@ class EngineStateMixin:
         return market.is_open_now()
 
     def get_trading_mode(self) -> str:
-        """Get current trading mode as string: 'paper' or 'live'."""
-        if self.is_paper_trading():
-            return "paper"
+        """Get current execution mode. Runtime trades are broker-routed only."""
         return "live"
 
     def is_paper_trading(self) -> bool:
-        """Check if we're currently in paper trading mode."""
-        return bool(getattr(self, "_dry_run_mode", False)) or self.simulate_24_7 or not self.live_during_market_hours
+        """Pulse no longer supports internal paper execution."""
+        return False
 
     async def _validate_order_mode(self, broker_ids: list, ticker_doc: dict) -> tuple[bool, str]:
         """Validate that order mode is appropriate for the configuration.
         
         Returns (is_valid, error_message).
         """
-        # No brokers = always paper
         if not broker_ids:
-            return True, ""
-        
-        # Have brokers - check mode
-        if self.is_paper_trading():
-            # Paper mode with brokers - this is valid for simulation
-            return True, ""
-        
-        # Live mode with brokers - verify brokers are connected
+            return False, "No broker accounts assigned for broker-routed execution"
+
         from deps import broker_mgr
         for bid in broker_ids:
             if bid not in broker_mgr._adapters:
-                return False, f"Broker {bid} not connected for live trading"
+                return False, f"Broker {bid} not connected for trading"
         
         return True, ""
 
@@ -404,11 +362,8 @@ class EngineStateMixin:
         broker_ids = ticker_doc.get("broker_ids", [])
         
         if not broker_ids:
+            issues.append("Ticker has no broker assignment; runtime execution is blocked")
             return issues
-            
-        # Check if we have live brokers but are in paper mode
-        if self.is_paper_trading() and broker_ids:
-            issues.append("Tickers configured with brokers but running in paper mode")
         
         # Check for broker connection issues
         for bid in broker_ids:
@@ -468,13 +423,7 @@ class EngineStateMixin:
         Args:
             market: Market code (US, HK, AU, UK, CA). If None, checks all configured markets.
         
-        In paper mode (simulate_24_7), always returns True.
         """
-        # In paper mode, always allow trading (24/7 simulation)
-        if self.simulate_24_7:
-            return True
-        
-        # In live mode, respect market_hours_only setting
         if not self.market_hours_only:
             return True
         
@@ -502,7 +451,7 @@ class EngineStateMixin:
         """Get list of currently open markets."""
         from markets import MARKETS
         
-        if self.simulate_24_7 or not self.market_hours_only:
+        if not self.market_hours_only:
             return list(MARKETS.keys())  # All markets
         
         open_markets = []

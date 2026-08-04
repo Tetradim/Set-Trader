@@ -26,11 +26,6 @@ async def sync_positions_from_broker(self, broker_id: str) -> dict:
         {},
         {"_id": 0, "symbol": 1, "broker_id": 1, "broker_ids": 1},
     ).to_list(1000)
-    allowed_symbols = {
-        str(doc.get("symbol") or "").upper()
-        for doc in ticker_docs
-        if doc.get("symbol")
-    }
     broker_managed_symbols = {
         str(doc.get("symbol") or "").upper()
         for doc in ticker_docs
@@ -41,16 +36,20 @@ async def sync_positions_from_broker(self, broker_id: str) -> dict:
         )
     }
 
+    previous = deepcopy(self._positions or {})
+    broker_managed_symbols.update(
+        symbol
+        for symbol, position in previous.items()
+        if _number((position or {}).get("qty")) > 0
+    )
+
     normalized: dict[str, dict[str, float]] = {}
-    skipped_external: list[str] = []
     for symbol, raw in (broker_positions or {}).items():
         sym = str(symbol or "").upper()
-        if allowed_symbols and sym not in allowed_symbols:
-            skipped_external.append(sym)
-            continue
         quantity = max(0.0, _number((raw or {}).get("quantity")))
         if quantity <= 0:
             continue
+        broker_managed_symbols.add(sym)
         normalized[sym] = {
             "qty": round(quantity, 8),
             "avg_entry": max(0.0, _number((raw or {}).get("avg_entry"))),
@@ -65,8 +64,9 @@ async def sync_positions_from_broker(self, broker_id: str) -> dict:
         self._broker_positions_by_broker = snapshots
     # A successful empty response is authoritative zero holdings for this broker.
     snapshots[str(broker_id)] = normalized
+    for source_positions in snapshots.values():
+        broker_managed_symbols.update(str(symbol).upper() for symbol in source_positions)
 
-    previous = deepcopy(self._positions or {})
     aggregate: dict[str, dict[str, Any]] = {}
     for source_broker, source_positions in snapshots.items():
         for symbol, raw in (source_positions or {}).items():
@@ -100,8 +100,8 @@ async def sync_positions_from_broker(self, broker_id: str) -> dict:
             if current_price > 0:
                 self._prices[symbol] = current_price
 
-    # Keep local paper/unassigned positions. Broker-managed symbols are rebuilt
-    # from all broker snapshots as one aggregate.
+    # Broker reconciliation is authoritative in live mode. Rebuild any open
+    # position from broker snapshots so stale internal-only holdings disappear.
     merged = {
         symbol: deepcopy(position)
         for symbol, position in previous.items()
@@ -178,7 +178,7 @@ async def sync_positions_from_broker(self, broker_id: str) -> dict:
         "added": added,
         "updated": updated,
         "removed": removed,
-        "skipped_external": sorted(skipped_external),
+        "skipped_external": [],
     }
 
 

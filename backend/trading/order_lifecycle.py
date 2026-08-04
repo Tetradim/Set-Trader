@@ -94,7 +94,7 @@ class OrderLifecycleMixin:
             target_price=exec_price,
             total_value=round(exec_price * qty, 2),
             buy_power=order_power,
-            trading_mode="paper" if is_paper or not broker_ids else "live",
+            trading_mode="live",
             broker_results=broker_results,
         )
         await self._record_trade(trade)
@@ -233,7 +233,7 @@ class OrderLifecycleMixin:
             entry_price=entry,
             total_value=round(price * executed_qty, 2),
             buy_power=ticker_doc.get("base_power", 0) if ticker_doc else 0,
-            trading_mode="paper" if is_paper or not broker_ids else "live",
+            trading_mode="live",
             broker_results=broker_results,
         )
         await self._record_trade(trade)
