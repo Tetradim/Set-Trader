@@ -42,13 +42,27 @@ class _Tickers:
     async def find_one(self, query, projection=None):
         return {**self.doc, "symbol": query["symbol"]}
 
+    def find(self, *_args, **_kwargs):
+        return _Cursor([self.doc])
+
+
+class _Cursor:
+    def __init__(self, docs):
+        self.docs = docs
+
+    async def to_list(self, _limit):
+        return list(self.docs)
+
 
 class _Settings:
     def __init__(self):
         self.updated = None
+        self.updates = []
 
     async def update_one(self, query, update, upsert=False):
-        self.updated = {"query": query, "update": update, "upsert": upsert}
+        entry = {"query": query, "update": update, "upsert": upsert}
+        self.updated = entry
+        self.updates.append(entry)
 
     async def find_one(self, *_args, **_kwargs):
         return None
@@ -142,6 +156,7 @@ def _engine(monkeypatch, ticker_doc=None, broker_results=None, broker_adapter=No
     monkeypatch.setattr(deps, "logger", _Logger())
 
     engine = TradingEngine()
+    monkeypatch.setattr(deps, "engine", engine)
     engine.simulate_24_7 = False
     engine.live_during_market_hours = False
     engine.REENTRY_COOLDOWN_SECS = 0
@@ -162,18 +177,17 @@ def _engine(monkeypatch, ticker_doc=None, broker_results=None, broker_adapter=No
     return engine
 
 
-def test_broker_ticker_stays_paper_when_live_during_market_hours_disabled(monkeypatch):
+def test_broker_ticker_routes_to_broker_even_when_market_hours_live_toggle_disabled(monkeypatch):
     engine = _engine(monkeypatch)
 
     result = asyncio.run(engine.execute_buy("SPY", 50.0))
 
-    assert result["trading_mode"] == "paper"
-    assert engine._test_trades[0].trading_mode == "paper"
-    assert engine._test_broker_mgr.calls == []
+    assert result["trading_mode"] == "live"
+    assert engine._test_trades[0].trading_mode == "live"
+    assert len(engine._test_broker_mgr.calls) == 1
 
 
-def test_broker_ticker_routes_to_paper_broker_when_explicitly_enabled(monkeypatch):
-    monkeypatch.setenv("SENTINEL_PULSE_ENABLE_BROKER_PAPER_EXECUTION", "true")
+def test_broker_ticker_routes_to_assigned_broker_without_paper_execution_flag(monkeypatch):
     engine = _engine(
         monkeypatch,
         ticker_doc=_ticker_doc(
@@ -185,24 +199,36 @@ def test_broker_ticker_routes_to_paper_broker_when_explicitly_enabled(monkeypatc
 
     result = asyncio.run(engine.execute_buy("SPY", 50.0))
 
-    assert result["trading_mode"] == "paper"
+    assert result["trading_mode"] == "live"
     assert result["quantity"] == 1.0
-    assert engine._test_trades[0].trading_mode == "paper"
+    assert engine._test_trades[0].trading_mode == "live"
     assert len(engine._test_broker_mgr.calls) == 1
     assert engine._test_broker_mgr.calls[0]["allocations"] == {"alpaca": 50.0}
 
 
-def test_dry_run_blocks_broker_paper_handoff_even_when_explicitly_enabled(monkeypatch):
-    monkeypatch.setenv("SENTINEL_PULSE_ENABLE_BROKER_PAPER_EXECUTION", "true")
+def test_dry_run_blocks_execution_without_creating_internal_trade(monkeypatch):
     engine = _engine(monkeypatch)
     engine.live_during_market_hours = True
-    engine.set_dry_run(True)
 
-    result = asyncio.run(engine.execute_buy("SPY", 50.0))
+    with pytest.raises(ValueError, match="Dry-run mode has been removed"):
+        engine.set_dry_run(True)
 
-    assert result["trading_mode"] == "paper"
-    assert engine._test_trades[0].trading_mode == "paper"
     assert engine._test_broker_mgr.calls == []
+    assert engine._test_trades == []
+
+
+def test_no_broker_assignment_blocks_execution_without_internal_trade(monkeypatch):
+    engine = _engine(
+        monkeypatch,
+        ticker_doc=_ticker_doc(broker_ids=[], broker_allocations={}),
+    )
+
+    with pytest.raises(RuntimeError, match="No broker accounts assigned"):
+        asyncio.run(engine.execute_buy("SPY", 50.0))
+
+    assert engine._test_broker_mgr.calls == []
+    assert engine._test_trades == []
+    assert engine._positions.get("SPY") is None
 
 
 def test_broker_ticker_routes_live_only_when_live_during_market_hours_enabled(monkeypatch):
@@ -504,13 +530,12 @@ def test_live_sell_preserves_unfilled_remainder_after_broker_partial_fill(monkey
 def test_dry_run_blocks_live_broker_handoff_even_when_live_mode_enabled(monkeypatch):
     engine = _engine(monkeypatch)
     engine.live_during_market_hours = True
-    engine.set_dry_run(True)
 
-    result = asyncio.run(engine.execute_buy("SPY", 50.0))
+    with pytest.raises(ValueError, match="Dry-run mode has been removed"):
+        engine.set_dry_run(True)
 
-    assert result["trading_mode"] == "paper"
-    assert engine._test_trades[0].trading_mode == "paper"
     assert engine._test_broker_mgr.calls == []
+    assert engine._test_trades == []
 
 
 def test_live_trailing_stop_uses_configured_limit_order_type(monkeypatch):
@@ -609,5 +634,37 @@ def test_sync_positions_from_broker_replaces_stale_internal_positions(monkeypatc
     assert engine._positions["NVDA"]["qty"] == 3.5175
     assert "MSFT" not in engine._trailing_highs
     assert "MSFT" in engine._last_exit_ts
-    saved_positions = engine._test_db.settings.updated["update"]["$set"]["value"]["positions"]
+    state_updates = [
+        update
+        for update in engine._test_db.settings.updates
+        if update["query"] == {"key": "engine_state"}
+    ]
+    saved_positions = state_updates[-1]["update"]["$set"]["value"]["positions"]
     assert set(saved_positions) == {"AMD", "NVDA"}
+
+
+def test_sync_positions_from_broker_imports_broker_positions_not_in_tickers(monkeypatch):
+    engine = _engine(
+        monkeypatch,
+        ticker_doc=_ticker_doc(symbol="SPY"),
+        broker_positions={
+            "SPY": {
+                "quantity": 0.1351,
+                "avg_entry": 739.696,
+                "current_price": 758.09,
+            },
+            "ORCL": {
+                "quantity": 0.754,
+                "avg_entry": 134.913045,
+                "current_price": 142.65,
+            },
+        },
+    )
+
+    result = asyncio.run(engine.sync_positions_from_broker("alpaca"))
+
+    assert result["synced"] == 2
+    assert result["skipped_external"] == []
+    assert set(engine._positions) == {"SPY", "ORCL"}
+    assert engine._positions["ORCL"]["qty"] == 0.754
+    assert engine._positions["ORCL"]["broker_positions"]["alpaca"]["current_price"] == 142.65

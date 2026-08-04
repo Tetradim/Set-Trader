@@ -65,18 +65,10 @@ async def get_replay_status():
 
 @router.post("/replay/sessions/{session_id}/start")
 async def start_replay_session(session_id: str, body: StartReplayRequest):
-    if not getattr(deps.engine, "simulate_24_7", False):
-        raise HTTPException(400, "Replay can only be started while Simulate 24/7 paper mode is enabled.")
-    try:
-        state = await replay_service.start_replay(
-            deps.db,
-            session_id=session_id,
-            speed=body.speed,
-            loop=body.loop,
-        )
-        return {"ok": True, "replay": state}
-    except Exception as exc:
-        raise HTTPException(400, str(exc)) from exc
+    raise HTTPException(
+        410,
+        "Pulse local replay execution has been removed; runtime trades must route to assigned brokers.",
+    )
 
 
 @router.post("/replay/stop")

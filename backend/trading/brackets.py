@@ -266,7 +266,7 @@ class BracketManagementMixin:
                         target_price=trigger,
                         total_value=round(price * qty, 2),
                         buy_power=leg_power, avg_price=avg,
-                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        trading_mode="live",
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)
@@ -306,7 +306,7 @@ class BracketManagementMixin:
                     entry_price=entry, target_price=current_stop,
                     total_value=round(price * pos["qty"], 2),
                     buy_power=effective_power,
-                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    trading_mode="live",
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
@@ -370,7 +370,7 @@ class BracketManagementMixin:
                         entry_price=entry, target_price=trigger,
                         total_value=round(price * sell_qty, 2),
                         buy_power=effective_power,
-                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        trading_mode="live",
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)
@@ -437,7 +437,7 @@ class BracketManagementMixin:
                     stop_target=stop_target,
                     trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
                     trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
-                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    trading_mode="live",
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)

@@ -4,6 +4,9 @@ Importing the trading package installs compatibility guards that make live
 state transitions depend on durable broker fill evidence and reconciliation.
 """
 
+# Risk units must be normalized before TradingEngine initializes default limits.
+from trading import risk_notional_semantics_patch as _risk_notional_semantics_patch  # noqa: F401,E402
+
 from trading import live_truth_patch as _live_truth_patch  # noqa: F401,E402
 from trading import live_order_reconciliation_patch as _live_order_reconciliation_patch  # noqa: F401,E402
 from trading import live_broker_scope_patch as _live_broker_scope_patch  # noqa: F401,E402
@@ -33,3 +36,23 @@ from trading import live_terminal_fill_patch as _live_terminal_fill_patch  # noq
 from trading import live_execution_orchestrator_patch as _live_execution_orchestrator_patch  # noqa: F401,E402
 from trading import live_cycle_capital_patch as _live_cycle_capital_patch  # noqa: F401,E402
 from trading import live_cycle_accounting_composition_patch as _live_cycle_accounting_composition_patch  # noqa: F401,E402
+
+# Passive range scalping is opt-in per ticker. Adapter capabilities load first so
+# the evaluator can require real order-status and bid/ask evidence in live mode.
+from trading import passive_broker_adapter_patch as _passive_broker_adapter_patch  # noqa: F401,E402
+from trading import passive_range_patch as _passive_range_patch  # noqa: F401,E402
+from trading import passive_range_paper_risk_patch as _passive_range_paper_risk_patch  # noqa: F401,E402
+from trading import passive_range_controls_patch as _passive_range_controls_patch  # noqa: F401,E402
+from trading import passive_range_risk_patch as _passive_range_risk_patch  # noqa: F401,E402
+from trading import passive_range_cycle_telemetry_patch as _passive_range_cycle_telemetry_patch  # noqa: F401,E402
+
+# Cross-feature safety composition must remain last. These guards preserve the
+# public engine API while making partial fills, risk state, and multi-broker
+# reconciliation use one authoritative execution path.
+from trading import risk_safety_patch as _risk_safety_patch  # noqa: F401,E402
+from trading import broker_position_safety_patch as _broker_position_safety_patch  # noqa: F401,E402
+from trading import broker_position_truth_patch as _broker_position_truth_patch  # noqa: F401,E402
+from trading import execution_order_safety_patch as _execution_order_safety_patch  # noqa: F401,E402
+from trading import partial_publication_safety_patch as _partial_publication_safety_patch  # noqa: F401,E402
+from trading import execution_safety_compatibility_patch as _execution_safety_compatibility_patch  # noqa: F401,E402
+from trading import state_safety_compatibility_patch as _state_safety_compatibility_patch  # noqa: F401,E402

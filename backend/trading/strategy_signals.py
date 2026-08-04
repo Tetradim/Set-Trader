@@ -86,7 +86,7 @@ class StrategySignalMixin:
                 target_price=price, total_value=round(price * qty, 2),
                 buy_power=effective_power, avg_price=avg,
                 sell_target=sell_target, stop_target=stop_target,
-                trading_mode="paper" if is_paper or not broker_ids else "live",
+                trading_mode="live",
                 broker_results=broker_results,
             )
             await self._record_trade(trade)
@@ -123,7 +123,7 @@ class StrategySignalMixin:
                 total_value=round(price * pos["qty"], 2),
                 buy_power=effective_power, avg_price=avg,
                 sell_target=sell_target, stop_target=stop_target,
-                trading_mode="paper" if is_paper or not broker_ids else "live",
+                trading_mode="live",
                 broker_results=broker_results,
             )
             await self._record_trade(trade)

@@ -13,6 +13,7 @@ router = APIRouter()
 
 LIVE_TRADING_CONFIRMATION = "ENABLE LIVE TRADING"
 LIVE_TRADING_OPERATOR_SECRET_ENV = "SENTINEL_PULSE_LIVE_TRADING_OPERATOR_SECRET"
+REMOVED_LOCAL_EXECUTION_ERROR = "local_paper_execution_removed"
 
 
 def _engine_is_dry_run() -> bool:
@@ -23,28 +24,15 @@ def _engine_is_dry_run() -> bool:
 
 
 def _candidate_live_mode(body: SettingsUpdate) -> bool:
-    simulate_24_7 = (
-        body.simulate_24_7
-        if body.simulate_24_7 is not None
-        else deps.engine.simulate_24_7
-    )
-    live_during_market_hours = (
-        body.live_during_market_hours
-        if body.live_during_market_hours is not None
-        else deps.engine.live_during_market_hours
-    )
-    return not _engine_is_dry_run() and not simulate_24_7 and bool(live_during_market_hours)
+    return True
 
 
 def _current_live_mode() -> bool:
-    is_live_trading = getattr(deps.engine, "is_live_trading", None)
-    if callable(is_live_trading):
-        return bool(is_live_trading())
-    return not _engine_is_dry_run() and not deps.engine.simulate_24_7 and bool(deps.engine.live_during_market_hours)
+    return True
 
 
 def _mode_label(is_live: bool) -> str:
-    return "live" if is_live else "paper"
+    return "live"
 
 
 def _requested_mode_fields(body: SettingsUpdate) -> list[str]:
@@ -97,6 +85,15 @@ async def _audit_mode_setting_attempt(
 
 @router.post("/settings")
 async def update_settings(body: SettingsUpdate):
+    if body.simulate_24_7 is True or body.paper_after_hours is True or body.live_during_market_hours is False:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": REMOVED_LOCAL_EXECUTION_ERROR,
+                "message": "Pulse local paper/demo execution is removed; runtime trades must route to assigned brokers.",
+            },
+        )
+
     mode_fields_requested = any(
         value is not None
         for value in (
@@ -158,14 +155,11 @@ async def update_settings(body: SettingsUpdate):
             )
 
     if mode_fields_requested:
-        if body.simulate_24_7 is not None:
-            deps.engine.simulate_24_7 = body.simulate_24_7
+        deps.engine.simulate_24_7 = False
         if body.market_hours_only is not None:
             deps.engine.market_hours_only = body.market_hours_only
-        if body.live_during_market_hours is not None:
-            deps.engine.live_during_market_hours = body.live_during_market_hours
-        if body.paper_after_hours is not None:
-            deps.engine.paper_after_hours = body.paper_after_hours
+        deps.engine.live_during_market_hours = True
+        deps.engine.paper_after_hours = False
         await deps.engine.save_state()
         await _audit_mode_setting_attempt(
             body,
@@ -257,10 +251,10 @@ async def get_settings():
     account_balance = balance_doc.get("value", 0) if balance_doc else 0
     cash_reserve = round(cash_doc.get("value", 0), 2) if cash_doc else 0
     return {
-        "simulate_24_7": deps.engine.simulate_24_7,
+        "simulate_24_7": False,
         "market_hours_only": deps.engine.market_hours_only,
-        "live_during_market_hours": deps.engine.live_during_market_hours,
-        "paper_after_hours": deps.engine.paper_after_hours,
+        "live_during_market_hours": True,
+        "paper_after_hours": False,
         "trading_mode": deps.engine.get_trading_mode(),
         "telegram": tg.get("value", {}) if tg else {"bot_token": "", "chat_ids": []},
         "telegram_connected": deps.telegram_service.running,

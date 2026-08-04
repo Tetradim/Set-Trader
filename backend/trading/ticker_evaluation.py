@@ -137,7 +137,7 @@ class TickerEvaluationMixin:
                         total_value=round(exec_price * qty, 2),
                         buy_power=effective_power, avg_price=avg,
                         sell_target=sell_target, stop_target=stop_target,
-                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        trading_mode="live",
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)
@@ -214,7 +214,7 @@ class TickerEvaluationMixin:
                             sell_target=sell_target, stop_target=stop_target,
                             trail_high=ob_high, trail_trigger=ob_trail_stop, trail_value=ob_trail_val,
                             trail_mode="PERCENT" if ob_trail_is_pct else "DOLLAR",
-                            trading_mode="paper" if is_paper or not broker_ids else "live",
+                            trading_mode="live",
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
@@ -297,7 +297,7 @@ class TickerEvaluationMixin:
                             sell_target=sell_target, stop_target=stop_target,
                             trail_high=high, trail_trigger=trail_stop, trail_value=trail_pct,
                             trail_mode="PERCENT" if trail_is_pct else "DOLLAR",
-                            trading_mode="paper" if is_paper or not broker_ids else "live",
+                            trading_mode="live",
                             broker_results=broker_results,
                         )
                         await self._record_trade(trade)
@@ -337,7 +337,7 @@ class TickerEvaluationMixin:
                     total_value=round(exec_price * pos["qty"], 2),
                     buy_power=effective_power, avg_price=avg,
                     sell_target=sell_target, stop_target=stop_target,
-                    trading_mode="paper" if is_paper or not broker_ids else "live",
+                    trading_mode="live",
                     broker_results=broker_results,
                 )
                 await self._record_trade(trade)
@@ -386,7 +386,7 @@ class TickerEvaluationMixin:
                         total_value=round(exec_price * pos["qty"], 2),
                         buy_power=effective_power, avg_price=avg,
                         sell_target=sell_target, stop_target=stop_target,
-                        trading_mode="paper" if is_paper or not broker_ids else "live",
+                        trading_mode="live",
                         broker_results=broker_results,
                     )
                     await self._record_trade(trade)

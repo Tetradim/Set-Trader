@@ -106,6 +106,15 @@ def test_record_trade_updates_portfolio_exposure_after_successful_buy(monkeypatc
         quantity=2.0,
         total_value=100.0,
         trading_mode="live",
+        broker_results=[
+            {
+                "broker_id": "alpaca",
+                "status": "filled",
+                "broker_order_id": "test-order",
+                "filled_quantity": 2.0,
+                "filled_price": 50.0,
+            }
+        ],
     )
 
     asyncio.run(engine._record_trade(trade))

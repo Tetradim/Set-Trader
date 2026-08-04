@@ -1,7 +1,7 @@
 import React, { memo, useState, useCallback } from 'react';
 import { useStore, TickerConfig } from '@/stores/useStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers, Brain, Plug } from 'lucide-react';
+import { X, TrendingDown, TrendingUp, ShieldAlert, BarChart3, Activity, Zap, Settings2, Layers, Brain, Plug, Repeat2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getMarketMeta } from '@/lib/market-utils';
@@ -26,6 +26,7 @@ import { PartialFillsTab } from './config-modal/PartialFillsTab';
 const CONFIG_TABS = [
   { id: 'strategy', label: 'Strategy', icon: Brain },
   { id: 'rules', label: 'Rules', icon: TrendingDown },
+  { id: 'scalp', label: 'Scalp', icon: Repeat2 },
   { id: 'brokers', label: 'Brokers', icon: Plug },
   { id: 'partial', label: 'Partial Fills', icon: Layers },
   { id: 'risk', label: 'Risk', icon: ShieldAlert },
@@ -124,7 +125,7 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
           </div>
 
           {/* Tab bar */}
-          <div className="flex items-center gap-1 px-6 pt-3 border-b border-border shrink-0">
+          <div className="flex items-center gap-1 px-6 pt-3 border-b border-border shrink-0 overflow-x-auto">
             {CONFIG_TABS.map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
@@ -132,7 +133,7 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg transition-all whitespace-nowrap ${
                     active
                       ? 'text-primary bg-card border border-b-0 border-border -mb-px'
                       : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50'
@@ -180,6 +181,9 @@ export const ConfigModal = memo(function ConfigModal({ symbol, onClose }: Props)
 
             {activeTab === 'rules' && (
               <RulesTab ticker={ticker} onChange={handleFieldChange} incStep={incrementStep} decStep={decrementStep} />
+            )}
+            {activeTab === 'scalp' && (
+              <PassiveRangeTab ticker={ticker} onChange={handleFieldChange} incStep={incrementStep} decStep={decrementStep} />
             )}
             {activeTab === 'brokers' && (
               <div className="space-y-4 py-2">
@@ -282,6 +286,77 @@ function RulesTab({ ticker, onChange, incStep, decStep }: TabProps) {
         <OffsetInput label={ticker.sell_percent ? 'Sell Offset (%)' : 'Sell Price ($)'} value={ticker.sell_offset} isPercent={ticker.sell_percent} mode="sell" onChange={(v) => onChange('sell_offset', v)} incrementStep={incStep} decrementStep={decStep} />
         <ConfigToggle label="Use %" checked={ticker.sell_percent} onChange={(v) => onChange('sell_percent', v)} />
       </ConfigSection>
+    </div>
+  );
+}
+
+function PassiveRangeTab({ ticker, onChange, incStep, decStep }: TabProps) {
+  const enabled = ticker.passive_range_enabled ?? false;
+  const absoluteRange = !ticker.buy_percent && !ticker.sell_percent && ticker.buy_offset > 0 && ticker.sell_offset > ticker.buy_offset;
+  const quantity = absoluteRange
+    ? (ticker.passive_fractional_shares ? ticker.base_power / ticker.buy_offset : Math.floor(ticker.base_power / ticker.buy_offset))
+    : 0;
+  const grossCycle = absoluteRange ? quantity * (ticker.sell_offset - ticker.buy_offset) : 0;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+        <div className="pr-4">
+          <p className="text-xs font-bold text-cyan-400">Passive Range Scalping</p>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Rest the buy immediately, wait for broker-confirmed fills, then rest the sell. Normal price-triggered bracket execution is bypassed for this ticker.
+          </p>
+        </div>
+        <Checkbox
+          data-testid={`passive-range-toggle-${ticker.symbol}`}
+          checked={enabled}
+          onCheckedChange={(v) => onChange('passive_range_enabled', Boolean(v))}
+        />
+      </div>
+
+      {enabled && (
+        <>
+          <ConfigSection title="Execution Controls" icon={Repeat2} color="text-cyan-400">
+            <SteppedInput label="Price Tick ($)" value={ticker.price_tick_size ?? 0} onChange={(v) => onChange('price_tick_size', v)} min={0} max={1000} incrementStep={0.0001} decrementStep={0.0001} />
+            <SteppedInput label="Re-entry Delay (s)" value={ticker.passive_reentry_seconds ?? 0} onChange={(v) => onChange('passive_reentry_seconds', Math.round(v))} min={0} max={86400} incrementStep={1} decrementStep={1} />
+            <SteppedInput label="Buy Order TTL (s)" value={ticker.passive_order_ttl_seconds ?? 300} onChange={(v) => onChange('passive_order_ttl_seconds', Math.round(v))} min={0} max={86400} incrementStep={5} decrementStep={5} />
+            <SteppedInput label="Paper Touches" value={ticker.passive_paper_min_touches ?? 2} onChange={(v) => onChange('passive_paper_min_touches', Math.round(v))} min={1} max={100} incrementStep={1} decrementStep={1} />
+            <ConfigToggle label="Cancel remainder on partial fill" checked={ticker.passive_cancel_on_partial ?? true} onChange={(v) => onChange('passive_cancel_on_partial', v)} />
+            <ConfigToggle label="Allow fractional shares" checked={ticker.passive_fractional_shares ?? false} onChange={(v) => onChange('passive_fractional_shares', v)} />
+          </ConfigSection>
+
+          <div className="rounded-lg border border-border/60 bg-secondary/20 p-3 space-y-2 text-[10px]">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Configured range</span>
+              <span className="font-mono text-foreground">
+                {absoluteRange ? `$${ticker.buy_offset.toFixed(4)} → $${ticker.sell_offset.toFixed(4)}` : 'Set absolute buy and sell prices in Rules'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Estimated shares</span>
+              <span className="font-mono text-foreground">{absoluteRange ? quantity.toFixed(ticker.passive_fractional_shares ? 4 : 0) : '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Gross target per completed cycle</span>
+              <span className="font-mono text-emerald-400">{absoluteRange ? `$${grossCycle.toFixed(3)}` : '—'}</span>
+            </div>
+          </div>
+
+          {(ticker.buy_percent || ticker.sell_percent) && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[10px] text-amber-300">
+              For an exact QSI-style range, turn off “Use %” for both Buy and Sell in Rules and enter the absolute prices.
+            </div>
+          )}
+          {(ticker.broker_ids?.length ?? 0) > 1 && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-[10px] text-red-300">
+              Initial live passive mode requires exactly one positively allocated broker. Paper mode can run without a broker.
+            </div>
+          )}
+          <p className="text-[9px] text-muted-foreground/70">
+            The stop configured in Risk remains mandatory range-break protection. Paper fills require bid/ask confirmation when available but do not model exchange queue priority.
+          </p>
+        </>
+      )}
     </div>
   );
 }

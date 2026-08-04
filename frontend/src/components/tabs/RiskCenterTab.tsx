@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { uiLog } from '@/lib/clientLogger';
+import { toast } from 'sonner';
 import { Shield, AlertTriangle, Activity, Crosshair, ToggleLeft, ToggleRight, RefreshCw, Users, DollarSign, TrendingDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -64,16 +65,22 @@ export function RiskCenterTab() {
     return () => clearInterval(interval);
   }, []);
 
-  const toggleKillSwitch = async (switchId: string, currentState: boolean) => {
+  const toggleKillSwitch = async (killSwitch: KillSwitch) => {
     try {
-      const newState = !currentState;
-      await apiFetch(`/api/risk/kill-switches/${switchId}`, {
+      const newState = !killSwitch.is_active;
+      await apiFetch(`/api/risk/kill-switches/${killSwitch.switch_id}`, {
         method: newState ? 'POST' : 'DELETE',
-        body: JSON.stringify({ reason: newState ? 'Manual toggle' : 'Manual reset' })
+        body: JSON.stringify({
+          level: killSwitch.level,
+          target_id: killSwitch.target_id,
+          reason: newState ? 'Manual toggle' : 'Manual reset',
+        })
       });
-      fetchRiskData();
+      toast.success(newState ? 'Kill switch activated' : 'Kill switch reset');
+      await fetchRiskData();
     } catch (err) {
-      uiLog.error('risk.kill_switch_toggle_failed', err, { switch_id: switchId });
+      toast.error('Failed to update kill switch');
+      uiLog.error('risk.kill_switch_toggle_failed', err, { switch_id: killSwitch.switch_id });
     }
   };
 
@@ -172,7 +179,7 @@ export function RiskCenterTab() {
                   <Button
                     variant={ks.is_active ? "destructive" : "default"}
                     size="sm"
-                    onClick={() => toggleKillSwitch(ks.switch_id, ks.is_active)}
+                    onClick={() => toggleKillSwitch(ks)}
                   >
                     {ks.is_active ? (
                       <>
@@ -271,13 +278,13 @@ export function RiskCenterTab() {
                         </div>
                       )}
                       
-                      {/* Position Size */}
+                      {/* Position Quantity */}
                       {limit.max_position_size > 0 && (
                         <div>
                           <div className="flex items-center justify-between text-sm mb-1">
                             <span className="text-muted-foreground flex items-center gap-1">
                               <Users className="h-3 w-3" />
-                              Position
+                              Quantity
                             </span>
                             <span>
                               {limit.current_position.toLocaleString()} / {limit.max_position_size.toLocaleString()}

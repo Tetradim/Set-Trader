@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timedelta, timezone
 
 import deps
@@ -53,20 +52,15 @@ class BrokerExecutionMixin:
         return active
 
     def _broker_paper_execution_enabled(self) -> bool:
-        if bool(getattr(self, "_dry_run_mode", False)):
-            return False
-        return os.getenv("SENTINEL_PULSE_ENABLE_BROKER_PAPER_EXECUTION", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        return True
 
     def _should_place_broker_orders(self, broker_ids: list) -> bool:
         if not broker_ids:
-            return False
-        if self.is_paper_trading():
-            return self._broker_paper_execution_enabled()
+            raise LiveOrderExecutionError(
+                "No broker accounts assigned; broker-routed execution is required"
+            )
+        if bool(getattr(self, "_dry_run_mode", False)):
+            raise LiveOrderExecutionError("DRY-RUN MODE: No real orders allowed")
         return True
 
     def _broker_result_confirmed(self, result: dict) -> bool:
