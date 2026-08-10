@@ -17,7 +17,7 @@ Recipients do not need Python, Node.js, Git, MongoDB setup steps, or developer t
 
 ## Option 1: Automated Build via GitHub Actions (Recommended)
 
-The easiest way to build the executable is through the GitHub Actions workflow.
+The easiest way to build the installer is through the GitHub Actions workflow.
 
 ### Trigger a Build
 
@@ -26,18 +26,18 @@ The easiest way to build the executable is through the GitHub Actions workflow.
 3. Click **Run workflow**
 4. Optionally set a custom MongoDB URI (defaults to `mongodb://localhost:27017`)
 5. Wait ~10 minutes for the build to complete
-6. Download **Sentinel Pulse-Windows.zip** from the workflow artifacts
+6. Download the **SentinelPulse-Beta-Setup-<version>** workflow artifact and use the contained `SentinelPulse-Beta-Setup-<version>.exe` installer
 
 ### Auto-Release on Tag
 
-Push a version tag to automatically create a GitHub Release with the `.zip`:
+Push a version tag to automatically create a GitHub Release with the beta installer:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The release will include `Sentinel Pulse-Windows.zip` as a downloadable asset.
+The release will include `SentinelPulse-Beta-Setup-<version>.exe` as a downloadable asset.
 
 ---
 
@@ -103,7 +103,7 @@ dist/SentinelPulse-Beta-Setup-<version>.exe
 The beta installer is per-user and does not require admin privileges. It installs under the tester's local app data folder, creates a Desktop shortcut named Sentinel Pulse, and creates Start Menu entries.
 
 1. Run `SentinelPulse-Beta-Setup-<version>.exe`
-2. Leave the default install location selected
+2. Leave the default installer options selected
 3. Leave "Launch Sentinel Pulse after install" checked
 4. Wait while the first-run bootstrap completes and the dashboard opens
 5. Use the Desktop shortcut named Sentinel Pulse for future launches
