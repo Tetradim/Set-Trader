@@ -80,7 +80,8 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
             re.search(r"#define\s+MyAppVersion\s+\"1\.0\.0\"", setup),
             "MyAppVersion must be derived from Version so CI output matches artifact names.",
         )
-        self.assertIn("options: /O+ /DVersion=${{ env.VERSION }}", workflow)
+        self.assertIn('options: /O+ /DVersion=\\"${{ env.VERSION }}\\"', workflow)
+        self.assertNotIn("options: /O+ /DVersion=${{ env.VERSION }}", workflow)
 
     def test_ci_build_copies_real_launcher_instead_of_generating_direct_exe_batch(self):
         text = self.read(".github/workflows/build.yml")
