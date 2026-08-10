@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sentinel Pulse can be packaged into a Windows installer that bundles the app and installs a first-run launcher. Beta testers install one `SentinelPulse-Setup-<version>.exe`, then launch Sentinel Pulse from the Desktop or Start Menu.
+Sentinel Pulse can be packaged into a Windows installer that bundles the app and installs a first-run launcher. Beta testers install one `SentinelPulse-Beta-Setup-<version>.exe`, then launch Sentinel Pulse from the Desktop or Start Menu.
 
 The installed launcher:
 - Starts the packaged Python/FastAPI backend
@@ -88,7 +88,7 @@ backend/dist/
 Share the generated installer:
 
 ```text
-dist/SentinelPulse-Setup-<version>.exe
+dist/SentinelPulse-Beta-Setup-<version>.exe
 ```
 
 ### What Recipients Need
@@ -98,12 +98,14 @@ dist/SentinelPulse-Setup-<version>.exe
 
 ### Setup for Recipients
 
-1. Run `SentinelPulse-Setup-<version>.exe`
-2. Leave "Launch Sentinel Pulse after install" checked, or double-click the Desktop shortcut later
-3. Wait while first run downloads missing runtime dependencies
-4. The dashboard opens automatically
+The beta installer is per-user and does not require admin privileges. It installs under the tester's local app data folder, creates a Desktop shortcut named Sentinel Pulse, and creates Start Menu entries.
 
-Downloaded dependencies are reused on future launches.
+1. Run `SentinelPulse-Beta-Setup-<version>.exe`
+2. Leave the default install location selected
+3. Leave "Launch Sentinel Pulse after install" checked
+4. Use the Desktop shortcut named Sentinel Pulse for future launches
+
+The first run downloads missing runtime dependencies and reuses them on future launches.
 
 ---
 

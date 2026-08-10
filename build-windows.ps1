@@ -147,6 +147,6 @@ Write-Host "    - SentinelPulse.exe          (packaged backend/frontend app)" -F
 Write-Host ""
 Write-Host "  To distribute:" -ForegroundColor Yellow
 Write-Host "    1. Build the installer with setup.iss or zip backend\dist\SentinelPulse" -ForegroundColor White
-Write-Host "    2. Share SentinelPulse-Setup-<version>.exe with beta testers" -ForegroundColor White
+Write-Host "    2. Share SentinelPulse-Beta-Setup-<version>.exe with beta testers" -ForegroundColor White
 Write-Host "    3. First launch downloads missing runtime dependencies automatically" -ForegroundColor White
 Write-Host ""

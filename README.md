@@ -142,7 +142,9 @@ The launcher will:
 6. Start Sentinel Pulse
 7. Open the dashboard in a dedicated browser window
 
-The installed Windows beta launcher downloads missing runtime dependencies on first launch and reuses them later.
+The Windows beta installer is distributed as `SentinelPulse-Beta-Setup-<version>.exe`. It installs per user, does not require admin privileges, creates a Desktop shortcut named `Sentinel Pulse`, and launches through the first-run dependency bootstrap.
+
+The first-run dependency bootstrap downloads missing runtime dependencies on first launch and reuses them later.
 
 **That's it!**
 
