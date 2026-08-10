@@ -17,6 +17,16 @@ import deps  # noqa: E402
 from trading_engine import TradingEngine  # noqa: E402
 
 
+TEST_BROKER_ID = "test-broker"
+
+
+def _broker_fields(allocation=1_000.0):
+    return {
+        "broker_ids": [TEST_BROKER_ID],
+        "broker_allocations": {TEST_BROKER_ID: allocation},
+    }
+
+
 class _Span:
     def __enter__(self):
         return self
@@ -197,8 +207,9 @@ class _Db:
 
 
 class _BrokerMgr:
-    def __init__(self, results):
+    def __init__(self, results=None, engine=None):
         self.results = results
+        self.engine = engine
         self.calls = []
 
     async def place_orders_for_ticker(self, broker_ids, allocations, order_template):
@@ -207,7 +218,48 @@ class _BrokerMgr:
             "allocations": dict(allocations),
             "order_template": deepcopy(order_template),
         })
-        return deepcopy(self.results)
+        if self.results is not None:
+            return deepcopy(self.results)
+
+        broker_id = list(broker_ids or [TEST_BROKER_ID])[0]
+        try:
+            price = float(order_template.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        try:
+            quantity = float(order_template.get("quantity") or 0)
+        except (TypeError, ValueError):
+            quantity = 0.0
+        if quantity <= 0 and price > 0:
+            allocation = sum(float(value or 0) for value in (allocations or {}).values())
+            quantity = allocation / price
+        return [{
+            "broker_id": broker_id,
+            "status": "filled",
+            "order_id": f"{broker_id}-{len(self.calls)}",
+            "filled_quantity": round(quantity, 8),
+            "avg_fill_price": price,
+        }]
+
+    def get_adapter(self, _broker_id):
+        if self.engine is None:
+            return None
+        return _BrokerAdapter(self.engine)
+
+
+class _BrokerAdapter:
+    def __init__(self, engine):
+        self.engine = engine
+
+    async def get_positions(self):
+        return [
+            SimpleNamespace(symbol=symbol, quantity=position.get("qty", 0))
+            for symbol, position in self.engine._positions.items()
+            if float(position.get("qty", 0) or 0) > 0
+        ]
+
+    async def get_open_orders(self):
+        return []
 
 
 @pytest.fixture
@@ -229,8 +281,7 @@ def engine_env(monkeypatch):
             "stop_offset": 99.70,
             "stop_order_type": "limit",
             "trailing_enabled": False,
-            "broker_ids": [],
-            "broker_allocations": {},
+            **_broker_fields(1_000.0),
             "compound_profits": False,
             "reentry_cooldown_seconds": 0,
         },
@@ -257,8 +308,7 @@ def engine_env(monkeypatch):
             "trailing_percent": 1.0,
             "trailing_percent_mode": True,
             "trailing_order_type": "limit",
-            "broker_ids": [],
-            "broker_allocations": {},
+            **_broker_fields(900.0),
             "compound_profits": False,
             "reentry_cooldown_seconds": 0,
         },
@@ -279,8 +329,7 @@ def engine_env(monkeypatch):
             "rebracket_lookback": 3,
             "rebracket_buffer": 0.10,
             "rebracket_cooldown": 0,
-            "broker_ids": [],
-            "broker_allocations": {},
+            **_broker_fields(100.0),
             "reentry_cooldown_seconds": 0,
         },
     ]
@@ -300,16 +349,19 @@ def engine_env(monkeypatch):
     monkeypatch.setattr(deps, "price_service", price_service)
     monkeypatch.setattr(deps, "ws_manager", _WsManager())
     monkeypatch.setattr(deps, "telegram_service", _Telegram())
-    monkeypatch.setattr(deps, "broker_mgr", SimpleNamespace())
 
     engine = TradingEngine()
     engine.simulate_24_7 = True
     engine.TRADE_COOLDOWN_SECS = 0
     engine.REENTRY_COOLDOWN_SECS = 0
+    global_limit = engine.risk_controls.get_exposure_limit("portfolio", "global")
+    if global_limit:
+        global_limit.max_orders_per_minute = 10_000
     engine._is_ticker_market_open = lambda _ticker_doc: True
     engine._is_opening_window = lambda *_args, **_kwargs: False
     engine._is_past_opening_window = lambda *_args, **_kwargs: False
     monkeypatch.setattr(deps, "engine", engine)
+    monkeypatch.setattr(deps, "broker_mgr", _BrokerMgr(engine=engine))
     return SimpleNamespace(engine=engine, db=db, price_service=price_service)
 
 
@@ -362,8 +414,7 @@ def test_gap_widening_stress_runs_repeated_cycles_without_state_leaks(engine_env
         "trailing_order_type": "limit",
         "auto_rebracket": True,
         "rebracket_threshold": 2.0,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
         "reentry_cooldown_seconds": 0,
     }
@@ -528,8 +579,7 @@ def test_market_sell_order_type_waits_for_sell_target(engine_env):
         "stop_offset": 90.0,
         "stop_order_type": "limit",
         "trailing_enabled": False,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -558,8 +608,7 @@ def test_market_stop_order_type_waits_for_stop_threshold(engine_env):
         "stop_offset": 95.0,
         "stop_order_type": "market",
         "trailing_enabled": False,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -591,8 +640,7 @@ def test_market_trailing_order_type_waits_for_trailing_threshold(engine_env):
         "trailing_percent": 1.0,
         "trailing_percent_mode": True,
         "trailing_order_type": "market",
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -625,8 +673,7 @@ def test_halved_opening_stop_uses_tightened_threshold(engine_env):
         "stop_order_type": "limit",
         "halve_stop_at_open": True,
         "trailing_enabled": False,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -659,8 +706,7 @@ def test_wait_day_after_buy_still_allows_stop_loss_exit(engine_env):
         "stop_order_type": "limit",
         "wait_day_after_buy": True,
         "trailing_enabled": False,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -697,8 +743,7 @@ def test_partial_fill_trailing_lock_at_open_keeps_remaining_position(engine_env)
         "trailing_percent_mode": True,
         "trailing_order_type": "limit",
         "lock_trailing_at_open": True,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
@@ -754,8 +799,7 @@ def test_auto_rebracket_converts_percent_config_to_absolute_bracket(engine_env):
         "rebracket_buffer": 0.10,
         "rebracket_lookback": 3,
         "rebracket_cooldown": 0,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(100.0),
     }
     env.db.tickers.docs.append(deepcopy(ticker))
 
@@ -793,8 +837,7 @@ def test_opening_bell_post_window_sets_real_absolute_bracket(engine_env):
         "opening_bell_enabled": True,
         "rebracket_spread": 0.80,
         "rebracket_buffer": 0.10,
-        "broker_ids": [],
-        "broker_allocations": {},
+        **_broker_fields(1_000.0),
         "compound_profits": False,
     }
     env.db.tickers.docs.append(deepcopy(ticker))
