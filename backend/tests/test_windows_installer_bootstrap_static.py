@@ -55,6 +55,19 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
         self.assertIn('Source: "Launch-Sentinel-Pulse.ps1"', text)
         self.assertNotIn('{tmp}\\vc_redist.x64.exe', text)
 
+    def test_inno_installer_is_per_user_beta_installer_with_desktop_launcher(self):
+        text = self.read("setup.iss")
+
+        self.assertIn("DefaultDirName={localappdata}\\Programs\\{#MyAppName}", text)
+        self.assertIn("PrivilegesRequired=lowest", text)
+        self.assertIn("OutputBaseFilename=SentinelPulse-Beta-Setup-{#MyAppVersion}", text)
+        self.assertIn('Name: "{userdesktop}\\{#MyAppName}"; Filename: "{app}\\Launch-Sentinel-Pulse.bat"', text)
+        self.assertIn('Name: "{group}\\{#MyAppName}"; Filename: "{app}\\Launch-Sentinel-Pulse.bat"', text)
+        self.assertIn('Filename: "{app}\\Setup-And-Launch.bat"', text)
+        self.assertNotIn("DefaultDirName={autopf}", text)
+        self.assertNotIn("PrivilegesRequired=admin", text)
+        self.assertNotIn('Name: "{commondesktop}\\{#MyAppName}"', text)
+
     def test_ci_build_copies_real_launcher_instead_of_generating_direct_exe_batch(self):
         text = self.read(".github/workflows/build.yml")
 
@@ -72,6 +85,10 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
         self.assertIn("downloads missing runtime dependencies on first launch", readme)
         self.assertIn("first run downloads missing runtime dependencies", windows)
         self.assertIn("SentinelPulse-Setup-", windows)
+        self.assertIn("SentinelPulse-Beta-Setup-", readme)
+        self.assertIn("SentinelPulse-Beta-Setup-", windows)
+        self.assertIn("does not require admin", windows)
+        self.assertIn("Desktop shortcut named Sentinel Pulse", windows)
         self.assertNotIn("Recipients only need **MongoDB**", windows)
         self.assertNotIn("Recipients need MongoDB installed", windows)
 
