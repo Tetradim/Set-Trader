@@ -78,6 +78,12 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
         self.assertNotIn("MongoDB not bundled - ensure MongoDB is running externally", text)
         self.assertNotIn("Download VC++ Redist", text)
 
+    def test_win_launcher_release_asset_discovery_accepts_beta_and_legacy_installers(self):
+        text = self.read("backend/win_launcher.py")
+
+        self.assertIn("SentinelPulse-Beta-Setup-", text)
+        self.assertIn("SentinelPulse-Setup-", text)
+
     def test_docs_present_first_run_dependency_download_as_beta_path(self):
         readme = self.read("README.md")
         windows = self.read("WINDOWS_BUILD.md")

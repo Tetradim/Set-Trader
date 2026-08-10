@@ -27,6 +27,10 @@ from pathlib import Path
 CURRENT_VERSION = "1.0.0"
 UPDATE_REPO = "Tetradim/Sentinel-Pulse"
 UPDATE_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
+INSTALLER_ASSET_PREFIXES = (
+    "SentinelPulse-Beta-Setup-",
+    "SentinelPulse-Setup-",
+)
 
 # Set Windows console to UTF-8 mode BEFORE any other imports
 if sys.platform == 'win32':
@@ -178,7 +182,7 @@ def check_for_update():
             if not zip_url:
                 for asset in release_data.get('assets', []):
                     asset_name = asset.get('name', '')
-                    if 'SentinelPulse-Setup-' in asset_name and asset_name.endswith('.exe'):
+                    if asset_name.startswith(INSTALLER_ASSET_PREFIXES) and asset_name.endswith('.exe'):
                         exe_url = asset.get('browser_download_url')
                         # Download exe to temp location
                         temp_exe = BASE_DIR / f"SentinelPulse_{latest_version}.exe.new"
