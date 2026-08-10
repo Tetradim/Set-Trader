@@ -5,7 +5,7 @@
 #define MyAppName "Sentinel Pulse"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Tetradim / SignalForge Lab"
-#define MyAppURL "https://github.com/Tetradim/Set-Trader"
+#define MyAppURL "https://github.com/Tetradim/Sentinel-Pulse"
 #define MyAppExeName "SentinelPulse.exe"
 #define MyAppAssocName "Sentinel Pulse Config"
 #define MyAppAssocExt ".sentinel"
@@ -19,17 +19,17 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=SentinelPulse-Setup-{#MyAppVersion}
+OutputBaseFilename=SentinelPulse-Beta-Setup-{#MyAppVersion}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 MinVersion=10.0.18362
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -54,8 +54,8 @@ Source: "readme.md"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Pulse.bat"; WorkingDir: "{app}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{commondesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userdesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocName}"; ValueData: ""; Flags: uninsdeletevalue
@@ -74,15 +74,9 @@ Type: files; Name: "{userdesktop}\Sentinel-Pulse-Transcript.log"
 Type: files; Name: "{userdesktop}\Sentinel-Pulse-MongoDB.log"
 Type: files; Name: "{userdesktop}\sentinel_pulse.log"
 Type: files; Name: "{userdesktop}\SentinelPulse-Setup*.exe"
+Type: files; Name: "{userdesktop}\SentinelPulse-Beta-Setup*.exe"
 Type: files; Name: "{userdesktop}\Sentinel Pulse-Setup*.exe"
 Type: files; Name: "{userdesktop}\Sentinel Pulse Setup*.exe"
-Type: files; Name: "{commondesktop}\Sentinel-Pulse.log"
-Type: files; Name: "{commondesktop}\Sentinel-Pulse-Transcript.log"
-Type: files; Name: "{commondesktop}\Sentinel-Pulse-MongoDB.log"
-Type: files; Name: "{commondesktop}\sentinel_pulse.log"
-Type: files; Name: "{commondesktop}\SentinelPulse-Setup*.exe"
-Type: files; Name: "{commondesktop}\Sentinel Pulse-Setup*.exe"
-Type: files; Name: "{commondesktop}\Sentinel Pulse Setup*.exe"
 
 [Code]
 // Kill Sentinel Pulse processes on uninstall
