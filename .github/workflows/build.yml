@@ -260,7 +260,7 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: setup.iss
-          options: /O+ /DVersion=\"${{ env.VERSION }}\"
+          options: /O+ /DVersion='${{ env.VERSION }}'
 
       # ---------------------------------------------------------------------
       # 11. Upload artifacts
