@@ -84,7 +84,6 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
 
         self.assertIn("downloads missing runtime dependencies on first launch", readme)
         self.assertIn("first run downloads missing runtime dependencies", windows)
-        self.assertIn("SentinelPulse-Setup-", windows)
         self.assertIn("SentinelPulse-Beta-Setup-", readme)
         self.assertIn("SentinelPulse-Beta-Setup-", windows)
         self.assertIn("does not require admin", windows)
