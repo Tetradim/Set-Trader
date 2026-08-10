@@ -3,7 +3,10 @@
 ; Requires Inno Setup 6.0+
 
 #define MyAppName "Sentinel Pulse"
-#define MyAppVersion "1.0.0"
+#ifndef Version
+#define Version "1.0.0"
+#endif
+#define MyAppVersion Version
 #define MyAppPublisher "Tetradim / SignalForge Lab"
 #define MyAppURL "https://github.com/Tetradim/Sentinel-Pulse"
 #define MyAppExeName "SentinelPulse.exe"
@@ -55,7 +58,7 @@ Source: "readme.md"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Pulse.bat"; WorkingDir: "{app}"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Pulse.bat"; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{userdesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: desktopicon
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocName}"; ValueData: ""; Flags: uninsdeletevalue

@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -62,11 +63,24 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
         self.assertIn("PrivilegesRequired=lowest", text)
         self.assertIn("OutputBaseFilename=SentinelPulse-Beta-Setup-{#MyAppVersion}", text)
         self.assertIn('Name: "{userdesktop}\\{#MyAppName}"; Filename: "{app}\\Launch-Sentinel-Pulse.bat"', text)
+        self.assertIn('Name: "{userdesktop}\\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: desktopicon', text)
         self.assertIn('Name: "{group}\\{#MyAppName}"; Filename: "{app}\\Launch-Sentinel-Pulse.bat"', text)
         self.assertIn('Filename: "{app}\\Setup-And-Launch.bat"', text)
         self.assertNotIn("DefaultDirName={autopf}", text)
         self.assertNotIn("PrivilegesRequired=admin", text)
         self.assertNotIn('Name: "{commondesktop}\\{#MyAppName}"', text)
+
+    def test_inno_installer_version_tracks_ci_version_define_with_local_fallback(self):
+        setup = self.read("setup.iss")
+        workflow = self.read(".github/workflows/build.yml")
+
+        self.assertRegex(setup, r"#ifndef\s+Version\s*\r?\n#define\s+Version\s+\"1\.0\.0\"")
+        self.assertRegex(setup, r"#define\s+MyAppVersion\s+Version\b")
+        self.assertIsNone(
+            re.search(r"#define\s+MyAppVersion\s+\"1\.0\.0\"", setup),
+            "MyAppVersion must be derived from Version so CI output matches artifact names.",
+        )
+        self.assertIn("options: /O+ /DVersion=${{ env.VERSION }}", workflow)
 
     def test_ci_build_copies_real_launcher_instead_of_generating_direct_exe_batch(self):
         text = self.read(".github/workflows/build.yml")
