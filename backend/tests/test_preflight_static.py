@@ -80,36 +80,31 @@ class PreflightStaticTest(unittest.TestCase):
         for term in required_terms:
             self.assertIn(term, runbook)
 
-    def test_ci_runs_live_trading_readiness_checks_before_packaging(self):
+    def test_ci_builds_installer_without_live_readiness_gate(self):
         workflow = self.read(".github/workflows/build.yml")
 
         required_terms = [
             "pull_request:",
-            "docs/runbooks/**",
-            "actions/setup-python@v5",
-            "actions/setup-node@v4",
-            "cache-dependency-path: backend/requirements.txt",
+            "runs-on: windows-latest",
+            "Build Windows Installer",
             "cache-dependency-path: frontend/package-lock.json",
             "pip install -r backend/requirements.txt",
-            "python -m pytest",
-            "backend/tests/test_release_security_static.py",
-            "backend/tests/test_preflight_static.py",
-            "backend/tests/test_settings_live_confirmation.py",
-            "backend/tests/test_order_mode_routing.py",
-            "backend/tests/test_engine_state_persistence.py",
-            "backend/tests/test_engine_stress_simulation.py",
-            "backend/tests/test_audit_service.py",
             "npm ci",
-            "npm audit --audit-level=high",
-            "npm run test:unit",
             "npm run build",
+            "Minionguyjpro/Inno-Setup-Action",
+            "Upload Installer",
         ]
         for term in required_terms:
             self.assertIn(term, workflow)
 
         self.assertRegex(workflow, r"(?m)^permissions:\n\s+contents:\s+read")
-        self.assertRegex(workflow, r"(?s)\n  readiness-checks:\n.*runs-on:\s+ubuntu-latest")
-        self.assertRegex(workflow, r"(?s)\n  build:\n.*needs:\s+readiness-checks")
+        self.assertNotIn("docs/runbooks/**", workflow)
+        self.assertNotIn("readiness-checks", workflow)
+        self.assertNotIn("Live Trading Readiness Checks", workflow)
+        self.assertNotIn("Run backend readiness tests", workflow)
+        self.assertNotIn("npm audit --audit-level=high", workflow)
+        self.assertNotIn("npm run test:unit", workflow)
+        self.assertNotRegex(workflow, r"(?s)\n  build:\n.*needs:\s+.*readiness")
 
 
 if __name__ == "__main__":
