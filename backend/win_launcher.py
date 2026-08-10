@@ -189,16 +189,16 @@ def check_for_update():
                             temp_exe = BASE_DIR / f"SentinelPulse_{latest_version}.exe.new"
                             logger.info(f"Downloading update...")
                             urllib.request.urlretrieve(exe_url, str(temp_exe))
-                            
+
                             # Rename current to .old, new to current
                             current_exe = sys.executable
                             old_exe = sys.executable + '.old'
-                            
+
                             # Replace on next startup - create marker
                             marker = BASE_DIR / 'update_pending.txt'
                             with open(marker, 'w') as f:
                                 f.write(f"{latest_version}\n{current_exe}\n{old_exe}\n{temp_exe}")
-                            
+
                             logger.info(f"Update downloaded. Will apply on restart.")
                             return True, latest_version
             
