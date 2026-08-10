@@ -123,17 +123,24 @@ Before any real-money cutover, follow the operator checklist in [docs/runbooks/l
 
 ### Quick Start (After Installation)
 
-**Just double-click one file to start everything:**
+The Windows beta installer is distributed as `SentinelPulse-Beta-Setup-<version>.exe`. It installs per user, does not require admin privileges, creates a Desktop shortcut named `Sentinel Pulse`, and launches through the first-run dependency bootstrap.
+
+1. Run `SentinelPulse-Beta-Setup-<version>.exe`
+2. Leave the default install location selected
+3. Leave "Launch Sentinel Pulse after install" checked
+4. Wait while the first-run dependency bootstrap downloads missing runtime dependencies on first launch
+5. Use the Desktop shortcut named `Sentinel Pulse` for future launches
+
+The dashboard opens automatically after the first-run bootstrap completes, and downloaded dependencies are reused later.
+
+Advanced/manual launchers for installed-folder or source users:
 
 ```bash
-# Option A: Double-click this file after installation
 Launch-Sentinel-Pulse.bat
-
-# Option B: Run PowerShell version
 pwsh Launch-Sentinel-Pulse.ps1
 ```
 
-The launcher will:
+The manual launcher will:
 1. Check Microsoft Visual C++ Runtime and MongoDB
 2. Download missing runtime dependencies on first launch
 3. Cache dependencies under `%LOCALAPPDATA%\Sentinel Pulse\dependencies`
@@ -141,10 +148,6 @@ The launcher will:
 5. Start MongoDB when it is not already running
 6. Start Sentinel Pulse
 7. Open the dashboard in a dedicated browser window
-
-The Windows beta installer is distributed as `SentinelPulse-Beta-Setup-<version>.exe`. It installs per user, does not require admin privileges, creates a Desktop shortcut named `Sentinel Pulse`, and launches through the first-run dependency bootstrap.
-
-The first-run dependency bootstrap downloads missing runtime dependencies on first launch and reuses them later.
 
 **That's it!**
 

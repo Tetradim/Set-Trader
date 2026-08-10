@@ -71,12 +71,14 @@ cd Sentinel Pulse
 
 ```
 backend/dist/
-  Start Sentinel Pulse.bat     <-- Double-click to launch
-  Sentinel Pulse/
-    Sentinel Pulse.exe         <-- The executable
-    static/                <-- Frontend files
-    .env                   <-- Configuration
-    ...                    <-- Bundled dependencies
+  SentinelPulse/
+    Launch-Sentinel-Pulse.bat  <-- First-run launcher; downloads missing runtime dependencies
+    Launch-Sentinel-Pulse.ps1  <-- PowerShell launcher used by the batch file
+    Start Sentinel Pulse.bat   <-- Compatibility launcher
+    SentinelPulse.exe          <-- Packaged backend/frontend app
+    static/                    <-- Frontend files
+    .env                       <-- Configuration
+    ...                        <-- Packaged app files; runtime dependencies download on first launch
 ```
 
 ---
@@ -103,7 +105,8 @@ The beta installer is per-user and does not require admin privileges. It install
 1. Run `SentinelPulse-Beta-Setup-<version>.exe`
 2. Leave the default install location selected
 3. Leave "Launch Sentinel Pulse after install" checked
-4. Use the Desktop shortcut named Sentinel Pulse for future launches
+4. Wait while the first-run bootstrap completes and the dashboard opens
+5. Use the Desktop shortcut named Sentinel Pulse for future launches
 
 The first run downloads missing runtime dependencies and reuses them on future launches.
 
@@ -121,7 +124,7 @@ When running as a standalone executable:
        |
        v
   +----------------------------+
-  |     Sentinel Pulse.exe         |
+  |     SentinelPulse.exe          |
   |                            |
   |  FastAPI (port 8001)       |
   |    ├── /api/*  REST + WS   |
@@ -161,7 +164,7 @@ When running as a standalone executable:
 | MongoDB does not start | Re-run the Sentinel Pulse shortcut; the launcher reuses or repairs the cached MongoDB runtime |
 | Port 8001 in use | Close whatever's using port 8001, or edit server.py's port |
 | "Module not found" errors | Re-build with `.\build-windows.ps1 -Clean` |
-| Frontend shows blank page | Make sure `static/` folder exists inside `Sentinel Pulse/` |
+| Frontend shows blank page | Make sure `static/` folder exists inside `SentinelPulse/` |
 | Can't connect to Atlas | Check your Atlas URI, whitelist your IP in Atlas |
 | Windows Defender blocks exe | Click "More info" > "Run anyway" (or add an exception) |
 
