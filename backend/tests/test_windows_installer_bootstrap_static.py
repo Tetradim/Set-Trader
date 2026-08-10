@@ -80,9 +80,19 @@ class WindowsInstallerBootstrapStaticTests(unittest.TestCase):
 
     def test_win_launcher_release_asset_discovery_accepts_beta_and_legacy_installers(self):
         text = self.read("backend/win_launcher.py")
+        fallback = text[text.index("# Fallback: download the exe directly"):]
 
         self.assertIn("SentinelPulse-Beta-Setup-", text)
         self.assertIn("SentinelPulse-Setup-", text)
+        self.assertLess(
+            text.index('"SentinelPulse-Beta-Setup-"'),
+            text.index('"SentinelPulse-Setup-"'),
+        )
+        self.assertIn("for installer_prefix in INSTALLER_ASSET_PREFIXES:", fallback)
+        self.assertLess(
+            fallback.index("for installer_prefix in INSTALLER_ASSET_PREFIXES:"),
+            fallback.index("for asset in release_data.get('assets', []):"),
+        )
 
     def test_docs_present_first_run_dependency_download_as_beta_path(self):
         readme = self.read("README.md")

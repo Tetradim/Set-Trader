@@ -180,26 +180,27 @@ def check_for_update():
             
             # Fallback: download the exe directly
             if not zip_url:
-                for asset in release_data.get('assets', []):
-                    asset_name = asset.get('name', '')
-                    if asset_name.startswith(INSTALLER_ASSET_PREFIXES) and asset_name.endswith('.exe'):
-                        exe_url = asset.get('browser_download_url')
-                        # Download exe to temp location
-                        temp_exe = BASE_DIR / f"SentinelPulse_{latest_version}.exe.new"
-                        logger.info(f"Downloading update...")
-                        urllib.request.urlretrieve(exe_url, str(temp_exe))
-                        
-                        # Rename current to .old, new to current
-                        current_exe = sys.executable
-                        old_exe = sys.executable + '.old'
-                        
-                        # Replace on next startup - create marker
-                        marker = BASE_DIR / 'update_pending.txt'
-                        with open(marker, 'w') as f:
-                            f.write(f"{latest_version}\n{current_exe}\n{old_exe}\n{temp_exe}")
-                        
-                        logger.info(f"Update downloaded. Will apply on restart.")
-                        return True, latest_version
+                for installer_prefix in INSTALLER_ASSET_PREFIXES:
+                    for asset in release_data.get('assets', []):
+                        asset_name = asset.get('name', '')
+                        if asset_name.startswith(installer_prefix) and asset_name.endswith('.exe'):
+                            exe_url = asset.get('browser_download_url')
+                            # Download exe to temp location
+                            temp_exe = BASE_DIR / f"SentinelPulse_{latest_version}.exe.new"
+                            logger.info(f"Downloading update...")
+                            urllib.request.urlretrieve(exe_url, str(temp_exe))
+                            
+                            # Rename current to .old, new to current
+                            current_exe = sys.executable
+                            old_exe = sys.executable + '.old'
+                            
+                            # Replace on next startup - create marker
+                            marker = BASE_DIR / 'update_pending.txt'
+                            with open(marker, 'w') as f:
+                                f.write(f"{latest_version}\n{current_exe}\n{old_exe}\n{temp_exe}")
+                            
+                            logger.info(f"Update downloaded. Will apply on restart.")
+                            return True, latest_version
             
             # Source zip approach - extract and replace files
             if zip_url:
